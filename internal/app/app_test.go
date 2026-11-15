@@ -116,3 +116,39 @@ func TestLiveAuthor(t *testing.T) {
 		t.Fatalf("author on their own page opened another: %d pages", len(a.pages))
 	}
 }
+
+// The follow button opens the list without pausing and keeps no focus, so
+// Space still pauses; a name in the list opens that account's videos.
+// Live: the lists load in the background.
+func TestLiveFollowing(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := dy.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{c: c, pages: []*page{stub("", 1)}}
+	tt := ui.NewTester(a.view, 405, 720)
+	if err := tt.Click("关注"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.pages) != 2 || a.cur().people == nil || a.paused {
+		t.Fatalf("after click: %d pages, paused %v", len(a.pages), a.paused)
+	}
+	tt.Key(0, ui.KeySpace)
+	if len(a.pages) != 2 || !a.paused {
+		t.Fatalf("after Space: %d pages, paused %v", len(a.pages), a.paused)
+	}
+
+	a.cur().users = []dy.User{{ID: "x", Name: "某人", Signature: "签名"}}
+	tt.Frame()
+	if err := tt.Click("某人"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.pages) != 3 || a.cur().title != "@某人" {
+		t.Fatalf("after clicking a name: %d pages", len(a.pages))
+	}
+}

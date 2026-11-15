@@ -36,11 +36,14 @@ const (
 )
 
 // page is a list of videos the window steps through: the recommend feed at
-// the bottom, and search results or a user's videos opened over it.
+// the bottom, and search results or a user's videos opened over it. A page
+// with people lists accounts instead, as the ones the user follows.
 type page struct {
 	title    string // "" for the recommend feed
 	next     dy.Pager[dy.Video]
 	list     []*slot
+	people   dy.Pager[dy.User]
+	users    []dy.User
 	idx      int
 	fetching bool
 	done     bool // next returned its last page
@@ -67,21 +70,31 @@ func (a *app) post(fn func()) {
 	a.win.Update(func() { fn(); a.win.Invalidate() })
 }
 
-// more fetches the next page of p's list.
+// more fetches the next page of p's list. A list of people loads to its end
+// while it shows, as fill asks again each time.
+// shortcut: loads all of a list of people; page it on scroll if lists of thousands matter.
 func (a *app) more(p *page) {
 	if p.fetching || p.done {
 		return
 	}
 	p.fetching = true
 	go func() {
-		vs, err := p.next()
+		var vs []dy.Video
+		var us []dy.User
+		var err error
+		if p.people != nil {
+			us, err = p.people()
+		} else {
+			vs, err = p.next()
+		}
 		a.post(func() {
 			p.fetching = false
 			if err != nil {
 				p.msg = err.Error()
 				return
 			}
-			p.msg, p.done = "", len(vs) == 0
+			p.msg, p.done = "", len(vs)+len(us) == 0
+			p.users = append(p.users, us...)
 			for _, v := range vs {
 				p.list = append(p.list, &slot{v: v})
 			}
@@ -109,13 +122,13 @@ func (a *app) fill() {
 	a.sync()
 }
 
-// open shows a list over the current one, whose players it frees: only one
-// page plays, and memory stays that of one page.
-func (a *app) open(title string, next dy.Pager[dy.Video]) {
+// open shows p over the current page, whose players it frees: only one page
+// plays, and memory stays that of one page.
+func (a *app) open(p *page) {
 	for _, s := range a.cur().list {
 		a.release(s)
 	}
-	a.pages = append(a.pages, &page{title: title, next: next})
+	a.pages = append(a.pages, p)
 	a.paused = false
 	a.fill()
 }
@@ -249,8 +262,30 @@ func (a *app) toggle() {
 // search opens the videos found for q.
 func (a *app) search(q string) {
 	if q = strings.TrimSpace(q); q != "" {
-		a.open("搜索："+q, a.c.Search(q))
+		a.open(&page{title: "搜索：" + q, next: a.c.Search(q)})
 	}
+}
+
+// openAuthor opens a user's videos, unless p is that page already.
+func (a *app) openAuthor(p *page, name, id string) {
+	if title := "@" + name; p.title != title && id != "" {
+		a.open(&page{title: title, next: a.c.Posts(id)})
+	}
+}
+
+// tap is a box that runs fn when clicked. Not a Button: one keeps the focus
+// after the click, and Space would then click it again instead of pausing.
+func tap(c *ui.Context, fn func()) ui.Element {
+	return ui.Box(c).Cursor(ui.CursorPointer).HandleInput(func(ev ui.InputEvent) bool {
+		switch {
+		case ev.Kind == ui.InputPointerDown && ev.Button == 0:
+			return true // taking the press is what brings its release here
+		case ev.Kind == ui.InputPointerUp && !ev.Canceled && ev.Button == 0:
+			fn()
+			return true
+		}
+		return false
+	})
 }
 
 func (a *app) view(c *ui.Context) {
@@ -264,6 +299,8 @@ func (a *app) view(c *ui.Context) {
 		// not in it, so a click in the search box does not pause.
 		ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).HandleInput(func(ev ui.InputEvent) bool {
 			switch {
+			case p.people != nil:
+				return false // a list of people scrolls itself
 			case ev.Kind == ui.InputScroll && !ev.Momentum && ev.DY != 0:
 				if ev.DY > 0 {
 					a.step(1)
@@ -272,7 +309,7 @@ func (a *app) view(c *ui.Context) {
 				}
 				return true
 			case ev.Kind == ui.InputPointerDown && ev.Button == 0:
-				return true // taking the press is what brings its release here
+				return true
 			case ev.Kind == ui.InputPointerUp && !ev.Canceled && ev.Button == 0:
 				a.toggle()
 				return true
@@ -287,6 +324,10 @@ var white = ui.RGB(255, 255, 255)
 
 // content is p's current video with its author and text, or what stands for it.
 func (a *app) content(c *ui.Context, p *page) {
+	if len(p.users) > 0 {
+		a.people(c, p)
+		return
+	}
 	if p.idx >= len(p.list) {
 		text := "载入中…"
 		switch {
@@ -307,22 +348,8 @@ func (a *app) content(c *ui.Context, p *page) {
 	// The fade keeps the white text readable over a bright frame.
 	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(48, 16, 20, 16).Gap(6).
 		Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {
-		// The author opens their videos. Not a Button: one keeps the focus after
-		// the click, and Space would then open the author again instead of pausing.
-		name := "@" + s.v.Author
-		ui.Box(c).Cursor(ui.CursorPointer).HandleInput(func(ev ui.InputEvent) bool {
-			switch {
-			case ev.Kind == ui.InputPointerDown && ev.Button == 0:
-				return true
-			case ev.Kind == ui.InputPointerUp && !ev.Canceled && ev.Button == 0:
-				if p.title != name && s.v.AuthorID != "" { // already on their page: nothing to open
-					a.open(name, a.c.Posts(s.v.AuthorID))
-				}
-				return true
-			}
-			return false
-		}).Children(func() {
-			ui.Text(c, name).Bold().FontSize(16).TextColor(white)
+		tap(c, func() { a.openAuthor(p, s.v.Author, s.v.AuthorID) }).Children(func() {
+			ui.Text(c, "@"+s.v.Author).Bold().FontSize(16).TextColor(white)
 		})
 		ui.Text(c, s.v.Desc).FontSize(14).TextColor(white).MaxLines(3)
 		status := fmt.Sprintf("♥ %s   💬 %s   %d/%d", count(s.v.Likes), count(s.v.Comments), p.idx+1, len(p.list))
@@ -333,6 +360,20 @@ func (a *app) content(c *ui.Context, p *page) {
 			status = "缓冲中…"
 		}
 		ui.Text(c, status).FontSize(12).TextColor(ui.RGB(200, 200, 200))
+	})
+}
+
+// people lists p's accounts; a click opens one's videos.
+func (a *app) people(c *ui.Context, p *page) {
+	ui.Scroll(c).Absolute().Top(56).Left(0).Right(0).Bottom(0).Children(func() {
+		for _, u := range p.users {
+			tap(c, func() { a.openAuthor(p, u.Name, u.ID) }).Column().Padding(10, 16).Gap(3).Children(func() {
+				ui.Text(c, u.Name).Bold().FontSize(15).TextColor(white)
+				if u.Signature != "" {
+					ui.Text(c, u.Signature).FontSize(12).TextColor(ui.RGB(160, 160, 160)).MaxLines(1)
+				}
+			})
+		}
 	})
 }
 
@@ -347,6 +388,10 @@ func (a *app) topBar(c *ui.Context, p *page) {
 				}
 				a.search(k.Text())
 				return true
+			})
+			tap(c, func() { a.open(&page{title: "关注", people: a.c.MyFollowing()}) }).
+				Background(white).Radius(6).Padding(5, 10).Children(func() {
+				ui.Text(c, "关注").FontSize(13).TextColor(ui.RGB(0, 0, 0))
 			})
 			return
 		}
@@ -364,9 +409,10 @@ func count(n int) string {
 	return fmt.Sprint(n)
 }
 
-// selfCheck (DY_SHOT=dir) saves shots of the feed, of the next video after a
-// swipe, of a search for 猫, of its first result's author's videos and the
-// second of them, and of the feed again after going back twice, then quits.
+// selfCheck (DY_SHOT=dir) walks the pages as clicks would and saves a shot of
+// each: the feed and its next video, a search for 猫, the first result's
+// author, the accounts the user follows, the first one's videos, the list
+// again, and the feed again. Then it quits.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -378,7 +424,7 @@ func (a *app) selfCheck(dir string) {
 		a.post(func() {
 			state := ""
 			for _, p := range a.pages {
-				state += fmt.Sprintf(" | %q idx=%d", p.title, p.idx)
+				state += fmt.Sprintf(" | %q idx=%d users=%d", p.title, p.idx, len(p.users))
 				for i, s := range p.list {
 					if s.vp != nil || s.loading || s.err != nil {
 						state += fmt.Sprintf(" %d:vp=%v,loading=%v,err=%v", i, s.vp != nil, s.loading, s.err)
@@ -394,15 +440,20 @@ func (a *app) selfCheck(dir string) {
 	shot("2.png")
 	a.post(func() { a.search("猫") })
 	shot("3.png")
-	a.post(func() { // as a click on the author does
-		v := a.cur().list[0].v
-		a.open("@"+v.Author, a.c.Posts(v.AuthorID))
-	})
+	a.post(func() { p := a.cur(); a.openAuthor(p, p.list[0].v.Author, p.list[0].v.AuthorID) })
 	shot("4.png")
-	a.post(func() { a.step(1) })
+	a.post(func() { a.back(); a.back(); a.open(&page{title: "关注", people: a.c.MyFollowing()}) })
 	shot("5.png")
-	a.post(func() { a.back(); a.back() })
+	a.post(func() {
+		if p := a.cur(); len(p.users) > 0 {
+			a.openAuthor(p, p.users[0].Name, p.users[0].ID)
+		}
+	})
 	shot("6.png")
+	a.post(a.back)
+	shot("7.png")
+	a.post(a.back)
+	shot("8.png")
 	os.Exit(0)
 }
 
