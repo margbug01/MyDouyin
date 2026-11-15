@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,26 +91,54 @@ const done = async (page) => {
 };
 `
 
-// writeScript sends a form to a write endpoint from a Douyin page without a
-// video playing, retrying while the page's scripts load.
+// writeScript sends a POST to a write endpoint, with query a form or JSON
+// body of type, from a Douyin page without a video playing, retrying while
+// the page's scripts load. The page starts the request and answers at
+// once, its result read after: an evaluation waiting on a request ego lite
+// holds would hold every call after it. With dry the request is stopped as
+// it leaves, the page's headers on it, and reported.
 const writeScript = `
-const [path, body] = ARGS;
+const [path, query, body, type, dry] = ARGS;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let page;
 try {
   page = task.page("p1");
   await page.goto("https://www.douyin.com/user/self", { timeout: 40000 });
-  for (let i = 0; i < 12 && !out.ok; i++) {
-    await new Promise(r => setTimeout(r, i == 0 ? 2500 : 1000));
-    const r = await page.evaluate(async ([path, body]) => {
-      try {
-        const r = await fetch("https://www-hj.douyin.com" + path + "?device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0", {
-          method: "POST", credentials: "include", headers: { "content-type": "application/x-www-form-urlencoded; charset=UTF-8" }, body });
-        return { http: r.status, text: (await r.text()).slice(0, 300) };
-      } catch (e) { return { http: 0, text: String(e) }; }
-    }, [path, body]);
-    out.reply = r.text;
-    out.ok = r.http == 200 && /"status_code":0[,}]/.test(r.text);
+  if (dry) await page.cdp("Fetch.enable", { patterns: [{ urlPattern: "*" + path + "*", requestStage: "Request" }] });
+  for (let i = 0; i < 12 && !out.ok && !out.dry; i++) {
+    await sleep(i == 0 ? 2500 : 1000);
+    await page.evaluate(([path, query, body, type]) => {
+      window.__dyWrite = null;
+      fetch("https://www-hj.douyin.com" + path + "?device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0" + (query ? "&" + query : ""), {
+        method: "POST", credentials: "include", headers: { "content-type": type }, body })
+        .then(async r => { window.__dyWrite = { http: r.status, text: (await r.text()).slice(0, 300) }; })
+        .catch(e => { window.__dyWrite = { http: 0, text: String(e) }; });
+    }, [path, query, body, type]);
+    const until = Date.now() + 15000;
+    let r = null;
+    while (Date.now() < until && !r) {
+      if (dry) {
+        for (const e of await page.events()) {
+          if (e.method !== "Fetch.requestPaused") continue;
+          if (e.params.request.method !== "POST") { await page.cdp("Fetch.continueRequest", { requestId: e.params.requestId }).catch(() => {}); continue; }
+          await page.cdp("Fetch.failRequest", { requestId: e.params.requestId, errorReason: "BlockedByClient" }).catch(() => {});
+          const guarded = /bd-ticket-guard-client-data/i.test(Object.keys(e.params.request.headers).join(","));
+          out.dry = true;
+          out.ok = guarded;
+          out.reply = "演练：发送已拦下，" + (guarded ? "带着安全头" : "没有安全头");
+        }
+        if (out.dry) break;
+      } else {
+        r = await page.evaluate(() => window.__dyWrite);
+      }
+      await sleep(100);
+    }
+    if (r) {
+      out.reply = r.text;
+      out.ok = r.http == 200 && /"status_code":0[,}]/.test(r.text);
+    }
   }
+  if (dry) await page.cdp("Fetch.disable", {}).catch(() => {});
 } catch (e) {
   out.error = String(e);
 }
@@ -126,13 +155,46 @@ type egoResult struct {
 	Dry       bool // a share stopped before it left, as asked
 }
 
+const form = "application/x-www-form-urlencoded; charset=UTF-8"
+
 // write sends a form to a write endpoint through ego lite.
 func (c *Client) write(path, body string) error {
-	r, err := c.ego(writeScript, path, body)
+	return c.post(path, "", body, form, false)
+}
+
+// post sends a POST to a write endpoint through ego lite; dry stops it as
+// it leaves.
+func (c *Client) post(path, query, body, typ string, dry bool) error {
+	r, err := c.ego(writeScript, path, query, body, typ, map[bool]string{true: "1"}[dry])
 	if err != nil {
 		return err
 	}
+	if r.OK && dry && !r.Dry {
+		return errors.New("演练没拦住发送")
+	}
 	return r.err("抖音没接受")
+}
+
+// SetWatchLater puts the video with the given ID in 稍后再看, or takes it out.
+func (c *Client) SetWatchLater(id string, on bool) error {
+	if on {
+		body, _ := json.Marshal(map[string]any{"item_to_playinfo": map[string]any{id: map[string]int{"play_duration": 0, "loop_status": 0}}, "action_type": 1})
+		return c.post("/aweme/v1/web/watchlater/upsert/", "", string(body), "application/json", false)
+	}
+	body, _ := json.Marshal(map[string]any{"remove_item_ids": []string{id}, "remove_type": 0})
+	return c.post("/aweme/v1/web/watchlater/remove/", "", string(body), "application/json", false)
+}
+
+// SendDanmaku posts a bullet comment on the video with the given ID, at
+// where it plays; everyone watching it sees it. uid is the user's own
+// numeric ID (User.UID). dry stops it as it leaves.
+func (c *Client) SendDanmaku(id, uid string, at time.Duration, text string, dry bool) error {
+	if dry {
+		id = "0" // were the stop to fail, Douyin would refuse it: there is no video 0
+	}
+	q := url.Values{"item_id": {id}, "offset_time": {fmt.Sprint(at.Milliseconds())}, "text": {text}, "user_id": {uid},
+		"enter_from": {"video_detail"}, "previous_page": {"video_detail"}}
+	return c.post("/aweme/v1/web/danmaku/post_v2/", q.Encode(), "", form, dry)
 }
 
 func (r egoResult) err(refused string) error {
@@ -302,3 +364,10 @@ try {
 }
 await done(page);
 `
+
+// DeleteDanmaku takes back a bullet comment of the user's own, by its ID,
+// as the web page's menu on it does (user_type 1: its sender).
+func (c *Client) DeleteDanmaku(danmakuID string) error {
+	q := url.Values{"app_name": {"aweme"}, "format": {"json"}, "user_type": {"1"}, "danmaku_id": {danmakuID}}
+	return c.post("/aweme/v1/web/danmaku/delete_v2/", q.Encode(), "", form, false)
+}

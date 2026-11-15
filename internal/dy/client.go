@@ -522,7 +522,8 @@ type User struct {
 	ID, Name, Signature string // ID is the sec_uid
 	Avatar              string // the picture's address
 
-	Following, Followers, Liked int // the counts of a profile, which only Self fills in
+	Following, Followers, Liked int    // the counts of a profile, which only Self fills in
+	UID                         string // the numeric ID, which only Self fills in
 }
 
 // Self returns the logged-in user.
@@ -537,6 +538,7 @@ func (c *Client) Self() (User, error) {
 			Following int  `json:"following_count"`
 			Followers int  `json:"follower_count"`
 			Liked     int  `json:"total_favorited"`
+			UID       string
 		}
 	}
 	if err := c.getJSON("/aweme/v1/web/user/profile/self/", "", &r); err != nil {
@@ -544,7 +546,7 @@ func (c *Client) Self() (User, error) {
 	}
 	u := r.User
 	return User{ID: u.SecUID, Name: u.Nickname, Signature: u.Signature, Avatar: u.Avatar.first(),
-		Following: u.Following, Followers: u.Followers, Liked: u.Liked}, nil
+		Following: u.Following, Followers: u.Followers, Liked: u.Liked, UID: u.UID}, nil
 }
 
 // Following pages through the accounts secUID follows.
@@ -933,6 +935,24 @@ func (c *Client) socialFeed(method, path, query string) Pager[Video] {
 		more := r.HasMore != 0 && r.Cursor != cursor && empty < 3
 		cursor = r.Cursor
 		return videos(list), more, nil
+	})
+}
+
+// WatchLater pages through the videos the user put in 稍后再看, the latest
+// first.
+func (c *Client) WatchLater() Pager[Video] {
+	offset := 0
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			status
+			Items   []aweme
+			HasMore bool `json:"has_more"`
+		}
+		if err := c.getJSON("/aweme/v1/web/watchlater/list/", fmt.Sprintf("offset=%d&list_type=0&operate_type=0", offset), &r); err != nil {
+			return nil, false, err
+		}
+		offset += len(r.Items)
+		return videos(r.Items), r.HasMore && len(r.Items) > 0, nil
 	})
 }
 

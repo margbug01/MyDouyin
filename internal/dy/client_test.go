@@ -472,6 +472,26 @@ func TestLiveWrite(t *testing.T) {
 		{"save", func() error { return c.SetSaved(id, true) }, false, true},
 		{"unsave", func() error { return c.SetSaved(id, false) }, false, false},
 	}
+	later := func() bool {
+		vs, err := c.WatchLater()()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range vs {
+			if v.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if later() {
+		t.Fatal("pick a video not in 稍后再看")
+	}
+	defer func() { // whatever happened, out of 稍后再看 again
+		if err := c.SetWatchLater(id, false); err != nil {
+			t.Error(err)
+		}
+	}()
 	for _, s := range steps {
 		start := time.Now()
 		if err := s.do(); err != nil {
@@ -490,6 +510,22 @@ func TestLiveWrite(t *testing.T) {
 			t.Errorf("after %s: liked %v saved %v", s.name, v.Liked, v.Saved)
 		}
 		t.Logf("%s in %v", s.name, took.Round(100*time.Millisecond))
+	}
+	for _, on := range []bool{true, false} {
+		if err := c.SetWatchLater(id, on); err != nil {
+			t.Fatalf("稍后再看 %v: %v", on, err)
+		}
+		ok := false
+		for range 15 { // the list catches up in some seconds
+			time.Sleep(time.Second)
+			if later() == on {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			t.Errorf("稍后再看 %v: the list did not follow", on)
+		}
 	}
 	if _, err := c.Self(); err != nil {
 		t.Fatalf("the client's login after the writes: %v", err)
