@@ -176,10 +176,13 @@ func (f *File) Video() (*VideoDecoder, error) {
 	return v, v.Rewind()
 }
 
-func (v *VideoDecoder) Rewind() error {
+func (v *VideoDecoder) Rewind() error { return v.RewindTo(0) }
+
+// RewindTo goes back, or on, to just before the frame at t.
+func (v *VideoDecoder) RewindTo(t time.Duration) error {
 	v.close()
 	// 'BGRA' pixel format
-	rd, out, err := v.f.reader(v.f.vtrack, nsDict("PixelFormatType", nsInt(0x42475241)), 0)
+	rd, out, err := v.f.reader(v.f.vtrack, nsDict("PixelFormatType", nsInt(0x42475241)), t)
 	v.rd, v.out = rd, out
 	return err
 }

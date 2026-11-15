@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"strconv"
 	"strings"
@@ -75,6 +76,10 @@ func (a *app) view(c *ui.Context) {
 	}
 	p := a.cur()
 	root.Children(func() {
+		if a.theater && p.plays() { // 网页全屏: the video alone, filling the window
+			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() { a.stage(c, p) })
+			return
+		}
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
 			ui.Column(c.Key("main")).Grow(1).Children(func() {
@@ -618,13 +623,15 @@ func (a *app) stage(c *ui.Context, p *page) {
 			}
 			a.loadDanmaku(s, at)
 		}
-		if a.danmakuLayer(c, s, box.Bounds().W, at) && !a.paused {
+		if !a.clear && a.danmakuLayer(c, s, box.Bounds().W, at) && !a.paused {
 			c.AnimationFrame() // they fly
 		} else if s.vp != nil && !a.paused {
 			c.After(500 * time.Millisecond) // the time moves on
 		}
-		a.caption(c, p, s)
-		a.rail(c, p, s, box.Bounds().H)
+		if !a.clear { // 清屏: the video alone, the bar left to bring the rest back
+			a.caption(c, p, s)
+			a.rail(c, p, s, box.Bounds().H)
+		}
 		a.controls(c, s, at)
 	})
 }
@@ -705,14 +712,12 @@ func (a *app) caption(c *ui.Context, p *page, s *slot) {
 	})
 }
 
-// controls is the bar along the bottom of the video: play and pause, the
-// time, and how far it has played, a line over it. Not seekable: the video
-// decoder can only start over.
+// controls is the bar under the video, as Douyin's: play, the time, the
+// bullet comments on the left; 连播 and 清屏, the definition, the speed, the
+// volume, filling the window and the screen on the right; above it the
+// progress, which a press or a drag moves the video to.
 func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
-	if s.v.Live != nil {
-		a.liveControls(c, s)
-		return
-	}
+	live := s.v.Live != nil
 	var of time.Duration
 	if s.ap != nil {
 		of = s.ap.Duration()
@@ -720,14 +725,11 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 	if of <= 0 {
 		of = s.v.Duration
 	}
-	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Children(func() {
-		ui.Box(c).Height(2).Background(ui.RGBA(255, 255, 255, 0.18)).Children(func() {
-			if of > 0 {
-				f := min(1, float32(at)/float32(of))
-				ui.Box(c).Absolute().Top(0).Left(0).Bottom(0).WidthPercent(f * 100).Background(white)
-			}
-		})
-		ui.Row(c).Height(40).PaddingX(8).Gap(4).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.5), 180).Children(func() {
+		if !live {
+			a.progress(c, s, at, of)
+		}
+		ui.Row(c).Height(44).PaddingX(10).Gap(6).AlignItems(ui.Center).Children(func() {
 			icon, label := iconPause, "暂停"
 			if a.paused {
 				icon, label = iconPlay, "播放"
@@ -735,27 +737,237 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 			if iconButton(c.Key("toggle"), icon, 16, white, label).Clicked() {
 				a.toggle()
 			}
-			ui.Text(c, clock(at)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8)).Grow(1)
-			if chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
-				a.dmOff = !a.dmOff
-			}
-			if chip(c.Key("next"), "连播", a.autoNext).Clicked() {
-				a.autoNext = !a.autoNext
-			}
-			sl := "倍速"
-			if a.speed != 0 && a.speed != 1 {
-				sl = strconv.FormatFloat(a.speed, 'f', -1, 64) + "x"
-			}
-			if chip(c.Key("speed"), sl, a.speed != 0 && a.speed != 1).Clicked() {
-				i := 0
-				for j, sp := range speeds {
-					if sp == a.speed {
-						i = j + 1
-					}
+			if live {
+				ui.Box(c).Size(7, 7).Radius(4).Background(pal.accent)
+				ui.Text(c, "直播中 · "+s.v.Live.Viewers+" 人在看").FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8))
+			} else {
+				shown := at
+				if a.dragging {
+					shown = time.Duration(float64(of) * float64(a.dragAt))
 				}
-				a.setSpeed(speeds[i%len(speeds)])
+				ui.Text(c, clock(shown)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.85)).Margin(0, 6, 0, 2)
+				if chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
+					a.dmOff = !a.dmOff
+				}
+			}
+			ui.Box(c).Grow(1)
+			if !live {
+				if toggleChip(c.Key("next"), "连播", a.autoNext).Clicked() {
+					a.autoNext = !a.autoNext
+				}
+			}
+			if toggleChip(c.Key("clear"), "清屏", a.clear).Clicked() {
+				a.clear = !a.clear
+			}
+			if !live {
+				a.qualityMenu(c, s)
+				a.speedMenu(c)
+			}
+			a.volumeButton(c)
+			if iconButton(c.Key("theater"), onOff(a.theater && !a.fullScreen(), iconUnfill, iconFillWindow), 16, white, onOff(a.theater && !a.fullScreen(), "退出网页全屏", "网页全屏")).Clicked() {
+				if a.fullScreen() {
+					a.win.SetFullScreen(false)
+				}
+				a.theater = !a.theater || a.fullScreen()
+			}
+			full := a.fullScreen()
+			if iconButton(c.Key("full"), onOff(full, iconShrink, iconExpand), 16, white, onOff(full, "退出全屏", "全屏")).Clicked() {
+				a.setFullScreen(!full)
 			}
 		})
+	})
+}
+
+// fullScreen tells whether the window fills the screen.
+func (a *app) fullScreen() bool { return a.win != nil && a.win.IsFullScreen() }
+
+// setFullScreen has the video fill the screen, or not: the window full
+// screen, and the video filling it.
+func (a *app) setFullScreen(on bool) {
+	if a.win != nil {
+		a.win.SetFullScreen(on)
+	}
+	a.theater = on
+}
+
+// progress is the line of how far the video played, over the bar: thicker
+// under the pointer, with a knob, which a press or a drag moves the video
+// to, at its release.
+func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
+	bar := ui.Box(c.Key("progress")).Height(14).Cursor(ui.CursorPointer).Label("进度")
+	w := bar.Bounds().W
+	frac := func(x float32) float32 {
+		if w <= 0 {
+			return 0
+		}
+		return max(0, min(1, x/w))
+	}
+	bar.HandleInput(func(ev ui.InputEvent) bool {
+		switch {
+		case ev.Kind == ui.InputPointerDown && ev.Button == 0 && of > 0 && s.dec != nil:
+			a.dragging, a.dragAt = true, frac(ev.X)
+			return true
+		case ev.Kind == ui.InputPointerMove && a.dragging:
+			a.dragAt = frac(ev.X)
+			return true
+		case ev.Kind == ui.InputPointerUp && a.dragging:
+			a.dragging = false
+			if !ev.Canceled {
+				a.seek(s, time.Duration(float64(of)*float64(frac(ev.X))))
+			}
+			return true
+		}
+		return false
+	})
+	f := float32(0)
+	if of > 0 {
+		f = min(1, float32(at)/float32(of))
+	}
+	if a.dragging {
+		f = a.dragAt
+	}
+	hot := bar.Hovered() || a.dragging
+	bar.Draw(func(p *ui.Painter, r ui.Rect) {
+		h := float32(2)
+		if hot {
+			h = 4
+		}
+		y := r.Y + r.H - 6 - h/2
+		p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: h}, ui.RGBA(255, 255, 255, 0.22), h/2)
+		p.Fill(ui.Rect{X: r.X, Y: y, W: r.W * f, H: h}, white, h/2)
+		if hot {
+			const k = 12
+			p.Fill(ui.Rect{X: r.X + r.W*f - k/2, Y: y + h/2 - k/2, W: k, H: k}, white, k/2)
+		}
+	})
+}
+
+// toggleChip is a switch of the bar with its name, as Douyin's 连播 and 清屏.
+func toggleChip(c *ui.Context, label string, on bool) ui.Element {
+	b := ui.ButtonBase(c).Height(28).PaddingX(6).Gap(6).Radius(8).AlignItems(ui.Center).FocusRing(false).Label(label).Role(ui.RoleSwitch).Checked(on)
+	if b.Hovered() {
+		b.Background(ui.RGBA(255, 255, 255, 0.1))
+	}
+	return b.Children(func() {
+		ui.Box(c).Width(26).Height(15).Radius(8).Background(onOff(on, pal.accent, ui.RGBA(255, 255, 255, 0.3))).Children(func() {
+			ui.Box(c).Absolute().Top(2).Left(onOff[float32](on, 13, 2)).Size(11, 11).Radius(6).Background(white)
+		})
+		ui.Text(c, label).FontSize(12.5).FontWeight(500).TextColor(onOff(on, white, ui.RGBA(255, 255, 255, 0.75)))
+	})
+}
+
+// barMenu is a menu that rises from a chip of the bar.
+func barMenu(c *ui.Context, key string, anchor ui.Element, open *bool, width float32, items func()) {
+	ui.PopoverBase(c.Key(key), anchor, open, func(panel ui.Element) {
+		panel.AttachTo(anchor, ui.AnchorTop, ui.AnchorBottom).Margin(0, 0, 8, 0).Padding(5).Gap(1).Width(width).
+			Radius(10).Background(ui.Hex("#2b2b2e")).Border(0.5, ui.RGBA(255, 255, 255, 0.14)).Shadow(0, 8, 24, -4, ui.RGBA(0, 0, 0, 0.4)).
+			Role(ui.RoleMenu).FocusGroup(ui.Vertical).
+			Transition(ui.ElementTransition{Animation: &ui.Snappy, Enter: &ui.Motion{Scale: 0.96, Y: 4}, Exit: &ui.Motion{Scale: 0.98}})
+		panel.Children(items)
+	})
+}
+
+// choice is an item of a bar's menu, marked while chosen.
+func choice(c *ui.Context, label string, on bool) ui.Element {
+	b := ui.ButtonBase(c.Key(label)).Role(ui.RoleMenuItemRadio).Checked(on).Label(label).Height(30).PaddingX(10).Radius(7).
+		AlignItems(ui.Center).Justify(ui.Center).FocusRing(false)
+	if b.Hovered() || b.FocusVisible() {
+		b.Background(pal.press)
+	}
+	return b.Children(func() {
+		ui.Text(c, label).FontSize(13).FontWeight(onOff(on, 700, 500)).TextColor(onOff(on, pal.accent, pal.text))
+	})
+}
+
+// qualityMenu chooses the definition: Douyin's pick (智能), or one the
+// video comes in.
+func (a *app) qualityMenu(c *ui.Context, s *slot) {
+	cur := a.quality
+	if cur == "" {
+		cur = "智能"
+	}
+	b := chip(c.Key("quality"), cur, cur != "智能")
+	b.Label("清晰度：" + cur)
+	if b.Clicked() {
+		a.qualityOpen = !a.qualityOpen
+	}
+	barMenu(c, "quality-menu", b, &a.qualityOpen, 96, func() {
+		names := []string{"智能"}
+		for _, q := range s.v.Qualities {
+			names = append(names, q.Name)
+		}
+		for _, n := range names {
+			if choice(c, n, n == cur).Clicked() {
+				a.qualityOpen = false
+				if n != cur {
+					a.setQuality(n)
+					a.toast = "清晰度：" + n
+				}
+			}
+		}
+	})
+}
+
+// speedMenu chooses the speed, as Douyin's: 2x down to 0.75x.
+func (a *app) speedMenu(c *ui.Context) {
+	label := "倍速"
+	if a.speed != 0 && a.speed != 1 {
+		label = strconv.FormatFloat(a.speed, 'f', -1, 64) + "x"
+	}
+	b := chip(c.Key("speed"), label, a.speed != 0 && a.speed != 1)
+	b.Label("倍速：" + label)
+	if b.Clicked() {
+		a.speedOpen = !a.speedOpen
+	}
+	barMenu(c, "speed-menu", b, &a.speedOpen, 84, func() {
+		for _, sp := range speeds {
+			name := strconv.FormatFloat(sp, 'f', -1, 64) + "x"
+			if choice(c, name, sp == a.speed || a.speed == 0 && sp == 1).Clicked() {
+				a.speedOpen = false
+				a.setSpeed(sp)
+			}
+		}
+	})
+}
+
+// volumeButton shows the volume, muted or not; a click opens a slider, with
+// a button that mutes and unmutes under it.
+func (a *app) volumeButton(c *ui.Context) {
+	icon := iconVolume
+	if a.muted || a.volume == 0 {
+		icon = iconMuted
+	}
+	b := iconButton(c.Key("volume"), icon, 17, white, "音量")
+	if b.Clicked() {
+		a.volumeOpen = !a.volumeOpen
+	}
+	barMenu(c, "volume-menu", b, &a.volumeOpen, 48, func() {
+		ui.Text(c, fmt.Sprint(int(math.Round(a.loudness()*100)))).FontSize(12).TextColor(pal.text).AlignSelf(ui.Center).Margin(4, 0)
+		const knob, track = 14, 4
+		v := a.volume
+		if a.muted {
+			v = 0
+		}
+		sl := ui.SliderBase(c.Key("volume-slider"), &v, 0, 1).Vertical().Size(knob+12, 110).PaddingY(knob / 2).Step(0.01).
+			AlignSelf(ui.Center).FocusRing(false).Label("音量大小")
+		if sl.Changed() {
+			a.setVolume(v, false)
+		}
+		sl.Draw(func(p *ui.Painter, r ui.Rect) {
+			top, foot := r.Y+knob/2, r.Y+r.H-knob/2
+			x := r.X + (r.W-track)/2
+			y := foot - (foot-top)*float32(v)
+			p.Fill(ui.Rect{X: x, Y: top - track/2, W: track, H: foot - top + track}, ui.RGBA(255, 255, 255, 0.2), track/2)
+			p.Fill(ui.Rect{X: x, Y: y, W: track, H: foot - y + track/2}, pal.accent, track/2)
+			p.Fill(ui.Rect{X: r.X + (r.W-knob)/2, Y: y - knob/2, W: knob, H: knob}, white, knob/2)
+		})
+		m := iconButton(c.Key("mute"), onOff(a.muted, iconMuted, iconVolume), 15, pal.text, onOff(a.muted, "取消静音", "静音")).AlignSelf(ui.Center)
+		if m.Clicked() {
+			if a.volume == 0 {
+				a.volume = 0.5
+			}
+			a.setVolume(a.volume, !a.muted)
+		}
 	})
 }
 
@@ -1120,22 +1332,6 @@ func (a *app) relatedList(c *ui.Context, sh *sheet) {
 	})
 }
 
-// liveControls is the control bar of a live room: play and pause, and how
-// many watch; a stream has no time to show, speed or next.
-func (a *app) liveControls(c *ui.Context, s *slot) {
-	ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(40).PaddingX(8).Gap(8).AlignItems(ui.Center).Children(func() {
-		icon, label := iconPause, "暂停"
-		if a.paused {
-			icon, label = iconPlay, "播放"
-		}
-		if iconButton(c.Key("toggle"), icon, 16, white, label).Clicked() {
-			a.toggle()
-		}
-		ui.Box(c).Size(7, 7).Radius(4).Background(pal.accent)
-		ui.Text(c, "直播中 · "+s.v.Live.Viewers+" 人在看").FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8))
-	})
-}
-
 // byline is a card's author and when the video came out; a live room has
 // no date.
 func byline(v dy.Video) string {
@@ -1406,6 +1602,12 @@ var (
 	iconUser       = strokeIcon(`<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>`)
 	iconLive       = strokeIcon(`<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/>`)
 	iconDrama      = strokeIcon(`<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m10 9 5 3-5 3z"/>`)
+	iconVolume     = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>`)
+	iconMuted      = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>`)
+	iconFillWindow = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10V8h2"/><path d="M16 14v2h-2"/>`)
+	iconUnfill     = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 8v2H8"/><path d="M14 16v-2h2"/>`)
+	iconExpand     = strokeIcon(`<path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>`)
+	iconShrink     = strokeIcon(`<path d="M9 4v5H4"/><path d="M15 4v5h5"/><path d="M9 20v-5H4"/><path d="M15 20v-5h5"/>`)
 	iconLayers     = strokeIcon(`<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>`)
 	iconShare      = fillIcon(`<path d="M13.5 4.5v3.6C7.2 8.8 3.6 12.7 3 19.5c2.3-3.2 5.4-4.9 10.5-5v3.9L21 11z"/>`)
 	iconHeadphones = strokeIcon(`<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>`)

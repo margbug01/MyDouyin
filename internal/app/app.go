@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -33,6 +34,9 @@ type slot struct {
 
 	liking, saving bool // a like or a save of it on its way to Douyin
 
+	resume time.Duration // where to go on from once opened again, in another definition
+	dmGen  int           // counts seeks: bullet comments loaded before one are let go
+
 	danmaku   []dy.Danmaku  // the bullet comments loaded, in time order
 	dmTo      time.Duration // how far into the video they are loaded
 	dmLoading bool
@@ -47,6 +51,7 @@ type players struct {
 	ap   *audio.Player // nil when the clip has no audio, and for a stream, whose sound live plays
 	dec  *paced        // vp's decoder for a file, whose clock stands in for a missing audio's
 	live *media.Live   // vp's decoder for a live room
+	path string        // the file downloaded, which release deletes
 }
 
 // close stops and lets go of whatever of pl there is.
@@ -64,14 +69,23 @@ func (pl players) close() {
 
 // paced is a video's decoder whose frames last as long as the speed says:
 // their own time divided by it. It counts the video's time it has decoded,
-// a clock where the video has no sound to give one.
+// a clock where the video has no sound to give one. It moves to another
+// time as the player plays it again: asked to (seek), it says the video
+// ended, which a looping player answers with Rewind, and Rewind goes there.
 type paced struct {
 	*media.VideoDecoder
 	speed *atomic.Uint64 // the float64 bits, read on the player's goroutine
 	done  atomic.Int64   // the video's time decoded, at its own speed
+	to    atomic.Int64   // where to go, plus one; 0 for nowhere
 }
 
+// seek has the player go on from t, a few frames on.
+func (p *paced) seek(t time.Duration) { p.to.Store(int64(t) + 1) }
+
 func (p *paced) Next() (ui.VideoFrame, error) {
+	if p.to.Load() != 0 {
+		return ui.VideoFrame{}, io.EOF
+	}
 	f, err := p.VideoDecoder.Next()
 	p.done.Add(int64(f.Duration))
 	if s := math.Float64frombits(p.speed.Load()); s > 0 {
@@ -81,6 +95,10 @@ func (p *paced) Next() (ui.VideoFrame, error) {
 }
 
 func (p *paced) Rewind() error {
+	if to := p.to.Swap(0); to != 0 {
+		p.done.Store(to - 1)
+		return p.VideoDecoder.RewindTo(time.Duration(to - 1))
+	}
 	p.done.Store(0)
 	return p.VideoDecoder.Rewind()
 }
@@ -97,8 +115,8 @@ func (s *slot) at() time.Duration {
 	return 0
 }
 
-// speeds are the choices of the speed button, which goes round them.
-var speeds = []float64{1, 1.25, 1.5, 2, 0.75}
+// speeds are the choices of the speed menu, fastest first, as Douyin's.
+var speeds = []float64{2, 1.5, 1.25, 1, 0.75}
 
 const (
 	ahead  = 2 // videos prepared after the current one
@@ -159,6 +177,17 @@ type app struct {
 	speedBits atomic.Uint64 // speed for the decoders
 	autoNext  bool          // 连播: the next video once one ends, rather than again
 	dmOff     bool          // bullet comments hidden
+
+	quality     string  // the definition chosen, "" or "智能" for Douyin's pick
+	volume      float64 // 0 to 1
+	muted       bool
+	clear       bool // 清屏: the video alone, without its text, rail or bullet comments
+	theater     bool // 网页全屏: the video fills the window, the sidebar and bars away
+	qualityOpen bool // the bar's menus
+	speedOpen   bool
+	volumeOpen  bool
+	dragging    bool    // the progress pressed, being dragged
+	dragAt      float32 // where along it, 0 to 1
 
 	posted chan func() // what post runs, in a test without a window
 
@@ -328,6 +357,78 @@ func (a *app) shareTo(v dy.Video, u dy.User) {
 	}()
 }
 
+// seek has s's video go on from t: its picture a few frames on, its sound
+// at once, its bullet comments loaded again from there.
+func (a *app) seek(s *slot, t time.Duration) {
+	if s.dec == nil {
+		return
+	}
+	t = max(0, min(t, s.v.Duration-time.Second))
+	s.dec.seek(t)
+	if s.ap != nil {
+		s.ap.Seek(t)
+	}
+	s.lastAt = t // not a loop, which 连播 would take for the end
+	s.danmaku, s.dmTo, s.dmLoading = nil, t/(32*time.Second)*(32*time.Second), false
+	s.dmGen++
+}
+
+// setQuality plays the videos in definition q ("智能" for Douyin's pick):
+// the one playing downloads again and goes on from where it was, the ones
+// prepared around it are prepared again.
+func (a *app) setQuality(q string) {
+	if q == a.quality {
+		return
+	}
+	a.quality = q
+	p := a.cur()
+	for i, s := range p.list {
+		if s.vp == nil || s.v.Live != nil {
+			continue
+		}
+		if i == p.idx && p.plays() {
+			s.resume = s.at()
+		}
+		a.release(s)
+	}
+	a.fill()
+}
+
+// volumeNow is the volume streams play at, which the player of a stream
+// reads as it plays; the view sets it.
+var volumeNow atomicFloat
+
+// atomicFloat is a float64 that goroutines read and write.
+type atomicFloat struct{ bits atomic.Uint64 }
+
+func (f *atomicFloat) Load() float64   { return math.Float64frombits(f.bits.Load()) }
+func (f *atomicFloat) Store(v float64) { f.bits.Store(math.Float64bits(v)) }
+
+// loudness is the gain the sound plays at: the volume, or none when muted.
+func (a *app) loudness() float64 {
+	if a.muted {
+		return 0
+	}
+	return a.volume
+}
+
+// setVolume sets the sound of every video, muted or at v from 0 to 1.
+func (a *app) setVolume(v float64, muted bool) {
+	a.volume, a.muted = max(0, min(1, v)), muted
+	g := a.loudness()
+	volumeNow.Store(g)
+	for _, p := range a.pages {
+		for _, s := range p.list {
+			if s.ap != nil {
+				s.ap.SetVolume(g)
+			}
+			if s.live != nil {
+				s.live.SetVolume(g)
+			}
+		}
+	}
+}
+
 // setSpeed plays every video at s, and the ones to come.
 func (a *app) setSpeed(s float64) {
 	a.speed = s
@@ -348,10 +449,13 @@ func (a *app) loadDanmaku(s *slot, at time.Duration) {
 		return
 	}
 	s.dmLoading = true
-	from := s.dmTo
+	from, gen := s.dmTo, s.dmGen
 	go func() {
 		ds, err := a.c.Danmaku(s.v.ID, s.v.Duration, from, from+32*time.Second)
 		a.post(func() {
+			if gen != s.dmGen { // a seek came meanwhile
+				return
+			}
 			s.dmLoading = false
 			if err != nil {
 				log.Printf("danmaku %s: %v", s.v.ID, err)
@@ -454,6 +558,10 @@ func (a *app) moreComments() {
 // escape leaves a chat for the inbox, closes what is open beside the page,
 // or else the page on top.
 func (a *app) escape() {
+	if a.theater { // out of 网页全屏 or full screen first
+		a.setFullScreen(false)
+		return
+	}
 	if a.dms != nil && a.dms.open >= 0 {
 		a.dms.open = -1
 		return
@@ -646,6 +754,10 @@ func (a *app) prepare(s *slot) {
 				return
 			}
 			s.players, s.err = pl, err
+			if s.resume > 0 && s.dec != nil { // opened again in another definition: on from where it was
+				a.seek(s, s.resume)
+			}
+			s.resume = 0
 			a.fill() // plays it if current, and starts the ones around it
 		})
 	}()
@@ -659,7 +771,7 @@ func (a *app) save(s *slot) {
 		return
 	}
 	s.saved = "保存中…"
-	src := filepath.Join(a.dir, s.v.ID+".mp4")
+	src := s.path
 	go func() {
 		dst, err := copyTo(src, filepath.Join(home, "Downloads"), fileName(s.v))
 		a.post(func() {
@@ -724,12 +836,23 @@ func (a *app) build(v dy.Video) (pl players, err error) {
 		pl.vp.Pause()
 		return pl, nil
 	}
-	path := filepath.Join(a.dir, v.ID+".mp4")
+	if a.c == nil {
+		return pl, errors.New("没有客户端") // a test's view
+	}
+	url, name := v.PlayURL, "智能"
+	for _, q := range v.Qualities {
+		if q.Name == a.quality {
+			url, name = q.URL, q.Name
+		}
+	}
+	path := filepath.Join(a.dir, v.ID+"-"+name+".mp4")
 	if _, err = os.Stat(path); err != nil {
-		if err = a.c.Download(v.PlayURL, path); err != nil {
+		if err = a.c.Download(url, path); err != nil {
+			os.Remove(path)
 			return
 		}
 	}
+	pl.path = path
 	if pl.file, err = media.Open(path); err != nil {
 		return
 	}
@@ -745,7 +868,7 @@ func (a *app) build(v dy.Video) (pl players, err error) {
 	pl.vp.SetLoop(true).Pause()
 	if ad, aerr := pl.file.Audio(); aerr == nil {
 		pl.ap = audio.NewPlayer(ad)
-		pl.ap.SetLoop(true).SetPreservesPitch(true)
+		pl.ap.SetLoop(true).SetPreservesPitch(true).SetVolume(a.loudness())
 		if s := math.Float64frombits(a.speedBits.Load()); s > 0 {
 			pl.ap.SetSpeed(s)
 		}
@@ -760,7 +883,9 @@ func (a *app) release(s *slot) {
 		return
 	}
 	s.players.close()
-	os.Remove(filepath.Join(a.dir, s.v.ID+".mp4"))
+	if s.path != "" {
+		os.Remove(s.path)
+	}
 	s.players = players{}
 	s.err = nil
 }
@@ -787,6 +912,7 @@ func (pl players) play(sound bool) {
 	pl.vp.Play()
 	if pl.live != nil {
 		pl.live.SetMuted(!sound)
+		pl.live.SetVolume(volumeNow.Load())
 		pl.live.Play()
 	}
 	if pl.ap != nil {
@@ -854,8 +980,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now liking and saving
-// the video DY_WRITE names, each checked on Douyin and taken back.
+// clicks would, saves a shot of each step and quits: now the control bar,
+// a seek, a change of definition, 网页全屏 and the share panel.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -881,44 +1007,58 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	id := os.Getenv("DY_WRITE")
-	v, err := a.c.Video(id)
-	if err != nil || v.Liked || v.Saved {
-		log.Printf("DY_WRITE %q: %v liked %v saved %v", id, err, v.Liked, v.Saved)
+	v, err := a.c.Video("7694319481270619427") // 3:29, in 1080P, 720P and 540P
+	if err != nil {
+		log.Println(err)
 		os.Exit(1)
 	}
+	log.Printf("qualities %+v", func() (n []string) {
+		for _, q := range v.Qualities {
+			n = append(n, fmt.Sprintf("%s %.0fMB", q.Name, float64(q.Size)/1e6))
+		}
+		return
+	}())
 	a.post(func() { a.open(&page{title: "测试", list: []*slot{{v: v}}, done: true}) })
-	time.Sleep(3 * time.Second)
-	step := func(name string, do func(*slot), busy func(*slot) bool, want func(dy.Video) bool) {
-		start := time.Now()
-		a.post(func() { do(a.cur().list[0]) })
-		for {
-			time.Sleep(200 * time.Millisecond)
-			ch := make(chan bool)
-			a.post(func() { ch <- busy(a.cur().list[0]) })
-			if !<-ch {
-				break
+	times := func(what string) {
+		ch := make(chan string)
+		a.post(func() {
+			s := a.cur().list[0]
+			snd, pic := time.Duration(0), time.Duration(0)
+			if s.ap != nil {
+				snd = s.ap.Position()
 			}
-		}
-		took := time.Since(start)
-		ok := false
-		for range 10 {
-			if v, err := a.c.Video(id); err == nil && want(v) {
-				ok = true
-				break
+			if s.dec != nil {
+				pic = time.Duration(s.dec.done.Load())
 			}
-			time.Sleep(time.Second)
-		}
-		log.Printf("WRITE %s: took %v, Douyin agrees %v", name, took.Round(100*time.Millisecond), ok)
+			ch <- fmt.Sprintf("%s: sound %v picture %v file %s", what, snd.Round(100*time.Millisecond), pic.Round(100*time.Millisecond), filepath.Base(s.path))
+		})
+		log.Println("TIME", <-ch)
 	}
-	liking := func(s *slot) bool { return s.liking }
-	saving := func(s *slot) bool { return s.saving }
-	step("like", a.like, liking, func(v dy.Video) bool { return v.Liked })
-	step("save", a.collect, saving, func(v dy.Video) bool { return v.Saved })
 	shot("1.png")
-	step("unlike", a.like, liking, func(v dy.Video) bool { return !v.Liked })
-	step("unsave", a.collect, saving, func(v dy.Video) bool { return !v.Saved })
+	times("playing")
+	a.post(func() { a.seek(a.cur().list[0], time.Minute) })
+	time.Sleep(3 * time.Second)
+	times("3 s after seeking to 1:00")
+	a.post(func() { a.setQuality("720P") })
+	for range 60 {
+		time.Sleep(time.Second)
+		ch := make(chan bool)
+		a.post(func() { ch <- a.cur().list[0].vp != nil })
+		if <-ch {
+			break
+		}
+	}
+	time.Sleep(2 * time.Second)
+	times("2 s after 720P opened")
+	a.post(func() { a.qualityOpen = true })
 	shot("2.png")
+	a.post(func() { a.qualityOpen = false; a.theater = true })
+	shot("3.png")
+	a.post(func() { a.theater = false; a.shareOpen = true })
+	shot("4.png")
+	a.post(func() { a.shareOpen = false; a.volumeOpen = true; a.setVolume(0.3, false) })
+	shot("5.png")
+	times("end")
 	os.Exit(0)
 }
 
@@ -945,6 +1085,7 @@ func Run() error {
 	a.setLiked, a.setSaved = c.SetLiked, c.SetSaved
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }
 	a.setSpeed(1)
+	a.setVolume(1, false)
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{

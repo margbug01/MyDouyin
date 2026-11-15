@@ -78,6 +78,15 @@ func (l *Live) SetMuted(m bool) {
 	}
 }
 
+// SetVolume sets the stream's sound, from 0 to 1.
+func (l *Live) SetVolume(v float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.closed {
+		l.player.Send(sel("setVolume:"), float32(v))
+	}
+}
+
 func (l *Live) send(s string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

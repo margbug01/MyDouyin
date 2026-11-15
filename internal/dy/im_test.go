@@ -41,3 +41,31 @@ func TestChatDecode(t *testing.T) {
 		t.Error("a field longer than its message decoded")
 	}
 }
+
+// A definition is the smallest H.264 mp4 of it, which has the sound: never
+// the dash gear beside it, the picture alone, however small.
+func TestPlayURLQualities(t *testing.T) {
+	type gear = struct {
+		Name   string `json:"gear_name"`
+		H265   int    `json:"is_h265"`
+		Format string
+		Addr   addr `json:"play_addr"`
+	}
+	g := func(name, format string, w, h int, size int64) gear {
+		return gear{Name: name, Format: format, Addr: addr{URLs: []string{"https://x/aweme/v1/play/?" + name + format}, W: w, H: h, Size: size}}
+	}
+	u, _, qs := playURL(addr{}, []gear{
+		g("normal_720_0", "mp4", 1280, 720, 40),
+		g("low_720_0", "dash", 1280, 720, 39),
+		g("lower_540_0", "mp4", 1024, 576, 31),
+		g("low_540_0", "dash", 1024, 576, 30),
+		g("adapt_low_540_0", "mp4", 1024, 576, 25),
+		func() gear { x := g("1080_1_1", "mp4", 1920, 1080, 20); x.H265 = 1; return x }(),
+	})
+	if u != "https://x/aweme/v1/play/?lower_540_0mp4" {
+		t.Fatalf("智能 picked %s", u)
+	}
+	if len(qs) != 2 || qs[0].Name != "720P" || qs[0].Size != 40 || qs[1].Name != "540P" || qs[1].Size != 31 {
+		t.Fatalf("qualities %+v", qs)
+	}
+}

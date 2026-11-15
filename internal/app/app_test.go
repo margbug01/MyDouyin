@@ -395,33 +395,72 @@ func (still) Next() (ui.VideoFrame, error) {
 }
 func (still) Rewind() error { return nil }
 
-// The control bar's chips switch bullet comments and 连播 and go round the
-// speeds, none of them pausing; with 连播 on, a video going back to its start
-// asks for the next, and without it, it does not.
+// The control bar's switches turn bullet comments, 连播 and 清屏 on and
+// off, 清屏 taking the text and the rail away; its menus choose the speed
+// and the definition, which opens the video again in it from where it was;
+// 网页全屏 leaves the video alone in the window till Escape; none of them
+// pauses. With 连播 on, a video going back to its start asks for the next,
+// and without it, it does not.
 func TestControlBar(t *testing.T) {
 	p := stub("推荐", 2)
 	ready(t, p.list[0])
+	p.list[0].v.Qualities = []dy.Quality{{Name: "1080P"}, {Name: "720P"}}
 	a := withRoots(&app{pages: []*page{p}})
 	a.setSpeed(1)
 	tt := newTester(a)
-	for _, name := range []string{"弹幕", "连播", "倍速"} {
+	for _, name := range []string{"弹幕", "连播", "清屏"} {
 		if err := tt.Click(name); err != nil {
 			t.Fatal(name, err)
 		}
 		tt.Frame()
 	}
-	if !a.dmOff || !a.autoNext || a.speed != 1.25 || a.paused || !tt.HasText("1.25x") {
-		t.Fatalf("after the chips: dmOff %v autoNext %v speed %v paused %v", a.dmOff, a.autoNext, a.speed, a.paused)
+	if !a.dmOff || !a.autoNext || !a.clear || a.paused || tt.HasText("听抖音") || tt.HasText("@作者") {
+		t.Fatalf("after the switches: dmOff %v autoNext %v clear %v paused %v: %q", a.dmOff, a.autoNext, a.clear, a.paused, tt.Texts())
 	}
-	a.setSpeed(0.75)
+	tt.Click("清屏")
 	tt.Frame()
-	if err := tt.Click("0.75x"); err != nil {
+	if a.clear || !tt.HasText("听抖音") {
+		t.Fatal("清屏 again did not bring the rail back")
+	}
+	if err := tt.Click("倍速：倍速"); err != nil {
 		t.Fatal(err)
 	}
-	if a.speed != 1 {
-		t.Fatalf("after 0.75x came %v, not 1", a.speed)
+	tt.Frame()
+	if err := tt.Click("1.5x"); err != nil {
+		t.Fatal(err)
 	}
-
+	tt.Frame()
+	if a.speed != 1.5 || a.speedOpen || !tt.HasText("1.5x") {
+		t.Fatalf("speed %v, menu open %v", a.speed, a.speedOpen)
+	}
+	if err := tt.Click("清晰度：智能"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("1080P") || !tt.HasText("720P") {
+		t.Fatalf("definitions: %q", tt.Texts())
+	}
+	if err := tt.Click("720P"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.quality != "720P" || p.list[0].vp != nil {
+		t.Fatalf("after 720P: quality %q, the old player kept %v", a.quality, p.list[0].vp != nil)
+	}
+	ready(t, p.list[0])
+	if err := tt.Click("网页全屏"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.theater || tt.HasText("精选") || a.paused {
+		t.Fatalf("网页全屏: theater %v, %q", a.theater, tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.theater || !tt.HasText("精选") || len(a.pages) != 1 {
+		t.Fatal("Escape did not leave 网页全屏, or left the page")
+	}
+	a.setSpeed(1)
 	s := p.list[0]
 	if a.watch(s, 10*time.Second) || a.watch(s, 30*time.Second) {
 		t.Fatal("next while playing on")
@@ -892,5 +931,83 @@ func TestSharePanel(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("没分享给甲：对方没回复，只能发一条") || len(sent) != 2 || sent[0] != "42 乙 丙" || sent[1] != "42 甲" {
 		t.Fatalf("after a refusal: %q, sent %q", tt.Texts(), sent)
+	}
+}
+
+// Seeking a video's decoder ends what it decodes, as a loop's end does, and
+// its Rewind then goes on from there, its clock with it.
+func TestPacedSeek(t *testing.T) {
+	f, err := media.Open("../../testdata/silent.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	vd, err := f.Video()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var speed atomic.Uint64
+	dec := &paced{VideoDecoder: vd, speed: &speed}
+	defer dec.Close()
+	dec.Next()
+	dec.seek(1500 * time.Millisecond)
+	if _, err := dec.Next(); err != io.EOF {
+		t.Fatalf("seeking, Next gave %v", err)
+	}
+	if err := dec.Rewind(); err != nil {
+		t.Fatal(err)
+	}
+	if got := time.Duration(dec.done.Load()); got != 1500*time.Millisecond {
+		t.Fatalf("the clock after the seek: %v", got)
+	}
+	n := 0
+	for {
+		if _, err := dec.Next(); err != nil {
+			break
+		}
+		n++
+	}
+	if n < 12 || n > 18 { // half a second of 30 fps, give or take where frames start
+		t.Fatalf("%d frames after 1.5 s of a 2 s clip", n)
+	}
+	if err := dec.Rewind(); err != nil || dec.done.Load() != 0 {
+		t.Fatalf("a plain rewind: clock %v, %v", dec.done.Load(), err)
+	}
+}
+
+// A press on the progress and a drag show where the video would go, which
+// it goes to on the release.
+func TestProgressDrag(t *testing.T) {
+	f, err := media.Open("../../testdata/silent.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	vd, _ := f.Video()
+	var speed atomic.Uint64
+	p := stub("推荐", 1)
+	s := p.list[0]
+	ready(t, s)
+	s.dec = &paced{VideoDecoder: vd, speed: &speed}
+	defer s.dec.Close()
+	s.v.Duration = 10 * time.Second
+	a := withRoots(&app{pages: []*page{p}})
+	tt := newTester(a)
+	r, ok := tt.Find("进度")
+	if !ok {
+		t.Fatalf("no progress: %q", tt.Texts())
+	}
+	y := r.Y + r.H/2
+	tt.Press(r.X+r.W*0.25, y)
+	tt.Frame()
+	tt.Move(r.X+r.W*0.75, y)
+	tt.Frame()
+	if !a.dragging || !tt.HasText("00:08 / 00:10") || s.dec.to.Load() != 0 {
+		t.Fatalf("dragging %v, %q, seeking %v", a.dragging, tt.Texts(), s.dec.to.Load())
+	}
+	tt.Release(r.X+r.W*0.75, y)
+	tt.Frame()
+	if got := time.Duration(s.dec.to.Load() - 1); a.dragging || got < 7400*time.Millisecond || got > 7600*time.Millisecond {
+		t.Fatalf("after the release: dragging %v, going to %v", a.dragging, got)
 	}
 }

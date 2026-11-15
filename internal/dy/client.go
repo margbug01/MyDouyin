@@ -50,6 +50,16 @@ type Video struct {
 	Created          time.Time
 
 	Liked, Saved bool // whether the user logged in has liked it and saved it (收藏)
+
+	Qualities []Quality // the definitions to choose from, finest first; PlayURL is Douyin's 智能 pick
+}
+
+// Quality is a definition a video comes in: 1080P, 720P or 540P, H.264
+// with its sound, as AVFoundation plays it.
+type Quality struct {
+	Name string
+	URL  string
+	Size int64
 }
 
 // login is the cookies a request carries, and the UIFID among them, which a
@@ -251,10 +261,11 @@ type addr struct {
 // be 1080p and 100 MB+ for a long video, and the window shows 540p fine, so
 // take the smallest file of at least 540p; the adapt_* gears have no audio.
 func playURL(top addr, gears []struct {
-	Name string `json:"gear_name"`
-	H265 int    `json:"is_h265"`
-	Addr addr   `json:"play_addr"`
-}) (u string, best addr) {
+	Name   string `json:"gear_name"`
+	H265   int    `json:"is_h265"`
+	Format string // "dash" for a picture without its sound
+	Addr   addr   `json:"play_addr"`
+}) (u string, best addr, qs []Quality) {
 	find := func(a addr) string {
 		for _, u := range a.URLs {
 			if strings.Contains(u, "aweme/v1/play") {
@@ -264,18 +275,36 @@ func playURL(top addr, gears []struct {
 		return ""
 	}
 	bestSize := int64(0)
+	classes := []int{1080, 720, 540}
+	byClass := map[int]addr{}
 	for _, g := range gears {
-		if g.H265 != 0 || strings.HasPrefix(g.Name, "adapt") || find(g.Addr) == "" || min(g.Addr.W, g.Addr.H) < 540 {
+		short := min(g.Addr.W, g.Addr.H)
+		// A dash gear is the picture alone, an adapt_ one too; both come
+		// as small as the H.264 mp4 of the definition, which has the sound.
+		if g.H265 != 0 || g.Format == "dash" || strings.HasPrefix(g.Name, "adapt") || find(g.Addr) == "" || short < 540 {
 			continue
 		}
 		if bestSize == 0 || g.Addr.Size < bestSize {
 			best, bestSize = g.Addr, g.Addr.Size
 		}
+		for _, cl := range classes { // the smallest of each definition
+			if short >= cl {
+				if have, ok := byClass[cl]; !ok || g.Addr.Size < have.Size {
+					byClass[cl] = g.Addr
+				}
+				break
+			}
+		}
 	}
 	if bestSize == 0 {
 		best = top
 	}
-	return find(best), best
+	for _, cl := range classes {
+		if a, ok := byClass[cl]; ok {
+			qs = append(qs, Quality{fmt.Sprintf("%dP", cl), find(a), a.Size})
+		}
+	}
+	return find(best), best, qs
 }
 
 type aweme struct {
@@ -297,9 +326,10 @@ type aweme struct {
 		Cover    addr `json:"cover"`
 		PlayAddr addr `json:"play_addr"`
 		Gears    []struct {
-			Name string `json:"gear_name"`
-			H265 int    `json:"is_h265"`
-			Addr addr   `json:"play_addr"`
+			Name   string `json:"gear_name"`
+			H265   int    `json:"is_h265"`
+			Format string
+			Addr   addr `json:"play_addr"`
 		} `json:"bit_rate"`
 	}
 	Mix *struct {
@@ -336,7 +366,7 @@ func videos(list []aweme) []Video {
 			}
 			continue
 		}
-		play, pa := playURL(a.Video.PlayAddr, a.Video.Gears)
+		play, pa, qs := playURL(a.Video.PlayAddr, a.Video.Gears)
 		if play == "" {
 			continue
 		}
@@ -348,7 +378,7 @@ func videos(list []aweme) []Video {
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
 			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),
-			Liked: a.Digged == 1, Saved: a.Saved == 1})
+			Liked: a.Digged == 1, Saved: a.Saved == 1, Qualities: qs})
 	}
 	return out
 }
