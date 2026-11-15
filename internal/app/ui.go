@@ -432,8 +432,8 @@ func (a *app) stage(c *ui.Context, p *page) {
 			}
 		})
 		at := time.Duration(0)
-		if s.ap != nil {
-			at = s.ap.Position()
+		if s.vp != nil { // the sound's clock, or the picture's for a video without
+			at = s.at()
 			if a.watch(s, at) { // after this frame, which is building the stage
 				a.post(func() { a.lastNav = time.Time{}; a.step(1) })
 			}
@@ -441,7 +441,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 		}
 		if a.danmakuLayer(c, s, box.Bounds().W, at) && !a.paused {
 			c.AnimationFrame() // they fly
-		} else if s.ap != nil && !a.paused {
+		} else if s.vp != nil && !a.paused {
 			c.After(500 * time.Millisecond) // the time moves on
 		}
 		a.caption(c, p, s)

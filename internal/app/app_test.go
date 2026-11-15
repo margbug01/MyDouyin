@@ -3,13 +3,17 @@ package app
 import (
 	"fmt"
 	"image"
+	"io"
+	"math"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"douyin/internal/dy"
+	"douyin/internal/media"
 )
 
 // stub is a page that loads nothing: its list is done and its slots count as loading.
@@ -477,5 +481,46 @@ func TestBigCard(t *testing.T) {
 	b, _ := tt.Find("结果0")
 	if s, _ := tt.Find("结果1"); b.W > 1.2*s.W || b.W == 0 {
 		t.Fatalf("a search's first card is big: %v beside %v", b, s)
+	}
+}
+
+// At 2x a silent 2-second clip's frames last a second in all, while the
+// clock it gives the view, having no sound, counts its own 2 seconds; a
+// rewind, as a loop does, sets that clock back to its start.
+func TestPacedSilent(t *testing.T) {
+	f, err := media.Open("../../testdata/silent.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.Audio(); err == nil {
+		t.Fatal("the silent clip has sound")
+	}
+	vd, err := f.Video()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var speed atomic.Uint64
+	speed.Store(math.Float64bits(2))
+	dec := &paced{VideoDecoder: vd, speed: &speed}
+	defer dec.Close()
+	s := &slot{dec: dec}
+	var shown time.Duration
+	for {
+		fr, err := dec.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown += fr.Duration
+	}
+	near := func(d, want time.Duration) bool { return d > want-50*time.Millisecond && d < want+50*time.Millisecond }
+	if !near(shown, time.Second) || !near(s.at(), 2*time.Second) {
+		t.Fatalf("shown for %v, clock at %v", shown, s.at())
+	}
+	if err := dec.Rewind(); err != nil || s.at() != 0 {
+		t.Fatalf("after a rewind the clock is at %v (%v)", s.at(), err)
 	}
 }

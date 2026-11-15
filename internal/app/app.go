@@ -28,6 +28,7 @@ type slot struct {
 	file    *media.File
 	vp      *ui.VideoPlayer
 	ap      *audio.Player // nil when the clip has no audio
+	dec     *paced        // vp's decoder, whose clock stands in for a missing audio's
 	loading bool
 	gone    bool // dropped while loading: close what arrives
 	err     error
@@ -40,18 +41,38 @@ type slot struct {
 }
 
 // paced is a video's decoder whose frames last as long as the speed says:
-// their own time divided by it.
+// their own time divided by it. It counts the video's time it has decoded,
+// a clock where the video has no sound to give one.
 type paced struct {
 	*media.VideoDecoder
 	speed *atomic.Uint64 // the float64 bits, read on the player's goroutine
+	done  atomic.Int64   // the video's time decoded, at its own speed
 }
 
-func (p paced) Next() (ui.VideoFrame, error) {
+func (p *paced) Next() (ui.VideoFrame, error) {
 	f, err := p.VideoDecoder.Next()
+	p.done.Add(int64(f.Duration))
 	if s := math.Float64frombits(p.speed.Load()); s > 0 {
 		f.Duration = time.Duration(float64(f.Duration) / s)
 	}
 	return f, err
+}
+
+func (p *paced) Rewind() error {
+	p.done.Store(0)
+	return p.VideoDecoder.Rewind()
+}
+
+// at is how far s has played: its sound's position, else what its video
+// has decoded, a few frames ahead of the one shown.
+func (s *slot) at() time.Duration {
+	switch {
+	case s.ap != nil:
+		return s.ap.Position()
+	case s.dec != nil:
+		return time.Duration(s.dec.done.Load())
+	}
+	return 0
 }
 
 // speeds are the choices of the speed button, which goes round them.
@@ -399,14 +420,14 @@ func (a *app) prepare(s *slot) {
 	}
 	s.loading = true
 	go func() {
-		f, vp, ap, err := a.build(s.v)
+		f, vp, ap, dec, err := a.build(s.v)
 		a.post(func() {
 			s.loading = false
 			if s.gone {
 				closeAll(f, vp, ap)
 				return
 			}
-			s.file, s.vp, s.ap, s.err = f, vp, ap, err
+			s.file, s.vp, s.ap, s.dec, s.err = f, vp, ap, dec, err
 			a.fill() // plays it if current, and starts the ones around it
 		})
 	}()
@@ -473,7 +494,7 @@ func copyTo(src, dir, name string) (string, error) {
 	return dst, nil
 }
 
-func (a *app) build(v dy.Video) (f *media.File, vp *ui.VideoPlayer, ap *audio.Player, err error) {
+func (a *app) build(v dy.Video) (f *media.File, vp *ui.VideoPlayer, ap *audio.Player, dec *paced, err error) {
 	path := filepath.Join(a.dir, v.ID+".mp4")
 	if _, err = os.Stat(path); err != nil {
 		if err = a.c.Download(v.PlayURL, path); err != nil {
@@ -485,11 +506,12 @@ func (a *app) build(v dy.Video) (f *media.File, vp *ui.VideoPlayer, ap *audio.Pl
 	}
 	vd, err := f.Video()
 	if err == nil {
-		vp, err = ui.NewVideoPlayer(paced{vd, &a.speedBits})
+		dec = &paced{VideoDecoder: vd, speed: &a.speedBits}
+		vp, err = ui.NewVideoPlayer(dec)
 	}
 	if err != nil {
 		f.Close()
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	vp.SetLoop(true).Pause()
 	if ad, aerr := f.Audio(); aerr == nil {
@@ -522,7 +544,7 @@ func (a *app) release(s *slot) {
 	}
 	closeAll(s.file, s.vp, s.ap)
 	os.Remove(filepath.Join(a.dir, s.v.ID+".mp4"))
-	s.file, s.vp, s.ap = nil, nil, nil
+	s.file, s.vp, s.ap, s.dec = nil, nil, nil, nil
 	s.err = nil
 }
 
@@ -601,9 +623,9 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now 精选 with its tabs
-// and its first video playing, the 游戏 tab, the notifications, a video
-// playing with its bullet comments, and at 1.5x with 连播 on.
+// clicks would, saves a shot of each step and quits: now 推荐's shortest
+// video at 1.5x with 连播 on, logging its sound's clock against its
+// picture's until the next video plays.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -629,26 +651,57 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
+	a.post(func() { a.root(a.feed) })
 	shot("1.png")
-	a.post(func() { a.showTab(300205) })
-	shot("2.png")
-	a.post(a.openNotes)
-	shot("3.png")
-	a.post(func() { a.notes = nil; a.play(a.cur(), 1) })
-	shot("4.png")
-	a.post(func() { a.setSpeed(1.5); a.autoNext = true })
-	shot("5.png")
-	info := make(chan string)
+	type probe struct {
+		idx, n int
+		id     string
+		of     time.Duration
+		snd    time.Duration
+		pic    time.Duration
+	}
+	look := func() probe {
+		ch := make(chan probe)
+		a.post(func() {
+			p := a.cur()
+			s := p.list[p.idx]
+			pr := probe{idx: p.idx, n: len(p.list), id: s.v.ID, of: s.v.Duration}
+			if s.ap != nil {
+				pr.snd = s.ap.Position()
+			}
+			if s.dec != nil {
+				pr.pic = time.Duration(s.dec.done.Load())
+			}
+			ch <- pr
+		})
+		return <-ch
+	}
 	a.post(func() {
 		p := a.cur()
-		s := p.list[p.idx]
-		at := time.Duration(0)
-		if s.ap != nil {
-			at = s.ap.Position()
+		best := p.idx
+		for i, s := range p.list {
+			if s.v.Duration > 8*time.Second && s.v.Duration < p.list[best].v.Duration {
+				best = i
+			}
 		}
-		info <- fmt.Sprintf("tab=%d danmaku=%d loadedTo=%v at=%v speed=%v unread=%d", a.tab, len(s.danmaku), s.dmTo, at.Round(time.Second), a.speed, a.unread)
+		p.idx = best
+		a.setSpeed(1.5)
+		a.autoNext = true
+		a.fill()
 	})
-	log.Println(<-info)
+	start := look()
+	log.Printf("playing #%d %s of %v at 1.5x", start.idx, start.id, start.of)
+	deadline := time.Now().Add(start.of*2/3 + 25*time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		pr := look()
+		log.Printf("idx=%d sound=%v picture=%v picture-sound=%v", pr.idx, pr.snd.Round(10*time.Millisecond), pr.pic.Round(10*time.Millisecond), (pr.pic - pr.snd).Round(10*time.Millisecond))
+		if pr.idx != start.idx {
+			log.Printf("NEXT: moved on to #%d after the video ended", pr.idx)
+			break
+		}
+	}
+	shot("2.png")
 	os.Exit(0)
 }
 
