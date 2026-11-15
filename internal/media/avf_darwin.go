@@ -163,6 +163,9 @@ func (f *File) reader(track objc.ID, settings objc.ID, start time.Duration) (rd,
 	return rd, out, nil
 }
 
+// Close releases the asset, once its decoders are closed.
+func (f *File) Close() { f.asset.Send(sel("release")) }
+
 // VideoDecoder implements ui.VideoDecoder, with frames as RGBA.
 type VideoDecoder struct {
 	f       *File
