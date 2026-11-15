@@ -263,3 +263,55 @@ func last1(ch Chat) string {
 	}
 	return ch.Msgs[len(ch.Msgs)-1].Text
 }
+
+// The hot search list, the user's likes, a video's related ones and a series'
+// episodes all read, the series in episode order. Live: skipped unless LIVE is set.
+func TestLiveHotLikedRelatedMix(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hot, err := c.HotSearch()
+	if err != nil || len(hot) < 10 || hot[1].Value <= 0 {
+		t.Fatalf("hot: %d words, %v", len(hot), err)
+	}
+	me, err := c.Self()
+	if err != nil {
+		t.Fatal(err)
+	}
+	liked, err := c.Liked(me.ID)()
+	if err != nil || len(liked) == 0 {
+		t.Fatalf("liked: %d, %v", len(liked), err)
+	}
+	vs, err := c.Picks(0)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := c.Related(vs[0].ID)()
+	if err != nil || len(rel) < 3 {
+		t.Fatalf("related: %d, %v", len(rel), err)
+	}
+	var mix Mix
+	for _, tab := range []int{0, 300214, 300215, 300213} {
+		vs, _ := c.Picks(tab)()
+		for _, v := range vs {
+			if v.Mix.ID != "" && v.Mix.Updated >= 2 {
+				mix = v.Mix
+			}
+		}
+		if mix.ID != "" {
+			break
+		}
+	}
+	if mix.ID == "" {
+		t.Skip("no series in 精选 now")
+	}
+	eps, err := c.MixVideos(mix.ID)()
+	if err != nil || len(eps) < 2 || eps[0].Mix.Episode != 1 || eps[1].Mix.Episode != 2 || eps[0].Mix.Name != mix.Name {
+		t.Fatalf("series %q: %d videos, first %+v, %v", mix.Name, len(eps), eps[0].Mix, err)
+	}
+	t.Logf("hot %q; %d liked; %d related; series %q has %d", hot[1].Word, len(liked), len(rel), mix.Name, len(eps))
+}

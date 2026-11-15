@@ -46,7 +46,14 @@ type Video struct {
 	Likes, Comments  int
 	Collects, Shares int
 	Cover, Avatar    string // image addresses: the frame the video shows first, the author's picture
+	Mix              Mix    // the series the video is an episode of, if any
 	Created          time.Time
+}
+
+// Mix is a series of videos an author groups (合集), and the episode a video is of it.
+type Mix struct {
+	ID, Name         string
+	Episode, Updated int // this video's episode, and how many there are so far
 }
 
 // New loads the cookies the login step saved; without them the client is anonymous.
@@ -211,6 +218,14 @@ type aweme struct {
 			Addr addr   `json:"play_addr"`
 		} `json:"bit_rate"`
 	}
+	Mix *struct {
+		ID     string `json:"mix_id"`
+		Name   string `json:"mix_name"`
+		Statis struct {
+			Episode int `json:"current_episode"`
+			Updated int `json:"updated_to_episode"`
+		} `json:"statis"`
+	} `json:"mix_info"`
 	Stats struct {
 		Likes    int `json:"digg_count"`
 		Comments int `json:"comment_count"`
@@ -235,7 +250,11 @@ func videos(list []aweme) []Video {
 		if play == "" {
 			continue
 		}
-		out = append(out, Video{ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, PlayURL: play,
+		var mix Mix
+		if a.Mix != nil {
+			mix = Mix{a.Mix.ID, a.Mix.Name, a.Mix.Statis.Episode, a.Mix.Statis.Updated}
+		}
+		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
 			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0)})
@@ -620,6 +639,95 @@ func (c *Client) Unread() (int, error) {
 		n += g.Count
 	}
 	return n, nil
+}
+
+// Hot is a term of Douyin's hot search list, and how hot it is; the list's
+// first, pinned, has none.
+type Hot struct {
+	Word  string
+	Value int
+}
+
+// HotSearch returns the hot search list, hottest first.
+func (c *Client) HotSearch() ([]Hot, error) {
+	var r struct {
+		status
+		Data struct {
+			Words []struct {
+				Word  string
+				Value float64 `json:"hot_value"`
+			} `json:"word_list"`
+		}
+	}
+	if err := c.getJSON("/aweme/v1/web/hot/search/list/", "detail_list=1&source=6&main_billboard_count=5", &r); err != nil {
+		return nil, err
+	}
+	out := make([]Hot, len(r.Data.Words))
+	for i, w := range r.Data.Words {
+		out[i] = Hot{w.Word, int(w.Value)}
+	}
+	return out, nil
+}
+
+// Liked pages through the videos the user with the given sec_uid has liked,
+// the latest first: the logged-in user's own, or anyone's who shows them.
+func (c *Client) Liked(secUID string) Pager[Video] {
+	var cursor int64
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			awemeList
+			Cursor  int64 `json:"max_cursor"`
+			HasMore int   `json:"has_more"`
+		}
+		q := fmt.Sprintf("sec_user_id=%s&max_cursor=%d&min_cursor=0&whale_cut_token=&cut_version=1&count=18&publish_video_strategy_type=2", url.QueryEscape(secUID), cursor)
+		if err := c.getJSON("/aweme/v1/web/aweme/favorite/", q, &r); err != nil {
+			return nil, false, err
+		}
+		more := r.HasMore != 0 && r.Cursor != cursor
+		cursor = r.Cursor
+		return videos(r.List), more, nil
+	})
+}
+
+// Related pages through the videos Douyin relates to the one with the given ID.
+func (c *Client) Related(videoID string) Pager[Video] {
+	var seen []string // asked not to come again
+	n := 0
+	return pager(func() ([]Video, bool, error) {
+		n++
+		var r struct {
+			awemeList
+			HasMore int `json:"has_more"`
+		}
+		q := fmt.Sprintf("aweme_id=%s&count=20&filterGids=%s&awemePcRecRawData=%%7B%%7D&sub_channel_id=0&refresh_index=%d",
+			videoID, url.QueryEscape(strings.Join(seen, ",")), n)
+		if err := c.getJSON("/aweme/v1/web/aweme/related/", q, &r); err != nil {
+			return nil, false, err
+		}
+		vs := videos(r.List)
+		for _, v := range vs {
+			seen = append(seen, v.ID)
+		}
+		return vs, r.HasMore != 0 && len(r.List) > 0 && n < 10, nil
+	})
+}
+
+// MixVideos pages through a series' videos, from its first episode.
+func (c *Client) MixVideos(mixID string) Pager[Video] {
+	var cursor int64
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			awemeList
+			Cursor  int64 `json:"cursor"`
+			HasMore int   `json:"has_more"`
+		}
+		if err := c.getJSON("/aweme/v1/web/mix/aweme/", fmt.Sprintf("mix_id=%s&cursor=%d&count=20", mixID, cursor), &r); err != nil {
+			return nil, false, err
+		}
+		more := r.HasMore != 0 && r.Cursor != cursor
+		cursor = r.Cursor
+		return videos(r.List), more, nil
+	})
 }
 
 // Image fetches a picture Douyin serves (a cover, an avatar), whose CDN wants
