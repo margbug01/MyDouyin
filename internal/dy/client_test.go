@@ -373,3 +373,62 @@ func TestLiveRoom(t *testing.T) {
 	}
 	t.Skip("no live room in ten pages")
 }
+
+// The pages of the sidebar read: 关注's feed of followed accounts, newest
+// first, over more than a page; the user's saves and watch history; the live
+// list's rooms, each on air with a stream; and the user's own counts.
+// Live: skipped unless LIVE is set.
+func TestLiveSidebarPages(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	me, err := c.Self()
+	if err != nil || me.Following == 0 {
+		t.Fatalf("self: %+v %v", me, err)
+	}
+	follows, _ := c.Following(me.ID)()
+	followed := map[string]bool{}
+	for _, u := range follows {
+		followed[u.ID] = true
+	}
+	next := c.FollowFeed()
+	var feed []Video
+	for range 2 {
+		vs, err := next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		feed = append(feed, vs...)
+	}
+	if len(feed) < 10 {
+		t.Fatalf("follow feed: %d videos", len(feed))
+	}
+	for _, v := range feed {
+		if !followed[v.AuthorID] && v.Live == nil {
+			t.Logf("follow feed has %q, not among the first %d followed", v.Author, len(follows))
+		}
+	}
+	saved, err := c.Collected()()
+	if err != nil || len(saved) == 0 {
+		t.Fatalf("collected: %d %v", len(saved), err)
+	}
+	seen, err := c.History()()
+	if err != nil || len(seen) == 0 {
+		t.Fatalf("history: %d %v", len(seen), err)
+	}
+	rooms, err := c.LiveRooms()()
+	if err != nil || len(rooms) < 5 {
+		t.Fatalf("rooms: %d %v", len(rooms), err)
+	}
+	for _, r := range rooms {
+		if r.Live == nil || r.Live.WebRID == "" || !strings.HasPrefix(r.Live.HLS, "https://") || r.Author == "" {
+			t.Fatalf("room %+v", r)
+		}
+	}
+	t.Logf("%s follows %d, %d followers, %d likes; feed %d (first %s), %d saved, %d watched, %d rooms (first %s, %s)",
+		me.Name, me.Following, me.Followers, me.Liked, len(feed), feed[0].Author, len(saved), len(seen), len(rooms), rooms[0].Author, rooms[0].Live.Viewers)
+}

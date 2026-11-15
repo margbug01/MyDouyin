@@ -59,8 +59,9 @@ type Live struct {
 	Viewers        string // as Douyin says it, 41 or 1.2万
 }
 
-// room decodes a live entry's room, which comes as JSON in a string.
-func room(raw string) (v Video, ok bool) {
+// room decodes a live room. A feed's entry may be a room that has ended,
+// whose status is not 2; the live list's say 0 and are all on air.
+func room(raw []byte, onAir bool) (v Video, ok bool) {
 	var r struct {
 		ID     string `json:"id_str"`
 		Status int
@@ -80,7 +81,7 @@ func room(raw string) (v Video, ok bool) {
 			HLSMap map[string]string `json:"hls_pull_url_map"`
 		} `json:"stream_url"`
 	}
-	if json.Unmarshal([]byte(raw), &r) != nil || r.Status != 2 { // 2: on air
+	if json.Unmarshal(raw, &r) != nil || !onAir && r.Status != 2 { // 2: on air
 		return v, false
 	}
 	hls := r.Stream.HLS
@@ -297,7 +298,7 @@ func videos(list []aweme) []Video {
 	var out []Video
 	for _, a := range list {
 		if a.Room != nil {
-			if v, ok := room(a.Room.Raw); ok {
+			if v, ok := room([]byte(a.Room.Raw), false); ok {
 				out = append(out, v)
 			}
 			continue
@@ -320,12 +321,13 @@ func videos(list []aweme) []Video {
 
 // getJSON calls Get and decodes the body into v, which must carry status_code.
 func (c *Client) getJSON(path, extra string, v interface{ code() int }) error {
-	return c.callJSON("GET", path, extra, v)
+	return c.callJSON("GET", path, extra, "", v)
 }
 
 // callJSON is getJSON with another method, an empty body.
-func (c *Client) callJSON(method, path, extra string, v interface{ code() int }) error {
-	b, err := c.call(method, path, extra, "")
+// callJSON calls an endpoint with a form body, if any, and decodes the reply into v.
+func (c *Client) callJSON(method, path, extra, body string, v interface{ code() int }) error {
+	b, err := c.call(method, path, extra, body)
 	if err != nil {
 		return err
 	}
@@ -446,6 +448,8 @@ func (c *Client) Posts(secUID string) Pager[Video] {
 type User struct {
 	ID, Name, Signature string // ID is the sec_uid
 	Avatar              string // the picture's address
+
+	Following, Followers, Liked int // the counts of a profile, which only Self fills in
 }
 
 // Self returns the logged-in user.
@@ -457,12 +461,17 @@ func (c *Client) Self() (User, error) {
 			Nickname  string
 			Signature string
 			Avatar    addr `json:"avatar_thumb"`
+			Following int  `json:"following_count"`
+			Followers int  `json:"follower_count"`
+			Liked     int  `json:"total_favorited"`
 		}
 	}
 	if err := c.getJSON("/aweme/v1/web/user/profile/self/", "", &r); err != nil {
 		return User{}, err
 	}
-	return User{r.User.SecUID, r.User.Nickname, r.User.Signature, r.User.Avatar.first()}, nil
+	u := r.User
+	return User{ID: u.SecUID, Name: u.Nickname, Signature: u.Signature, Avatar: u.Avatar.first(),
+		Following: u.Following, Followers: u.Followers, Liked: u.Liked}, nil
 }
 
 // Following pages through the accounts secUID follows.
@@ -485,7 +494,7 @@ func (c *Client) Following(secUID string) Pager[User] {
 		}
 		out := make([]User, len(r.List))
 		for i, u := range r.List {
-			out[i] = User{u.SecUID, u.Nickname, u.Signature, u.Avatar.first()}
+			out[i] = User{ID: u.SecUID, Name: u.Nickname, Signature: u.Signature, Avatar: u.Avatar.first()}
 		}
 		offset += len(out)
 		return out, r.HasMore && len(out) > 0, nil
@@ -557,7 +566,7 @@ func (c *Client) Picks(tab int) Pager[Video] {
 			awemeList
 			HasMore int `json:"has_more"`
 		}
-		if err := c.callJSON("POST", "/aweme/v2/web/module/feed/", q, &r); err != nil {
+		if err := c.callJSON("POST", "/aweme/v2/web/module/feed/", q, "", &r); err != nil {
 			return nil, false, err
 		}
 		return videos(r.List), r.HasMore != 0, nil
@@ -783,6 +792,113 @@ func (c *Client) MixVideos(mixID string) Pager[Video] {
 		more := r.HasMore != 0 && r.Cursor != cursor
 		cursor = r.Cursor
 		return videos(r.List), more, nil
+	})
+}
+
+// FollowFeed pages through the videos of the accounts the user follows, the
+// latest first, as 关注 shows them.
+func (c *Client) FollowFeed() Pager[Video] {
+	var cursor int64
+	empty := 0
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			status
+			Data []struct {
+				Aweme *aweme
+			}
+			Cursor  int64
+			HasMore int `json:"has_more"`
+		}
+		q := fmt.Sprintf("cursor=%d&level=1&count=20&pull_type=0&aweme_ids=&room_ids=&webcast_sdk_version=170400&webcast_version_code=170400", cursor)
+		if err := c.getJSON("/aweme/v1/web/follow/feed/", q, &r); err != nil {
+			return nil, false, err
+		}
+		var list []aweme
+		for _, d := range r.Data {
+			if d.Aweme != nil {
+				list = append(list, *d.Aweme)
+			}
+		}
+		// A page can come empty with more said to come; a few of those in a row is the end.
+		if len(list) == 0 {
+			empty++
+		} else {
+			empty = 0
+		}
+		more := r.HasMore != 0 && r.Cursor != cursor && empty < 3
+		cursor = r.Cursor
+		return videos(list), more, nil
+	})
+}
+
+// Collected pages through the videos the user saved (收藏), the latest first.
+func (c *Client) Collected() Pager[Video] {
+	var cursor int64
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			awemeList
+			Cursor  int64
+			HasMore int `json:"has_more"`
+		}
+		if err := c.callJSON("POST", "/aweme/v1/web/aweme/listcollection/", "publish_video_strategy_type=2", fmt.Sprintf("count=10&cursor=%d", cursor), &r); err != nil {
+			return nil, false, err
+		}
+		more := r.HasMore != 0 && r.Cursor != cursor
+		cursor = r.Cursor
+		return videos(r.List), more, nil
+	})
+}
+
+// History pages through the videos the user watched (观看历史), the latest first.
+func (c *Client) History() Pager[Video] {
+	var cursor int64
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			awemeList
+			Cursor  int64 `json:"max_cursor"`
+			HasMore int   `json:"has_more"`
+		}
+		if err := c.getJSON("/aweme/v1/web/history/read/", fmt.Sprintf("max_cursor=%d&count=20", cursor), &r); err != nil {
+			return nil, false, err
+		}
+		more := r.HasMore != 0 && r.Cursor != cursor
+		cursor = r.Cursor
+		return videos(r.List), more, nil
+	})
+}
+
+// LiveRooms pages through the rooms on air that the live list recommends.
+// Each page is a fresh pick, which may repeat a room shown before; those
+// are left out.
+func (c *Client) LiveRooms() Pager[Video] {
+	seen := map[string]bool{}
+	n := 0
+	return pager(func() ([]Video, bool, error) {
+		n++
+		var r struct {
+			status
+			Data []struct {
+				Type   int
+				Pseudo bool            `json:"is_pseudo_living"`
+				Room   json.RawMessage `json:"data"`
+			}
+		}
+		q := "app_name=douyin_web&live_id=1&request_tag_from=web&need_map=1&liveid=1&is_draw=1&inner_from_drawer=0&custom_count=30" +
+			"&action=load_more&action_type=loadmore&enter_source=web_homepage_hot_web_live_card&source_key=web_homepage_hot_web_live_card&maxtime=0"
+		if err := c.getJSON("/webcast/feed/", q, &r); err != nil {
+			return nil, false, err
+		}
+		var out []Video
+		for _, d := range r.Data {
+			if d.Type != 1 || d.Pseudo {
+				continue
+			}
+			if v, ok := room(d.Room, true); ok && !seen[v.ID] {
+				seen[v.ID] = true
+				out = append(out, v)
+			}
+		}
+		return out, len(out) > 0 && n < 8, nil
 	})
 }
 
