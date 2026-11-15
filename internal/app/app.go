@@ -31,6 +31,8 @@ type slot struct {
 	err     error
 	saved   string // what saving to Downloads came to: "" before the click
 
+	liking, saving bool // a like or a save of it on its way to Douyin
+
 	danmaku   []dy.Danmaku  // the bullet comments loaded, in time order
 	dmTo      time.Duration // how far into the video they are loaded
 	dmLoading bool
@@ -157,8 +159,13 @@ type app struct {
 	speedBits atomic.Uint64 // speed for the decoders
 	autoNext  bool          // 连播: the next video once one ends, rather than again
 	dmOff     bool          // bullet comments hidden
-	listen    bool          // 听抖音: the cover in the picture's place, the sound on
-	moreOpen  bool          // the rail's 更多 menu
+
+	posted chan func() // what post runs, in a test without a window
+
+	// setLiked and setSaved send a like or a save to Douyin; a test puts its own.
+	setLiked, setSaved func(id string, on bool) error
+	listen             bool // 听抖音: the cover in the picture's place, the sound on
+	moreOpen           bool // the rail's 更多 menu
 }
 
 // notes is the notifications, loaded a page at a time.
@@ -252,6 +259,40 @@ func (a *app) showTab(id int) {
 	}
 	a.tab, a.picks = id, p
 	a.root(p)
+}
+
+// like likes s's video, or takes the like back: at once on screen, then on
+// Douyin, the screen put back if Douyin did not take it.
+func (a *app) like(s *slot) {
+	a.write(s, &s.liking, &s.v.Liked, &s.v.Likes, a.setLiked, "点赞")
+}
+
+// collect saves s's video (收藏), or takes it out, as like does; save is
+// keeping its file in Downloads.
+func (a *app) collect(s *slot) {
+	a.write(s, &s.saving, &s.v.Saved, &s.v.Collects, a.setSaved, "收藏")
+}
+
+func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) error, what string) {
+	if *busy || send == nil || s.v.Live != nil {
+		return
+	}
+	want, step := !*on, 1
+	if !want {
+		step = -1
+	}
+	*on, *n, *busy = want, *n+step, true
+	id := s.v.ID
+	go func() {
+		err := send(id, want)
+		a.post(func() {
+			*busy = false
+			if err != nil {
+				*on, *n = !want, *n-step
+				a.toast = onOff(want, "", "取消") + what + "没成功：" + err.Error()
+			}
+		})
+	}()
 }
 
 // setSpeed plays every video at s, and the ones to come.
@@ -397,7 +438,10 @@ func (a *app) cur() *page { return a.pages[len(a.pages)-1] }
 func (p *page) plays() bool { return !p.grid || p.playing }
 
 func (a *app) post(fn func()) {
-	if a.win == nil { // a test's view without a window
+	if a.win == nil { // a test's view without a window: its own queue, if it keeps one
+		if a.posted != nil {
+			a.posted <- fn
+		}
 		return
 	}
 	a.win.Update(func() { fn(); a.win.Invalidate() })
@@ -777,8 +821,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now the sidebar's
-// pages, 关注, 我的, 直播 and 短剧.
+// clicks would, saves a shot of each step and quits: now liking and saving
+// the video DY_WRITE names, each checked on Douyin and taken back.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -804,10 +848,43 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	time.Sleep(4 * time.Second) // the account, which 我的 needs
-	a.post(func() { a.showMine("收藏") })
+	id := os.Getenv("DY_WRITE")
+	v, err := a.c.Video(id)
+	if err != nil || v.Liked || v.Saved {
+		log.Printf("DY_WRITE %q: %v liked %v saved %v", id, err, v.Liked, v.Saved)
+		os.Exit(1)
+	}
+	a.post(func() { a.open(&page{title: "测试", list: []*slot{{v: v}}, done: true}) })
+	time.Sleep(3 * time.Second)
+	step := func(name string, do func(*slot), busy func(*slot) bool, want func(dy.Video) bool) {
+		start := time.Now()
+		a.post(func() { do(a.cur().list[0]) })
+		for {
+			time.Sleep(200 * time.Millisecond)
+			ch := make(chan bool)
+			a.post(func() { ch <- busy(a.cur().list[0]) })
+			if !<-ch {
+				break
+			}
+		}
+		took := time.Since(start)
+		ok := false
+		for range 10 {
+			if v, err := a.c.Video(id); err == nil && want(v) {
+				ok = true
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		log.Printf("WRITE %s: took %v, Douyin agrees %v", name, took.Round(100*time.Millisecond), ok)
+	}
+	liking := func(s *slot) bool { return s.liking }
+	saving := func(s *slot) bool { return s.saving }
+	step("like", a.like, liking, func(v dy.Video) bool { return v.Liked })
+	step("save", a.collect, saving, func(v dy.Video) bool { return v.Saved })
 	shot("1.png")
-	a.post(func() { a.root(a.live) })
+	step("unlike", a.like, liking, func(v dy.Video) bool { return !v.Liked })
+	step("unsave", a.collect, saving, func(v dy.Video) bool { return !v.Saved })
 	shot("2.png")
 	os.Exit(0)
 }
@@ -832,6 +909,7 @@ func Run() error {
 	a.drama = &page{title: "短剧", next: c.Picks(300214), grid: true} // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.picks}
 	a.img = newImages(c.Image, a.post)
+	a.setLiked, a.setSaved = c.SetLiked, c.SetSaved
 	a.setSpeed(1)
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -776,4 +777,63 @@ func TestLiveRoomUI(t *testing.T) {
 	if len(copied) != 1 || copied[0] != "https://live.douyin.com/777" {
 		t.Fatalf("copied %q", copied)
 	}
+}
+
+// The heart and the star like and save at once on screen, without pausing,
+// and stay dimmed till Douyin answers; one Douyin refuses goes back as it
+// was, saying why.
+func TestLikeSave(t *testing.T) {
+	p := stub("推荐", 1)
+	p.list[0].v = dy.Video{ID: "42", Author: "作者", Likes: 10, Collects: 5}
+	ready(t, p.list[0])
+	s := p.list[0]
+	a := withRoots(&app{pages: []*page{p}, posted: make(chan func(), 8)})
+	answer := make(chan error)
+	var sent []string
+	a.setLiked = func(id string, on bool) error { sent = append(sent, fmt.Sprint("like ", id, " ", on)); return <-answer }
+	a.setSaved = func(id string, on bool) error { sent = append(sent, fmt.Sprint("save ", id, " ", on)); return <-answer }
+	tt := newTester(a)
+	if err := tt.Click("点赞"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !s.v.Liked || s.v.Likes != 11 || !s.liking || a.paused || !tt.HasText("11") {
+		t.Fatalf("after a click: %+v liking %v paused %v", s.v, s.liking, a.paused)
+	}
+	tt.Click("取消点赞") // still on its way: nothing more
+	answer <- nil
+	waitFor(t, a, tt, func() bool { return !s.liking })
+	if !s.v.Liked || s.v.Likes != 11 {
+		t.Fatalf("after Douyin took it: %+v", s.v)
+	}
+	if err := tt.Click("收藏"); err != nil {
+		t.Fatal(err)
+	}
+	answer <- errors.New("不行")
+	waitFor(t, a, tt, func() bool { return !s.saving })
+	if s.v.Saved || s.v.Collects != 5 || !tt.HasText("收藏没成功：不行") {
+		t.Fatalf("a refused save stayed: %+v, %q", s.v, tt.Texts())
+	}
+	if len(sent) != 2 || sent[0] != "like 42 true" || sent[1] != "save 42 true" {
+		t.Fatalf("sent %q", sent)
+	}
+}
+
+// waitFor runs what a posts and frames, as the window would, until ok or a
+// second has passed.
+func waitFor(t *testing.T, a *app, tt *ui.Tester, ok func() bool) {
+	t.Helper()
+	for range 100 {
+		select {
+		case fn := <-a.posted:
+			fn()
+		default:
+		}
+		tt.Frame()
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out")
 }

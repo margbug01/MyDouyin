@@ -760,10 +760,10 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 }
 
 // rail is the column down the right of the video, as Douyin's: the author,
-// the likes, the comments, the saves, sharing, listening, and more. Liking
-// and saving need Douyin's write endpoints, which the client cannot sign
-// yet, so their counts show as text, not buttons. On a short stage the
-// column shrinks to fit.
+// the likes, the comments, the saves, sharing, listening, and more. A like
+// or a save shows at once and goes to Douyin through ego lite, some seconds
+// on; the button is dimmed till then. On a short stage the column shrinks
+// to fit.
 func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 	icon, gap := float32(34), float32(14)
 	if height > 0 && height < 680 {
@@ -781,14 +781,6 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 			ui.Text(c, text).FontSize(14).FontWeight(600).TextColor(ui.RGBA(255, 255, 255, 0.9)).TextShadow(0, 1, 3, shadow).SingleLine()
 		}
 		// shown is a count with its icon, which does nothing.
-		shown := func(ic *ui.SVG, label, n string) {
-			ui.Column(c).Gap(2).AlignItems(ui.Center).Label(label + " " + n).Children(func() {
-				ui.Box(c).Size(icon+16, icon+16).Center().Children(func() {
-					ui.Icon(c, ic).Size(icon, icon).TextColor(white)
-				})
-				under(n)
-			})
-		}
 		action := func(key string, ic *ui.SVG, label, text string, color ui.Color) ui.Element {
 			var b ui.Element
 			ui.Column(c).Gap(2).AlignItems(ui.Center).Children(func() {
@@ -801,7 +793,11 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 		}
 		shares := count(s.v.Shares)
 		if s.v.Live == nil { // a room has no counts, nor comments the client reads
-			shown(iconHeartFill, "点赞", count(s.v.Likes))
+			if b := action("like", iconHeartFill, onOff(s.v.Liked, "取消点赞", "点赞"), count(s.v.Likes), onOff(s.v.Liked, pal.accent, white)); s.liking {
+				b.Opacity(0.55)
+			} else if b.Clicked() {
+				a.like(s)
+			}
 			color := white
 			if a.sheet != nil {
 				color = pal.accent
@@ -813,7 +809,11 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 					a.comments(s.v)
 				}
 			}
-			shown(iconStar, "收藏", count(s.v.Collects))
+			if b := action("collects", iconStar, onOff(s.v.Saved, "取消收藏", "收藏"), count(s.v.Collects), onOff(s.v.Saved, starColor, white)); s.saving {
+				b.Opacity(0.55)
+			} else if b.Clicked() {
+				a.collect(s)
+			}
 		} else {
 			shares = "分享"
 		}
@@ -1047,6 +1047,17 @@ func byline(v dy.Video) string {
 		return "@" + v.Author
 	}
 	return "@" + v.Author + " · " + ago(v.Created, time.Now())
+}
+
+// starColor is a saved video's star, as Douyin's.
+var starColor = ui.Hex("#ffb802")
+
+// onOff is yes when on, else no.
+func onOff[T any](on bool, yes, no T) T {
+	if on {
+		return yes
+	}
+	return no
 }
 
 // liveBadge marks a live room's cover, at its top left.
