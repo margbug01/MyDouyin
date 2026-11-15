@@ -5,6 +5,7 @@ import (
 	"image"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -322,3 +323,159 @@ func (still) Next() (ui.VideoFrame, error) {
 	return ui.VideoFrame{Image: image.NewRGBA(image.Rect(0, 0, 4, 4))}, nil
 }
 func (still) Rewind() error { return nil }
+
+// The control bar's chips switch bullet comments and 连播 and go round the
+// speeds, none of them pausing; with 连播 on, a video going back to its start
+// asks for the next, and without it, it does not.
+func TestControlBar(t *testing.T) {
+	p := stub("推荐", 2)
+	ready(t, p.list[0])
+	a := withRoots(&app{pages: []*page{p}})
+	a.setSpeed(1)
+	tt := newTester(a)
+	for _, name := range []string{"弹幕", "连播", "倍速"} {
+		if err := tt.Click(name); err != nil {
+			t.Fatal(name, err)
+		}
+		tt.Frame()
+	}
+	if !a.dmOff || !a.autoNext || a.speed != 1.25 || a.paused || !tt.HasText("1.25x") {
+		t.Fatalf("after the chips: dmOff %v autoNext %v speed %v paused %v", a.dmOff, a.autoNext, a.speed, a.paused)
+	}
+	a.setSpeed(0.75)
+	tt.Frame()
+	if err := tt.Click("0.75x"); err != nil {
+		t.Fatal(err)
+	}
+	if a.speed != 1 {
+		t.Fatalf("after 0.75x came %v, not 1", a.speed)
+	}
+
+	s := p.list[0]
+	if a.watch(s, 10*time.Second) || a.watch(s, 30*time.Second) {
+		t.Fatal("next while playing on")
+	}
+	if !a.watch(s, 200*time.Millisecond) {
+		t.Fatal("no next after looping with 连播 on")
+	}
+	a.autoNext = false
+	a.watch(s, 30*time.Second)
+	if a.watch(s, 0) {
+		t.Fatal("next after looping with 连播 off")
+	}
+}
+
+// A bullet comment shows from its time for flight, and not before or after;
+// hidden, none shows.
+func TestDanmakuLayer(t *testing.T) {
+	s := &slot{danmaku: []dy.Danmaku{{At: time.Second, Text: "早了"}, {At: 3 * time.Second, Text: "正在飞"}, {At: 9 * time.Second, Text: "还没到"}}}
+	a := &app{}
+	at := 5 * time.Second
+	var shown bool
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Fill().Children(func() { shown = a.danmakuLayer(c, s, 800, at) })
+	}, 800, 400)
+	if !shown || !tt.HasText("早了") || !tt.HasText("正在飞") || tt.HasText("还没到") {
+		t.Fatalf("at 5s: %q", tt.Texts())
+	}
+	at = 10 * time.Second
+	tt.Frame()
+	if tt.HasText("早了") || !tt.HasText("正在飞") || !tt.HasText("还没到") {
+		t.Fatalf("at 10s: %q", tt.Texts())
+	}
+	a.dmOff = true
+	tt.Frame()
+	if shown || tt.HasText("正在飞") {
+		t.Fatal("hidden bullet comments showed")
+	}
+}
+
+// The notifications show beside the page, who and what, and close with
+// their button, the bell and Escape, without closing the page.
+func TestNotes(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, unread: 3})
+	tt := newTester(a)
+	if !tt.HasText("3") {
+		t.Fatal("no unread badge")
+	}
+	open := func() {
+		a.notes = &notes{done: true, items: []dy.Notice{{User: dy.User{Name: "某人"}, Action: "赞了你的评论", Text: "说得好"}}}
+		tt.Frame()
+		if !tt.HasText("某人") || !tt.HasText("赞了你的评论") || !tt.HasText("说得好") {
+			t.Fatalf("panel shows %q", tt.Texts())
+		}
+	}
+	for _, how := range []string{"关闭通知", "通知", "Escape"} {
+		open()
+		if how == "Escape" {
+			tt.Key(0, ui.KeyEscape)
+		} else if err := tt.Click(how); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if a.notes != nil || len(a.pages) != 1 {
+			t.Fatalf("after %s: open %v, %d pages", how, a.notes != nil, len(a.pages))
+		}
+	}
+}
+
+// 精选 shows its tabs; another one opens its own covers, and going back to a
+// tab finds its page as it was. Live: the pages load in the background.
+func TestLiveTabs(t *testing.T) {
+	c := live(t)
+	a := withRoots(&app{c: c, pages: []*page{stub("推荐", 1)}, tabPages: map[int]*page{}})
+	a.tabPages[0] = a.picks
+	a.root(a.picks)
+	tt := newTester(a)
+	if err := tt.Click("游戏"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	game := a.picks
+	if a.tab != 300205 || game == a.tabPages[0] || a.cur() != game {
+		t.Fatalf("after 游戏: tab %d", a.tab)
+	}
+	tt.Click("全部")
+	tt.Click("游戏")
+	if a.picks != game {
+		t.Fatal("游戏 opened a new page the second time")
+	}
+	a.root(a.feed)
+	tt.Frame()
+	if tt.HasText("游戏") {
+		t.Fatal("tabs over 推荐")
+	}
+}
+
+// 精选's first video is a big card, which plays it; a search's first is a
+// card like the others.
+func TestBigCard(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+	for i, s := range a.picks.list {
+		s.v.Desc = fmt.Sprint("视频", i)
+	}
+	a.root(a.picks)
+	tt := newTester(a)
+	big, _ := tt.Find("视频0")
+	small, _ := tt.Find("视频1")
+	if big.W < 1.8*small.W || big.H < 1.5*small.H {
+		t.Fatalf("first card %v beside %v", big, small)
+	}
+	if err := tt.Click("视频0"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.picks.playing || a.picks.idx != 0 {
+		t.Fatal("the big card did not play its video")
+	}
+	search := stub("搜索：猫", 3)
+	search.grid = true
+	for i, s := range search.list {
+		s.v.Desc = fmt.Sprint("结果", i)
+	}
+	a.open(search)
+	tt.Frame()
+	b, _ := tt.Find("结果0")
+	if s, _ := tt.Find("结果1"); b.W > 1.2*s.W || b.W == 0 {
+		t.Fatalf("a search's first card is big: %v beside %v", b, s)
+	}
+}

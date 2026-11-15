@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -30,7 +32,30 @@ type slot struct {
 	gone    bool // dropped while loading: close what arrives
 	err     error
 	saved   string // what saving to Downloads came to: "" before the click
+
+	danmaku   []dy.Danmaku  // the bullet comments loaded, in time order
+	dmTo      time.Duration // how far into the video they are loaded
+	dmLoading bool
+	lastAt    time.Duration // where the view last saw it, which a loop goes back from
 }
+
+// paced is a video's decoder whose frames last as long as the speed says:
+// their own time divided by it.
+type paced struct {
+	*media.VideoDecoder
+	speed *atomic.Uint64 // the float64 bits, read on the player's goroutine
+}
+
+func (p paced) Next() (ui.VideoFrame, error) {
+	f, err := p.VideoDecoder.Next()
+	if s := math.Float64frombits(p.speed.Load()); s > 0 {
+		f.Duration = time.Duration(float64(f.Duration) / s)
+	}
+	return f, err
+}
+
+// speeds are the choices of the speed button, which goes round them.
+var speeds = []float64{1, 1.25, 1.5, 2, 0.75}
 
 const (
 	ahead  = 2 // videos prepared after the current one
@@ -73,6 +98,99 @@ type app struct {
 
 	picks, feed *page   // the roots: 精选's covers, 推荐's videos one by one
 	img         *images // covers and avatars
+
+	tab      int           // 精选's tab shown, a dy.Tabs ID
+	tabPages map[int]*page // 精选's tabs opened, kept as they were scrolled
+
+	notes  *notes // the notifications open beside the page, or nil
+	unread int
+
+	speed     float64       // 1 as recorded
+	speedBits atomic.Uint64 // speed for the decoders
+	autoNext  bool          // 连播: the next video once one ends, rather than again
+	dmOff     bool          // bullet comments hidden
+}
+
+// notes is the notifications, loaded a page at a time.
+type notes struct {
+	items    []dy.Notice
+	next     dy.Pager[dy.Notice]
+	fetching bool
+	done     bool
+	msg      string
+}
+
+// openNotes shows the notifications, in the place of the comments.
+func (a *app) openNotes() {
+	a.sheet, a.unread = nil, 0
+	a.notes = &notes{next: a.c.Notices()}
+	a.moreNotes()
+}
+
+func (a *app) moreNotes() {
+	n := a.notes
+	if n == nil || n.fetching || n.done {
+		return
+	}
+	n.fetching = true
+	go func() {
+		ns, err := n.next()
+		a.post(func() {
+			n.fetching = false
+			if err != nil {
+				n.msg = err.Error()
+				return
+			}
+			n.msg, n.done = "", len(ns) == 0
+			n.items = append(n.items, ns...)
+		})
+	}()
+}
+
+// showTab shows 精选's tab id, as it was left if it was open before.
+func (a *app) showTab(id int) {
+	p := a.tabPages[id]
+	if p == nil {
+		p = &page{title: "精选", next: a.c.Picks(id), grid: true}
+		a.tabPages[id] = p
+	}
+	a.tab, a.picks = id, p
+	a.root(p)
+}
+
+// setSpeed plays every video at s, and the ones to come.
+func (a *app) setSpeed(s float64) {
+	a.speed = s
+	a.speedBits.Store(math.Float64bits(s))
+	for _, p := range a.pages {
+		for _, sl := range p.list {
+			if sl.ap != nil {
+				sl.ap.SetSpeed(s)
+			}
+		}
+	}
+}
+
+// loadDanmaku loads s's bullet comments for the next 32 seconds, as Douyin's
+// page does, once the video nears where they end.
+func (a *app) loadDanmaku(s *slot, at time.Duration) {
+	if a.dmOff || a.c == nil || s.dmLoading || s.dmTo >= s.v.Duration || at+5*time.Second < s.dmTo {
+		return
+	}
+	s.dmLoading = true
+	from := s.dmTo
+	go func() {
+		ds, err := a.c.Danmaku(s.v.ID, s.v.Duration, from, from+32*time.Second)
+		a.post(func() {
+			s.dmLoading = false
+			if err != nil {
+				log.Printf("danmaku %s: %v", s.v.ID, err)
+				s.dmTo = s.v.Duration // not again for this video
+				return
+			}
+			s.danmaku, s.dmTo = append(s.danmaku, ds...), from+32*time.Second
+		})
+	}()
 }
 
 // sheet is the comments of the current video, loaded a page at a time.
@@ -111,10 +229,10 @@ func (a *app) moreComments() {
 	}()
 }
 
-// escape closes the comments, or else the page on top.
+// escape closes the comments or the notifications, or else the page on top.
 func (a *app) escape() {
-	if a.sheet != nil {
-		a.sheet = nil
+	if a.sheet != nil || a.notes != nil {
+		a.sheet, a.notes = nil, nil
 		return
 	}
 	a.back()
@@ -163,13 +281,18 @@ func (a *app) more(p *page) {
 // failed), so they do not share its bandwidth.
 func (a *app) fill() {
 	p := a.cur()
-	if !p.plays() { // covers: no video loads, the grid asks for more as it scrolls
-		for _, s := range p.list {
-			a.release(s)
+	if !p.plays() { // covers, the grid asking for more as it scrolls; only 精选's first plays
+		for i, s := range p.list {
+			if i == 0 && p == a.picks {
+				a.prepare(s)
+			} else {
+				a.release(s)
+			}
 		}
 		if len(p.list) == 0 {
 			a.more(p)
 		}
+		a.sync()
 		return
 	}
 	ready := false
@@ -362,7 +485,7 @@ func (a *app) build(v dy.Video) (f *media.File, vp *ui.VideoPlayer, ap *audio.Pl
 	}
 	vd, err := f.Video()
 	if err == nil {
-		vp, err = ui.NewVideoPlayer(vd)
+		vp, err = ui.NewVideoPlayer(paced{vd, &a.speedBits})
 	}
 	if err != nil {
 		f.Close()
@@ -371,7 +494,10 @@ func (a *app) build(v dy.Video) (f *media.File, vp *ui.VideoPlayer, ap *audio.Pl
 	vp.SetLoop(true).Pause()
 	if ad, aerr := f.Audio(); aerr == nil {
 		ap = audio.NewPlayer(ad)
-		ap.SetLoop(true)
+		ap.SetLoop(true).SetPreservesPitch(true)
+		if s := math.Float64frombits(a.speedBits.Load()); s > 0 {
+			ap.SetSpeed(s)
+		}
 	}
 	return
 }
@@ -400,14 +526,22 @@ func (a *app) release(s *slot) {
 	s.err = nil
 }
 
-// sync plays the current video and holds the others.
+// sync plays the current video and holds the others; 精选's covers play
+// their first video, silent.
 func (a *app) sync() {
 	p := a.cur()
 	for i, s := range p.list {
 		if s.vp == nil {
 			continue
 		}
-		if i == p.idx && !a.paused {
+		if !p.plays() && i == 0 {
+			s.vp.Play()
+			if s.ap != nil {
+				s.ap.Pause()
+			}
+			continue
+		}
+		if i == p.idx && !a.paused && p.plays() {
 			s.vp.Play()
 			if s.ap != nil {
 				s.ap.Play()
@@ -439,6 +573,14 @@ func (a *app) step(d int) {
 	a.fill()
 }
 
+// watch follows where s plays, at, and reports whether it has looped back
+// to its start with 连播 on: the next video is to play instead.
+func (a *app) watch(s *slot, at time.Duration) bool {
+	looped := at+time.Second < s.lastAt
+	s.lastAt = at
+	return looped && a.autoNext
+}
+
 func (a *app) toggle() {
 	a.paused = !a.paused
 	a.sync()
@@ -459,9 +601,9 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now 精选's covers, its
-// first video playing, its comments, the covers again, a search for 猫, and
-// 推荐.
+// clicks would, saves a shot of each step and quits: now 精选 with its tabs
+// and its first video playing, the 游戏 tab, the notifications, a video
+// playing with its bullet comments, and at 1.5x with 连播 on.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -473,7 +615,7 @@ func (a *app) selfCheck(dir string) {
 		a.post(func() {
 			state := ""
 			for _, p := range a.pages {
-				state += fmt.Sprintf(" | %q idx=%d n=%d playing=%v", p.title, p.idx, len(p.list), p.plays())
+				state += fmt.Sprintf(" | %q idx=%d n=%d playing=%v scrollY=%.0f", p.title, p.idx, len(p.list), p.plays(), p.scroll.Y)
 				if a.sheet != nil && p == a.cur() {
 					state += fmt.Sprintf(" comments=%d done=%v msg=%q", len(a.sheet.items), a.sheet.done, a.sheet.msg)
 				}
@@ -488,21 +630,25 @@ func (a *app) selfCheck(dir string) {
 		log.Println("shot", name, err, <-done)
 	}
 	shot("1.png")
-	a.post(func() { a.play(a.cur(), 0) })
+	a.post(func() { a.showTab(300205) })
 	shot("2.png")
-	a.post(func() { p := a.cur(); a.comments(p.list[p.idx].v) })
+	a.post(a.openNotes)
 	shot("3.png")
-	a.post(func() { a.escape(); a.escape() })
+	a.post(func() { a.notes = nil; a.play(a.cur(), 1) })
 	shot("4.png")
-	a.post(func() { a.search("猫") })
+	a.post(func() { a.setSpeed(1.5); a.autoNext = true })
 	shot("5.png")
-	a.post(func() { a.root(a.feed) })
-	shot("6.png")
-	follows := make(chan string)
+	info := make(chan string)
 	a.post(func() {
-		follows <- fmt.Sprintf("me=%v follows=%d msg=%q pictures=%d", a.me.Name != "", len(a.follows), a.followMsg, len(a.img.m))
+		p := a.cur()
+		s := p.list[p.idx]
+		at := time.Duration(0)
+		if s.ap != nil {
+			at = s.ap.Position()
+		}
+		info <- fmt.Sprintf("tab=%d danmaku=%d loadedTo=%v at=%v speed=%v unread=%d", a.tab, len(s.danmaku), s.dmTo, at.Round(time.Second), a.speed, a.unread)
 	})
-	log.Println(<-follows)
+	log.Println(<-info)
 	os.Exit(0)
 }
 
@@ -517,9 +663,12 @@ func Run() error {
 		return err
 	}
 	a := &app{c: c, dir: filepath.Join(cache, "Douyin", "videos"),
-		picks: &page{title: "精选", next: c.Feed, grid: true}, feed: &page{title: "推荐", next: c.Feed}}
+		feed: &page{title: "推荐", next: c.Feed}, tabPages: map[int]*page{}}
+	a.picks = &page{title: "精选", next: c.Picks(0), grid: true}
+	a.tabPages[0] = a.picks
 	a.pages = []*page{a.picks}
 	a.img = newImages(c.Image, a.post)
+	a.setSpeed(1)
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
@@ -538,6 +687,11 @@ func Run() error {
 		})
 		a.fill()
 		a.loadAccount()
+		go func() {
+			if n, err := c.Unread(); err == nil {
+				a.post(func() { a.unread = n })
+			}
+		}()
 		if dir := os.Getenv("DY_SHOT"); dir != "" {
 			go a.selfCheck(dir)
 		}

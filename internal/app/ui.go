@@ -3,10 +3,13 @@ package app
 import (
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
+	"douyin/internal/dy"
 )
 
 // The window is laid out as Douyin's own, with less in it: a narrow sidebar
@@ -74,13 +77,19 @@ func (a *app) view(c *ui.Context) {
 			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
 			ui.Column(c.Key("main")).Grow(1).Children(func() {
 				a.topBar(c, p)
-				if !p.plays() {
-					a.grid(c, p)
-					return
+				if p == a.picks && !p.plays() {
+					a.tabsRow(c)
 				}
 				ui.Row(c).Grow(1).Padding(0, 16, 16, 0).Gap(16).AlignItems(ui.Stretch).Children(func() {
-					a.stage(c, p)
-					if a.sheet != nil {
+					if p.plays() {
+						a.stage(c, p)
+					} else {
+						a.grid(c, p)
+					}
+					switch {
+					case a.notes != nil:
+						a.notePanel(c, a.notes)
+					case a.sheet != nil && p.plays():
 						a.commentPanel(c, a.sheet)
 					}
 				})
@@ -185,6 +194,27 @@ func (a *app) topBar(c *ui.Context, p *page) {
 				ui.Text(c, p.title).FontSize(15).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).MaxWidth(220)
 			}
 		}
+		bell := ui.Box(c).Absolute().Top(6).Right(16)
+		bell.Children(func() {
+			color := pal.muted
+			if a.notes != nil {
+				color = white
+			}
+			if iconButton(c.Key("bell"), iconBell, 20, color, "通知").Clicked() {
+				if a.notes != nil {
+					a.notes = nil
+				} else {
+					a.openNotes()
+				}
+			}
+			if a.unread > 0 {
+				ui.Box(c).Absolute().Top(4).Right(2).MinWidth(16).Height(16).PaddingX(4).Radius(8).Background(pal.accent).Center().
+					HitTest(func(x, y float32, r ui.Rect) bool { return false }). // the bell under it takes the click
+					Children(func() {
+						ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(10).FontWeight(700).TextColor(white)
+					})
+			}
+		})
 		w, _ := c.Size()
 		fieldW := min(460, w-sidebarWidth-2*260)
 		left := (w - sidebarWidth - fieldW) / 2
@@ -217,14 +247,56 @@ func (a *app) topBar(c *ui.Context, p *page) {
 	})
 }
 
-// grid is p's covers, as many columns as fit, loading more near its end.
+// tabsRow is 精选's categories, the one shown marked, scrolling sideways
+// where the window is too narrow for them.
+func (a *app) tabsRow(c *ui.Context) {
+	ui.ScrollHorizontal(c.Key("tabs")).Height(40).PaddingX(24).Gap(22).AlignItems(ui.Center).Children(func() {
+		for _, t := range dy.Tabs {
+			b := ui.ButtonBase(c.Key(t.Name)).Column().Gap(5).AlignItems(ui.Center).FocusRing(false).Label(t.Name)
+			on := t.ID == a.tab
+			b.Children(func() {
+				color := pal.muted
+				switch {
+				case on:
+					color = white
+				case b.Hovered():
+					color = pal.text
+				}
+				weight := 500
+				if on {
+					weight = 700
+				}
+				ui.Text(c, t.Name).FontSize(15).FontWeight(weight).TextColor(color).SingleLine()
+				bar := ui.Box(c).Width(16).Height(3).Radius(2)
+				if on {
+					bar.Background(pal.accent)
+				}
+			})
+			if b.Clicked() && !on {
+				a.showTab(t.ID)
+			}
+		}
+	})
+}
+
+// grid is p's covers, as many columns as fit, loading more near its end. 精选's
+// first video is a big card that plays, silent, as Douyin's does.
 func (a *app) grid(c *ui.Context, p *page) {
 	w, h := c.Size()
-	inner := w - sidebarWidth - 2*24
+	inner := w - sidebarWidth - 24 - 16 // the grid's padding, the row's
+	if a.notes != nil {
+		inner -= 360 + 16
+	}
 	cols := max(2, int((inner+16)/(260+16)))
-	ui.Scroll(c.Key("grid:"+p.title)).TrackScroll(&p.scroll).Grow(1).Padding(4, 24, 32, 24).Children(func() {
+	colW := (inner - 16*float32(cols-1)) / float32(cols)
+	ui.Scroll(c.Key("grid:"+p.title)).TrackScroll(&p.scroll).Grow(1).Padding(4, 0, 32, 24).Children(func() {
 		ui.Grid(c).Columns(cols).GapX(16).GapY(26).Children(func() {
 			for i, s := range p.list {
+				if i == 0 && p == a.picks && cols >= 3 {
+					// As tall as two cards beside it: their covers and some 63 points of text each (measured).
+					a.bigCard(c.Key("0"), p, s, cols-1, 2*(colW*9/16+63)+26)
+					continue
+				}
 				a.card(c.Key(fmt.Sprint(i)), p, i, s) // by place: a feed can bring a video twice
 			}
 		})
@@ -278,6 +350,28 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 	})
 	if b.Clicked() {
 		a.play(p, i)
+	}
+}
+
+// bigCard is 精选's first video across span columns and two rows, playing
+// silent once loaded, its cover until then, with its author and text over it.
+func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32) {
+	v := s.v
+	b := ui.ButtonBase(c).ColumnSpan(span).RowSpan(2).Height(height).Radius(12).Clip().Background(ui.RGB(0, 0, 0)).FocusRing(false).Label(v.Desc)
+	b.Children(func() {
+		if s.vp != nil {
+			ui.Video(c, s.vp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+		} else if bmp := a.img.get(v.Cover); bmp != nil {
+			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+		}
+		ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(60, 18, 16, 18).Gap(6).
+			Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {
+			ui.Text(c, "@"+v.Author+" · "+ago(v.Created, time.Now())).FontSize(15).FontWeight(700).TextColor(white)
+			ui.Text(c, v.Desc).FontSize(13.5).TextColor(ui.RGBA(255, 255, 255, 0.85)).MaxLines(2)
+		})
+	})
+	if b.Clicked() {
+		a.play(p, 0)
 	}
 }
 
@@ -337,10 +431,51 @@ func (a *app) stage(c *ui.Context, p *page) {
 				})
 			}
 		})
+		at := time.Duration(0)
+		if s.ap != nil {
+			at = s.ap.Position()
+			if a.watch(s, at) { // after this frame, which is building the stage
+				a.post(func() { a.lastNav = time.Time{}; a.step(1) })
+			}
+			a.loadDanmaku(s, at)
+		}
+		if a.danmakuLayer(c, s, box.Bounds().W, at) && !a.paused {
+			c.AnimationFrame() // they fly
+		} else if s.ap != nil && !a.paused {
+			c.After(500 * time.Millisecond) // the time moves on
+		}
 		a.caption(c, p, s)
 		a.rail(c, p, s)
-		a.controls(c, s)
+		a.controls(c, s, at)
 	})
+}
+
+// flight is how long a bullet comment takes to cross the video.
+const flight = 8 * time.Second
+
+// danmakuLayer flies the bullet comments of s across the top of the video,
+// w wide, each from its time on, in lanes by its place in the list. It
+// reports whether any shows.
+func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) bool {
+	if a.dmOff || w <= 0 {
+		return false
+	}
+	const lanes, lane, size = 7, 30, 17
+	shown := 0
+	for i, d := range s.danmaku {
+		age := at - d.At
+		if age < 0 || age >= flight {
+			continue
+		}
+		tw, _ := c.MeasureText(0, ui.Span{Text: d.Text, Size: size, Weight: 600})
+		x := w - float32(age)/float32(flight)*(w+tw)
+		ui.Text(c, d.Text).Absolute().Top(float32(14+i%lanes*lane)).Left(x).FontSize(size).FontWeight(600).
+			TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine()
+		if shown++; shown == 40 { // a crowd past this reads as noise
+			break
+		}
+	}
+	return shown > 0
 }
 
 // caption is the author, the day and the text, over the foot of the video;
@@ -369,13 +504,10 @@ func (a *app) caption(c *ui.Context, p *page, s *slot) {
 // controls is the bar along the bottom of the video: play and pause, the
 // time, and how far it has played, a line over it. Not seekable: the video
 // decoder can only start over.
-func (a *app) controls(c *ui.Context, s *slot) {
-	var at, of time.Duration
+func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
+	var of time.Duration
 	if s.ap != nil {
-		at, of = s.ap.Position(), s.ap.Duration()
-		if !a.paused {
-			c.After(500 * time.Millisecond) // the time moves on
-		}
+		of = s.ap.Duration()
 	}
 	if of <= 0 {
 		of = s.v.Duration
@@ -395,7 +527,26 @@ func (a *app) controls(c *ui.Context, s *slot) {
 			if iconButton(c.Key("toggle"), icon, 16, white, label).Clicked() {
 				a.toggle()
 			}
-			ui.Text(c, clock(at)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8))
+			ui.Text(c, clock(at)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8)).Grow(1)
+			if chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
+				a.dmOff = !a.dmOff
+			}
+			if chip(c.Key("next"), "连播", a.autoNext).Clicked() {
+				a.autoNext = !a.autoNext
+			}
+			sl := "倍速"
+			if a.speed != 0 && a.speed != 1 {
+				sl = strconv.FormatFloat(a.speed, 'f', -1, 64) + "x"
+			}
+			if chip(c.Key("speed"), sl, a.speed != 0 && a.speed != 1).Clicked() {
+				i := 0
+				for j, sp := range speeds {
+					if sp == a.speed {
+						i = j + 1
+					}
+				}
+				a.setSpeed(speeds[i%len(speeds)])
+			}
 		})
 	})
 }
@@ -493,6 +644,72 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 	})
 }
 
+// chip is a small text button of the control bar, bright while on.
+func chip(c *ui.Context, label string, on bool) ui.Element {
+	b := ui.ButtonBase(c).Height(28).PaddingX(10).Radius(8).Center().FocusRing(false).Label(label)
+	if b.Hovered() {
+		b.Background(ui.RGBA(255, 255, 255, 0.12))
+	}
+	color := ui.RGBA(255, 255, 255, 0.55)
+	if on {
+		color = white
+	}
+	return b.Children(func() { ui.Text(c, label).FontSize(12.5).FontWeight(600).TextColor(color) })
+}
+
+// notePanel is the notifications beside the page, loaded a page at a time:
+// who, what they did, and what it was about.
+func (a *app) notePanel(c *ui.Context, n *notes) {
+	ui.Column(c.Key("notes")).Width(360).Radius(12).Background(pal.raised).Children(func() {
+		ui.Row(c).Padding(10, 8, 6, 16).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "通知").FontSize(14).FontWeight(600).TextColor(pal.text).Grow(1)
+			if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭通知").Clicked() {
+				a.notes = nil
+			}
+		})
+		ui.Scroll(c.Key("note-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
+			for i, it := range n.items {
+				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
+					a.avatar(c, it.User.Avatar, it.User.Name, 34)
+					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+							b := ui.ButtonBase(c.Key("who")).FocusRing(false).Label(it.User.Name).Shrink(1).MinWidth(0)
+							b.Children(func() {
+								t := ui.Text(c, it.User.Name).FontSize(13).FontWeight(600).TextColor(pal.text).SingleLine()
+								if b.Hovered() {
+									t.Underline()
+								}
+							})
+							if b.Clicked() {
+								a.openAuthor(a.cur(), it.User.Name, it.User.ID)
+							}
+							ui.Text(c, it.Action).FontSize(12.5).TextColor(pal.muted).SingleLine()
+						})
+						if it.Text != "" {
+							ui.Text(c, it.Text).FontSize(13).TextColor(pal.text).MaxLines(2)
+						}
+						ui.Text(c, ago(it.Time, time.Now())).FontSize(11).TextColor(pal.faint)
+					})
+				})
+			}
+			ui.Row(c).Padding(12, 16).Justify(ui.Center).Children(func() {
+				switch {
+				case n.fetching:
+					ui.Text(c, "载入中…").FontSize(12).TextColor(pal.faint)
+				case n.msg != "":
+					ui.Text(c, n.msg).FontSize(12).TextColor(pal.faint)
+				case !n.done:
+					if ui.Button(c.Key("more"), "更多通知").Clicked() {
+						a.moreNotes()
+					}
+				case len(n.items) == 0:
+					ui.Text(c, "没有通知").FontSize(12).TextColor(pal.faint)
+				}
+			})
+		})
+	})
+}
+
 // iconButton is a borderless round button showing an icon, which a soft
 // circle marks under the pointer and which gives a little as it is
 // pressed: MySpotify's.
@@ -572,5 +789,6 @@ var (
 	iconComment   = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
 	iconDownload  = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
 	iconCheck     = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
+	iconBell      = strokeIcon(`<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>`)
 	iconClose     = strokeIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
 )
