@@ -307,7 +307,23 @@ func (a *app) content(c *ui.Context, p *page) {
 	// The fade keeps the white text readable over a bright frame.
 	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(48, 16, 20, 16).Gap(6).
 		Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {
-		ui.Text(c, "@"+s.v.Author).Bold().FontSize(16).TextColor(white)
+		// The author opens their videos. Not a Button: one keeps the focus after
+		// the click, and Space would then open the author again instead of pausing.
+		name := "@" + s.v.Author
+		ui.Box(c).Cursor(ui.CursorPointer).HandleInput(func(ev ui.InputEvent) bool {
+			switch {
+			case ev.Kind == ui.InputPointerDown && ev.Button == 0:
+				return true
+			case ev.Kind == ui.InputPointerUp && !ev.Canceled && ev.Button == 0:
+				if p.title != name && s.v.AuthorID != "" { // already on their page: nothing to open
+					a.open(name, a.c.Posts(s.v.AuthorID))
+				}
+				return true
+			}
+			return false
+		}).Children(func() {
+			ui.Text(c, name).Bold().FontSize(16).TextColor(white)
+		})
 		ui.Text(c, s.v.Desc).FontSize(14).TextColor(white).MaxLines(3)
 		status := fmt.Sprintf("♥ %s   💬 %s   %d/%d", count(s.v.Likes), count(s.v.Comments), p.idx+1, len(p.list))
 		switch {
@@ -349,8 +365,8 @@ func count(n int) string {
 }
 
 // selfCheck (DY_SHOT=dir) saves shots of the feed, of the next video after a
-// swipe, of a search for 猫, of its second result, and of the feed again
-// after going back, then quits.
+// swipe, of a search for 猫, of its first result's author's videos and the
+// second of them, and of the feed again after going back twice, then quits.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -378,10 +394,15 @@ func (a *app) selfCheck(dir string) {
 	shot("2.png")
 	a.post(func() { a.search("猫") })
 	shot("3.png")
-	a.post(func() { a.step(1) })
+	a.post(func() { // as a click on the author does
+		v := a.cur().list[0].v
+		a.open("@"+v.Author, a.c.Posts(v.AuthorID))
+	})
 	shot("4.png")
-	a.post(a.back)
+	a.post(func() { a.step(1) })
 	shot("5.png")
+	a.post(func() { a.back(); a.back() })
+	shot("6.png")
 	os.Exit(0)
 }
 

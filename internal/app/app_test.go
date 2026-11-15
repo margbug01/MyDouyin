@@ -78,3 +78,41 @@ func TestLiveSearchEnter(t *testing.T) {
 		t.Fatalf("after Enter: %d pages", len(a.pages))
 	}
 }
+
+// Clicking the author opens their videos without pausing, Space still pauses
+// after it, and the author on their own page opens nothing. Live: their
+// videos load in the background.
+func TestLiveAuthor(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := dy.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := stub("", 1)
+	feed.list[0].v.AuthorID = "x"
+	a := &app{c: c, pages: []*page{feed}}
+	tt := ui.NewTester(a.view, 405, 720)
+	if err := tt.Click("@作者"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.pages) != 2 || a.cur().title != "@作者" || a.paused {
+		t.Fatalf("after click: %d pages, paused %v", len(a.pages), a.paused)
+	}
+	tt.Key(0, ui.KeySpace)
+	if len(a.pages) != 2 || !a.paused {
+		t.Fatalf("after Space: %d pages, paused %v", len(a.pages), a.paused)
+	}
+
+	own := stub("@作者", 1)
+	own.list[0].v.AuthorID = "x"
+	a.pages = append(a.pages, own)
+	tt.Frame()
+	tt.Click("@作者")
+	tt.Frame()
+	if len(a.pages) != 3 {
+		t.Fatalf("author on their own page opened another: %d pages", len(a.pages))
+	}
+}
