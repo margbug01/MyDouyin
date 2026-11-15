@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"douyin/internal/sign"
@@ -29,8 +30,8 @@ type Client struct {
 	http    *http.Client
 	signer  *sign.Signer
 	cookie  string
-	uifid   string // the UIFID cookie, sent again as a header
-	refresh int
+	uifid   string       // the UIFID cookie, sent again as a header
+	refresh atomic.Int32 // the feed's page, which two lists of it share
 }
 
 // Video is one entry of the recommend feed that has a playable video.
@@ -265,9 +266,9 @@ type awemeList struct {
 // logged in, 2 on the first call. Ads and photo posts, which have no play
 // address, are dropped.
 func (c *Client) Feed() ([]Video, error) {
-	c.refresh++
+	n := c.refresh.Add(1)
 	var r awemeList
-	if err := c.getJSON("/aweme/v1/web/tab/feed/", fmt.Sprintf("count=10&refresh_index=%d&video_type_select=1&aweme_pc_rec_raw_data=%%7B%%7D&globalwid=&pull_type=0", c.refresh), &r); err != nil {
+	if err := c.getJSON("/aweme/v1/web/tab/feed/", fmt.Sprintf("count=10&refresh_index=%d&video_type_select=1&aweme_pc_rec_raw_data=%%7B%%7D&globalwid=&pull_type=0", n), &r); err != nil {
 		return nil, err
 	}
 	return videos(r.List), nil

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"os"
 	"testing"
@@ -19,6 +20,15 @@ func stub(title string, n int) *page {
 	return p
 }
 
+// withRoots gives a the two roots, its first page standing for 推荐, and
+// 精选 a grid of n videos.
+func withRoots(a *app) *app {
+	a.feed = a.pages[0]
+	a.picks = stub("精选", 3)
+	a.picks.grid = true
+	return a
+}
+
 // newTester shows a's window at its usual size.
 func newTester(a *app) *ui.Tester { return ui.NewTester(a.view, 1100, 760) }
 
@@ -35,7 +45,7 @@ func ready(t *testing.T, s *slot) {
 // on the video pauses; Escape and the back button close the page on top,
 // and nothing closes the feed.
 func TestControls(t *testing.T) {
-	a := &app{pages: []*page{stub("", 3)}}
+	a := withRoots(&app{pages: []*page{stub("推荐", 3)}})
 	tt := newTester(a)
 	if err := tt.Click("搜索"); err != nil {
 		t.Fatal(err)
@@ -85,7 +95,7 @@ func TestControls(t *testing.T) {
 // Enter in the search box opens the search. Live: the search runs in the background.
 func TestLiveSearchEnter(t *testing.T) {
 	c := live(t)
-	a := &app{c: c, pages: []*page{stub("", 1)}}
+	a := withRoots(&app{c: c, pages: []*page{stub("推荐", 1)}})
 	tt := newTester(a)
 	if err := tt.Click("搜索"); err != nil {
 		t.Fatal(err)
@@ -103,9 +113,9 @@ func TestLiveSearchEnter(t *testing.T) {
 // opens nothing. Live: their videos load in the background.
 func TestLiveAuthor(t *testing.T) {
 	c := live(t)
-	feed := stub("", 1)
+	feed := stub("推荐", 1)
 	feed.list[0].v.AuthorID = "x"
-	a := &app{c: c, pages: []*page{feed}}
+	a := withRoots(&app{c: c, pages: []*page{feed}})
 	tt := newTester(a)
 	if err := tt.Click("@作者"); err != nil {
 		t.Fatal(err)
@@ -131,10 +141,10 @@ func TestLiveAuthor(t *testing.T) {
 }
 
 // An account followed, in the sidebar, opens its videos and shows chosen
-// while they do; 推荐 goes back to the feed. Live: the videos load in the background.
+// while they do; 精选 goes to its covers, with nothing over them. Live: the videos load in the background.
 func TestLiveSidebar(t *testing.T) {
 	c := live(t)
-	a := &app{c: c, pages: []*page{stub("", 1)}, follows: []dy.User{{ID: "x", Name: "某人"}}, me: dy.User{Name: "我"}}
+	a := withRoots(&app{c: c, pages: []*page{stub("推荐", 1)}, follows: []dy.User{{ID: "x", Name: "某人"}}, me: dy.User{Name: "我"}})
 	tt := newTester(a)
 	if err := tt.Click("某人"); err != nil {
 		t.Fatal(err)
@@ -147,12 +157,58 @@ func TestLiveSidebar(t *testing.T) {
 	tt.Frame()
 	a.pages = append(a.pages, stub("搜索：猫", 1))
 	tt.Frame()
-	if err := tt.Click("推荐"); err != nil {
+	if err := tt.Click("精选"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if len(a.pages) != 1 {
-		t.Fatalf("推荐 left %d pages", len(a.pages))
+	if len(a.pages) != 1 || a.cur() != a.picks {
+		t.Fatalf("精选 left %d pages", len(a.pages))
+	}
+}
+
+// 精选 shows covers, which play nothing and do not step; a cover plays its
+// video, which then steps and pauses; Escape and the back button bring the
+// covers back, its videos let go.
+func TestGrid(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+	a.root(a.picks)
+	for i, s := range a.picks.list {
+		s.v.ID, s.v.Desc = fmt.Sprint(i), fmt.Sprint("视频", i)
+		s.loading = false
+	}
+	tt := newTester(a)
+	if !tt.HasText("视频1") || tt.HasText("00:00 / 00:00") {
+		t.Fatalf("covers show %q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyDown)
+	if a.picks.idx != 0 {
+		t.Fatal("the covers stepped")
+	}
+	if err := tt.Click("视频1"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.picks.playing || a.picks.idx != 1 || a.paused {
+		t.Fatalf("after a click: playing %v idx %d paused %v", a.picks.playing, a.picks.idx, a.paused)
+	}
+	ready(t, a.picks.list[1])
+	tt.Frame()
+	if !tt.HasText("@作者") || !tt.HasText("00:00 / 00:00") {
+		t.Fatalf("playing shows %q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.picks.playing || len(a.pages) != 1 || a.picks.list[1].vp != nil {
+		t.Fatalf("after Escape: playing %v, %d pages, player kept %v", a.picks.playing, len(a.pages), a.picks.list[1].vp != nil)
+	}
+	tt.Click("视频2")
+	tt.Frame()
+	if err := tt.Click("返回"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.picks.playing {
+		t.Fatal("the back button left it playing")
 	}
 }
 
@@ -160,9 +216,9 @@ func TestLiveSidebar(t *testing.T) {
 // again, Escape and moving to another video, none of which pauses or closes
 // the page; a click in them leaves them open.
 func TestComments(t *testing.T) {
-	feed := stub("", 3)
+	feed := stub("推荐", 3)
 	ready(t, feed.list[0])
-	a := &app{pages: []*page{feed, stub("@作者", 3)}}
+	a := withRoots(&app{pages: []*page{feed, stub("@作者", 3)}})
 	a.pages[1].list[0] = feed.list[0]
 	tt := newTester(a)
 	open := func() {
@@ -228,9 +284,9 @@ func TestSave(t *testing.T) {
 // The download button is off until the video is ready, does not pause, and
 // shows its progress.
 func TestSaveButton(t *testing.T) {
-	p := stub("", 1)
+	p := stub("推荐", 1)
 	s := p.list[0]
-	a := &app{pages: []*page{p}, dir: t.TempDir()}
+	a := withRoots(&app{pages: []*page{p}, dir: t.TempDir()})
 	tt := newTester(a)
 	tt.Click("下载到「下载」文件夹")
 	if s.saved != "" {

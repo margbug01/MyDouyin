@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -38,12 +37,17 @@ const (
 	behind = 1
 )
 
-// page is a list of videos the window steps through: the recommend feed at
-// the bottom, and search results or a user's videos opened over it.
+// page is a list of videos: the picks (精选) or the recommend feed at the
+// bottom, and search results or a user's videos opened over it. A grid page
+// shows covers until one is clicked, then plays as the feed does, until
+// Escape brings the covers back.
 type page struct {
-	title    string // "" for the recommend feed
+	title    string
 	next     dy.Pager[dy.Video]
 	list     []*slot
+	grid     bool
+	playing  bool // a grid page playing its idx
+	scroll   ui.ScrollState
 	idx      int
 	fetching bool
 	done     bool // next returned its last page
@@ -61,12 +65,14 @@ type app struct {
 	lastNav time.Time
 	sheet   *sheet // the comments open beside the video, or nil
 
-	pal       palette
 	searchBox ui.Handle
 	toast     string    // a message to show once
 	me        dy.User   // the account logged in, once known
 	follows   []dy.User // the accounts it follows, in the sidebar
 	followMsg string    // why they did not load
+
+	picks, feed *page   // the roots: 精选's covers, 推荐's videos one by one
+	img         *images // covers and avatars
 }
 
 // sheet is the comments of the current video, loaded a page at a time.
@@ -116,6 +122,9 @@ func (a *app) escape() {
 
 func (a *app) cur() *page { return a.pages[len(a.pages)-1] }
 
+// plays reports whether p shows a video rather than its covers.
+func (p *page) plays() bool { return !p.grid || p.playing }
+
 func (a *app) post(fn func()) {
 	if a.win == nil { // a test's view without a window
 		return
@@ -154,6 +163,15 @@ func (a *app) more(p *page) {
 // failed), so they do not share its bandwidth.
 func (a *app) fill() {
 	p := a.cur()
+	if !p.plays() { // covers: no video loads, the grid asks for more as it scrolls
+		for _, s := range p.list {
+			a.release(s)
+		}
+		if len(p.list) == 0 {
+			a.more(p)
+		}
+		return
+	}
 	ready := false
 	if p.idx < len(p.list) {
 		s := p.list[p.idx]
@@ -186,11 +204,21 @@ func (a *app) open(p *page) {
 	a.fill()
 }
 
-// home closes every page over the recommend feed.
-func (a *app) home() {
-	for len(a.pages) > 1 {
-		a.back()
+// root shows r, the picks or the feed, with nothing over it.
+func (a *app) root(r *page) {
+	for _, p := range a.pages {
+		for _, s := range p.list {
+			a.release(s)
+		}
 	}
+	a.pages, a.sheet, a.paused = []*page{r}, nil, false
+	a.fill()
+}
+
+// play plays p's video i, from its covers.
+func (a *app) play(p *page, i int) {
+	p.idx, p.playing, a.paused, a.sheet = i, true, false, nil
+	a.fill()
 }
 
 // loadAccount fetches the account logged in and all it follows, for the sidebar.
@@ -222,7 +250,13 @@ func (a *app) loadAccount() {
 }
 
 // back closes the page on top and goes on with the one under it.
+// A grid page playing goes back to its covers first.
 func (a *app) back() {
+	if p := a.cur(); p.grid && p.playing {
+		p.playing, a.sheet = false, nil
+		a.fill()
+		return
+	}
 	if len(a.pages) == 1 {
 		return
 	}
@@ -396,7 +430,7 @@ func (a *app) step(d int) {
 	}
 	p := a.cur()
 	i := p.idx + d
-	if i < 0 || i >= len(p.list) {
+	if !p.plays() || i < 0 || i >= len(p.list) {
 		return
 	}
 	a.lastNav = now
@@ -413,21 +447,21 @@ func (a *app) toggle() {
 // search opens the videos found for q.
 func (a *app) search(q string) {
 	if q = strings.TrimSpace(q); q != "" {
-		a.open(&page{title: "搜索：" + q, next: a.c.Search(q)})
+		a.open(&page{title: "搜索：" + q, next: a.c.Search(q), grid: true})
 	}
 }
 
 // openAuthor opens a user's videos, unless p is that page already.
 func (a *app) openAuthor(p *page, name, id string) {
 	if title := "@" + name; p.title != title && id != "" {
-		a.open(&page{title: title, next: a.c.Posts(id)})
+		a.open(&page{title: title, next: a.c.Posts(id), grid: true})
 	}
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now the whole window,
-// with the feed, its comments, a search for 猫, the first result's author,
-// and the feed again from the sidebar.
+// clicks would, saves a shot of each step and quits: now 精选's covers, its
+// first video playing, its comments, the covers again, a search for 猫, and
+// 推荐.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -439,7 +473,7 @@ func (a *app) selfCheck(dir string) {
 		a.post(func() {
 			state := ""
 			for _, p := range a.pages {
-				state += fmt.Sprintf(" | %q idx=%d", p.title, p.idx)
+				state += fmt.Sprintf(" | %q idx=%d n=%d playing=%v", p.title, p.idx, len(p.list), p.plays())
 				if a.sheet != nil && p == a.cur() {
 					state += fmt.Sprintf(" comments=%d done=%v msg=%q", len(a.sheet.items), a.sheet.done, a.sheet.msg)
 				}
@@ -454,29 +488,22 @@ func (a *app) selfCheck(dir string) {
 		log.Println("shot", name, err, <-done)
 	}
 	shot("1.png")
-	a.post(func() { p := a.cur(); a.comments(p.list[p.idx].v) })
+	a.post(func() { a.play(a.cur(), 0) })
 	shot("2.png")
-	a.post(func() { a.search("猫") })
+	a.post(func() { p := a.cur(); a.comments(p.list[p.idx].v) })
 	shot("3.png")
-	a.post(func() { p := a.cur(); a.openAuthor(p, p.list[0].v.Author, p.list[0].v.AuthorID) })
+	a.post(func() { a.escape(); a.escape() })
 	shot("4.png")
-	a.post(a.home)
+	a.post(func() { a.search("猫") })
 	shot("5.png")
+	a.post(func() { a.root(a.feed) })
+	shot("6.png")
 	follows := make(chan string)
 	a.post(func() {
-		follows <- fmt.Sprintf("me=%v follows=%d msg=%q", a.me.Name != "", len(a.follows), a.followMsg)
+		follows <- fmt.Sprintf("me=%v follows=%d msg=%q pictures=%d", a.me.Name != "", len(a.follows), a.followMsg, len(a.img.m))
 	})
 	log.Println(<-follows)
 	os.Exit(0)
-}
-
-// sidebarVibrancy is the material behind the sidebar: macOS's. Windows'
-// stays light under a dark theme, so the sidebar is painted there.
-func sidebarVibrancy() mygo.Vibrancy {
-	if runtime.GOOS == "darwin" {
-		return mygo.VibrancySidebar
-	}
-	return mygo.VibrancyNone
 }
 
 // Run opens the window and blocks until it closes.
@@ -489,22 +516,24 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	a := &app{c: c, dir: filepath.Join(cache, "Douyin", "videos"), pages: []*page{{next: c.Feed}}}
+	a := &app{c: c, dir: filepath.Join(cache, "Douyin", "videos"),
+		picks: &page{title: "精选", next: c.Feed, grid: true}, feed: &page{title: "推荐", next: c.Feed}}
+	a.pages = []*page{a.picks}
+	a.img = newImages(c.Image, a.post)
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "抖音",
-			Width:     1100,
-			Height:    760,
-			MinWidth:  820,
-			MinHeight: 560,
+			Width:     1280,
+			Height:    820,
+			MinWidth:  960,
+			MinHeight: 620,
 			StateKey:  "main",
 			// As MySpotify's: no title bar, the window buttons inset within the sidebar.
 			TitleBarStyle:        mygo.TitleBarHidden,
-			TitleBarHeight:       topBarHeight + 6,
-			TrafficLightPosition: &mygo.Point{X: 20, Y: 20},
-			Vibrancy:             sidebarVibrancy(),
-			BackgroundColor:      "light-dark(#ffffff, #141416)",
+			TitleBarHeight:       topBarHeight,
+			TrafficLightPosition: &mygo.Point{X: 18, Y: 18},
+			BackgroundColor:      bgHex, // dark always, as Douyin's
 			Content:              ui.View(a.view),
 		})
 		a.fill()
