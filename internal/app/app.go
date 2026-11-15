@@ -162,6 +162,15 @@ type app struct {
 
 	posted chan func() // what post runs, in a test without a window
 
+	// The rail's share panel: open, its search, and how sending a video to an
+	// account went, by video and account ID: "sending", "done".
+	shareOpen  bool
+	shareQuery string
+	shareBox   ui.Handle
+	shared     map[string]string
+	// sendShare sends a video to an account by name; a test puts its own.
+	sendShare func(videoID, name string) error
+
 	// setLiked and setSaved send a like or a save to Douyin; a test puts its own.
 	setLiked, setSaved func(id string, on bool) error
 	listen             bool // 听抖音: the cover in the picture's place, the sound on
@@ -291,6 +300,30 @@ func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) err
 				*on, *n = !want, *n-step
 				a.toast = onOff(want, "", "取消") + what + "没成功：" + err.Error()
 			}
+		})
+	}()
+}
+
+// shareTo sends v to u in a direct message, the panel's button showing how
+// it goes; one that fails can be tried again, and says why.
+func (a *app) shareTo(v dy.Video, u dy.User) {
+	if a.sendShare == nil {
+		return
+	}
+	if a.shared == nil {
+		a.shared = map[string]string{}
+	}
+	key := v.ID + "|" + u.ID
+	a.shared[key] = "sending"
+	go func() {
+		err := a.sendShare(v.ID, u.Name)
+		a.post(func() {
+			if err != nil {
+				delete(a.shared, key)
+				a.toast = "没分享给" + u.Name + "：" + err.Error()
+				return
+			}
+			a.shared[key] = "done"
 		})
 	}()
 }
@@ -910,6 +943,7 @@ func Run() error {
 	a.pages = []*page{a.picks}
 	a.img = newImages(c.Image, a.post)
 	a.setLiked, a.setSaved = c.SetLiked, c.SetSaved
+	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }
 	a.setSpeed(1)
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {

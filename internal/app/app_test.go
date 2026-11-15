@@ -330,7 +330,7 @@ func TestSaveButton(t *testing.T) {
 	}
 }
 
-// The rail has Douyin's column: the counts, sharing, which copies the
+// The rail has Douyin's column: the counts, sharing, whose panel copies the
 // video's link, 听抖音, which puts the cover in the picture's place and plays
 // on, and 更多's menu, whose 复制链接 copies it too.
 func TestRail(t *testing.T) {
@@ -346,8 +346,16 @@ func TestRail(t *testing.T) {
 			t.Fatalf("rail lacks %q: %q", want, tt.Texts())
 		}
 	}
-	if err := tt.Click("分享：复制链接"); err != nil {
+	if err := tt.Click("分享"); err != nil {
 		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("复制链接"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.shareOpen {
+		t.Fatal("the share panel stayed open after copying")
 	}
 	if err := tt.Click("听抖音"); err != nil {
 		t.Fatal(err)
@@ -836,4 +844,53 @@ func waitFor(t *testing.T, a *app, tt *ui.Tester, ok func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("timed out")
+}
+
+// 分享 opens a panel of the accounts followed, which its search narrows,
+// typing a space without pausing; a 分享 sends the video to one, showing
+// 发送中… then 已分享; one that fails goes back to 分享 and says why.
+func TestSharePanel(t *testing.T) {
+	p := stub("推荐", 1)
+	p.list[0].v = dy.Video{ID: "42", Author: "作者"}
+	ready(t, p.list[0])
+	a := withRoots(&app{pages: []*page{p}, posted: make(chan func(), 8),
+		follows: []dy.User{{ID: "a", Name: "甲"}, {ID: "b", Name: "乙 丙"}}})
+	answer := make(chan error)
+	var sent []string
+	a.sendShare = func(id, name string) error { sent = append(sent, id+" "+name); return <-answer }
+	tt := newTester(a)
+	if err := tt.Click("分享"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("甲") || !tt.HasText("乙 丙") || !tt.HasText("分享给朋友") {
+		t.Fatalf("panel shows %q", tt.Texts())
+	}
+	tt.Click("搜索朋友")
+	tt.Frame()
+	tt.Type("乙 ")
+	tt.Frame()
+	if tt.HasText("甲") || !tt.HasText("乙 丙") || a.paused {
+		t.Fatalf("searching 乙: %q, paused %v", tt.Texts(), a.paused)
+	}
+	if err := tt.Click("分享给乙 丙"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("发送中…") {
+		t.Fatalf("sending shows %q", tt.Texts())
+	}
+	answer <- nil
+	waitFor(t, a, tt, func() bool { return tt.HasText("已分享") })
+	a.shareQuery = ""
+	tt.Frame()
+	if err := tt.Click("分享给甲"); err != nil {
+		t.Fatal(err)
+	}
+	answer <- errors.New("对方没回复，只能发一条")
+	waitFor(t, a, tt, func() bool { return a.shared["42|a"] == "" })
+	tt.Frame()
+	if !tt.HasText("没分享给甲：对方没回复，只能发一条") || len(sent) != 2 || sent[0] != "42 乙 丙" || sent[1] != "42 甲" {
+		t.Fatalf("after a refusal: %q, sent %q", tt.Texts(), sent)
+	}
 }

@@ -65,7 +65,7 @@ func (a *app) view(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
 	c.OnShortcut(0, ui.KeyEscape, a.escape)
 	root := ui.Box(c).Fill().Background(pal.bg)
-	if !c.Focused(a.searchBox) {
+	if !c.Focused(a.searchBox) && !c.Focused(a.shareBox) {
 		// Space pauses wherever the focus is, as in MySpotify: on the box
 		// around everything it comes before a button the pointer focused,
 		// which would take it as a click; on the window, as nothing has
@@ -817,8 +817,16 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 		} else {
 			shares = "分享"
 		}
-		if action("share", iconShare, "分享：复制链接", shares, white).Clicked() {
-			a.copyLink(s.v)
+		if s.v.Live != nil { // a room's link is all there is to share
+			if action("share", iconShare, "分享：复制链接", shares, white).Clicked() {
+				a.copyLink(s.v)
+			}
+		} else {
+			share := action("share", iconShare, "分享", shares, onOff(a.shareOpen, pal.accent, white))
+			if share.Clicked() {
+				a.shareOpen, a.shareQuery = !a.shareOpen, ""
+			}
+			a.sharePanel(c, share, s)
 		}
 		color := white
 		if a.listen {
@@ -832,6 +840,94 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 			a.moreOpen = !a.moreOpen
 		}
 		a.moreMenu(c, more, s)
+	})
+}
+
+// sharePanel opens beside the rail's 分享, as Douyin's: a search, the
+// accounts followed, each with a button that sends them the video in a
+// direct message (through ego lite, some seconds on), and below, copying
+// its link, saving it, and opening it on the web.
+func (a *app) sharePanel(c *ui.Context, anchor ui.Element, s *slot) {
+	ui.PopoverBase(c.Key("share-panel"), anchor, &a.shareOpen, func(panel ui.Element) {
+		panel.AttachTo(anchor, ui.AnchorStart, ui.AnchorEnd).Margin(0, 10, 0, 0).Width(340).Height(440).Padding(12, 0, 0, 0).
+			Radius(14).Background(ui.Hex("#252632")).Border(0.5, ui.RGBA(255, 255, 255, 0.12)).Shadow(0, 10, 30, -6, ui.RGBA(0, 0, 0, 0.5)).
+			Role(ui.RoleDialog).Label("分享").
+			Transition(ui.ElementTransition{Animation: &ui.Snappy, Enter: &ui.Motion{Scale: 0.96}, Exit: &ui.Motion{Scale: 0.98}})
+		panel.Children(func() {
+			ui.Row(c).Height(38).Margin(0, 12, 8, 12).PaddingX(12).Gap(8).Radius(10).AlignItems(ui.Center).Background(pal.hover).Children(func() {
+				ui.Icon(c, iconSearch).Size(15, 15).TextColor(pal.faint)
+				ui.TextInputBase(c.Key("share-search"), &a.shareQuery).Bind(&a.shareBox).Grow(1).Placeholder("搜索").FontSize(13.5).Label("搜索朋友")
+			})
+			ui.Text(c, "分享给朋友").FontSize(12).TextColor(pal.faint).Margin(4, 16, 6, 16)
+			ui.Scroll(c.Key("share-list")).Grow(1).Children(func() {
+				q := strings.ToLower(strings.TrimSpace(a.shareQuery))
+				shown := 0
+				for _, u := range a.follows {
+					if q != "" && !strings.Contains(strings.ToLower(u.Name), q) {
+						continue
+					}
+					shown++
+					state := a.shared[s.v.ID+"|"+u.ID]
+					ui.Row(c.Key("to:" + u.ID)).Height(56).PaddingX(16).Gap(12).AlignItems(ui.Center).Children(func() {
+						a.avatar(c, u.Avatar, u.Name, 40)
+						ui.Text(c, u.Name).FontSize(14).TextColor(pal.text).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+						label := map[string]string{"": "分享", "sending": "发送中…", "done": "已分享"}[state]
+						b := ui.ButtonBase(c.Key("send")).Height(32).Width(72).Radius(8).Center().FocusRing(false).Label("分享给" + u.Name)
+						bg := pal.accent
+						switch {
+						case state != "":
+							bg = pal.press
+						case b.Hovered():
+							bg = ui.Hex("#ff4d6d")
+						}
+						b.Background(bg).Children(func() {
+							ui.Text(c, label).FontSize(13).FontWeight(600).TextColor(white)
+						})
+						if state != "" {
+							b.Disabled(true)
+						} else if b.Clicked() {
+							a.shareTo(s.v, u)
+						}
+					})
+				}
+				if shown == 0 {
+					text := "没有搜索到朋友"
+					if len(a.follows) == 0 {
+						text = "还没有关注的人"
+					}
+					ui.Text(c, text).FontSize(12.5).TextColor(pal.faint).Margin(16, 16)
+				}
+			})
+			ui.Row(c).Padding(10, 12, 12, 12).Gap(8).AlignItems(ui.Center).BorderWidth(0.5, 0, 0, 0).BorderColor(pal.hairline).Children(func() {
+				link := ui.ButtonBase(c.Key("copy")).Grow(1).Height(38).Radius(10).Gap(6).Center().FocusRing(false).Label("复制链接")
+				link.Background(onOff(link.Hovered(), pal.press, pal.hover)).Children(func() {
+					ui.Icon(c, iconLink).Size(15, 15).TextColor(pal.text)
+					ui.Text(c, "复制链接").FontSize(13.5).TextColor(pal.text)
+				})
+				if link.Clicked() {
+					a.shareOpen = false
+					a.copyLink(s.v)
+				}
+				square := func(key string, ic *ui.SVG, label string) ui.Element {
+					b := ui.ButtonBase(c.Key(key)).Size(38, 38).Radius(10).Center().FocusRing(false).Label(label)
+					return b.Background(onOff(b.Hovered(), pal.press, pal.hover)).Children(func() {
+						ui.Icon(c, ic).Size(16, 16).TextColor(pal.text)
+					})
+				}
+				if b := square("download", iconDownload, "下载"); s.vp == nil || s.saved == "保存中…" {
+					b.Disabled(true).Opacity(0.4)
+				} else if b.Clicked() {
+					a.shareOpen = false
+					a.save(s)
+				}
+				if square("web", iconGlobe, "在浏览器中打开").Clicked() {
+					a.shareOpen = false
+					if err := mygo.Shell.OpenExternal(videoURL(s.v)); err != nil {
+						a.toast = "打不开浏览器：" + err.Error()
+					}
+				}
+			})
+		})
 	})
 }
 
