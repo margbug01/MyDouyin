@@ -111,16 +111,24 @@ const (
 // Get calls a GET endpoint of www.douyin.com with extra (already encoded) query
 // parameters, and returns the body.
 func (c *Client) Get(path, extra string) ([]byte, error) {
+	return c.call("GET", path, extra, "")
+}
+
+// call is Get with any method and a form body, which a_bogus signs too.
+func (c *Client) call(method, path, extra, body string) ([]byte, error) {
 	fp := "verify_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + randString(8, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(12, alnum)
 	q := baseQuery + "&verifyFp=" + fp + "&fp=" + fp
 	if extra != "" {
 		q += "&" + extra
 	}
 	q += "&msToken=" + randString(107, token)
-	q += "&a_bogus=" + url.QueryEscape(c.signer.Sign(q, ""))
-	req, err := http.NewRequest("GET", "https://www.douyin.com"+path+"?"+q, nil)
+	q += "&a_bogus=" + url.QueryEscape(c.signer.Sign(q, body))
+	req, err := http.NewRequest(method, "https://www.douyin.com"+path+"?"+q, strings.NewReader(body))
 	if err != nil {
 		return nil, err
+	}
+	if method == "POST" {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
 	}
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Referer", "https://www.douyin.com/")
@@ -235,7 +243,12 @@ func videos(list []aweme) []Video {
 
 // getJSON calls Get and decodes the body into v, which must carry status_code.
 func (c *Client) getJSON(path, extra string, v interface{ code() int }) error {
-	b, err := c.Get(path, extra)
+	return c.callJSON("GET", path, extra, v)
+}
+
+// callJSON is getJSON with another method, an empty body.
+func (c *Client) callJSON(method, path, extra string, v interface{ code() int }) error {
+	b, err := c.call(method, path, extra, "")
 	if err != nil {
 		return err
 	}
@@ -438,6 +451,173 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 		cursor = r.Cursor
 		return out, more, nil
 	})
+}
+
+// Tab is a category of 精选, as its row of tabs names them.
+type Tab struct {
+	ID   int
+	Name string
+}
+
+// Tabs are 精选's categories, in the page's order: the page has them in its
+// code, with no endpoint to ask.
+// shortcut: copied from www.douyin.com/jingxuan on 2026-11-15; read them from the page if they change often.
+var Tabs = []Tab{{0, "全部"}, {100000, "公开课"}, {300205, "游戏"}, {300206, "二次元"}, {300209, "音乐"},
+	{300215, "影视"}, {300204, "美食"}, {300213, "知识"}, {300214, "小剧场"}, {300216, "生活vlog"},
+	{300207, "体育"}, {300221, "旅行"}, {300217, "亲子"}, {300220, "动物"}, {300219, "三农"},
+	{300218, "汽车"}, {300222, "美妆穿搭"}}
+
+// Picks pages through 精选's videos of the tab with the given ID, 0 for all.
+func (c *Client) Picks(tab int) Pager[Video] {
+	n := 0
+	return pager(func() ([]Video, bool, error) {
+		n++
+		q := fmt.Sprintf("module_id=3003101&count=20&refresh_index=%d&refer_type=10&pull_type=%d&awemePcRecRawData=%%7B%%22is_client%%22%%3Afalse%%7D", n, min(n-1, 1)*2)
+		if tab != 0 {
+			q += "&tag_id=" + strconv.Itoa(tab)
+		}
+		var r struct {
+			awemeList
+			HasMore int `json:"has_more"`
+		}
+		if err := c.callJSON("POST", "/aweme/v2/web/module/feed/", q, &r); err != nil {
+			return nil, false, err
+		}
+		return videos(r.List), r.HasMore != 0, nil
+	})
+}
+
+// Danmaku is a bullet comment, shown At into its video.
+type Danmaku struct {
+	At   time.Duration
+	Text string
+}
+
+// Danmaku returns the bullet comments of the video with the given ID and
+// length that show from from to to; Douyin's page asks 32 seconds at a time.
+func (c *Client) Danmaku(videoID string, length, from, to time.Duration) ([]Danmaku, error) {
+	var r struct {
+		status
+		List []struct {
+			Offset int64 `json:"offset_time"` // ms
+			Text   string
+		} `json:"danmaku_list"`
+	}
+	q := fmt.Sprintf("app_name=aweme&format=json&group_id=%s&item_id=%s&start_time=%d&end_time=%d&duration=%d",
+		videoID, videoID, from.Milliseconds(), to.Milliseconds(), length.Milliseconds())
+	if err := c.getJSON("/aweme/v1/web/danmaku/get_v2/", q, &r); err != nil {
+		return nil, err
+	}
+	var out []Danmaku
+	for _, d := range r.List {
+		// The reply strays past the window now and then, which the next window brings again.
+		if at := time.Duration(d.Offset) * time.Millisecond; at >= from && at < to {
+			out = append(out, Danmaku{at, d.Text})
+		}
+	}
+	return out, nil
+}
+
+// Notice is something someone did to the logged-in user: liked, commented,
+// replied or followed. Text is what they wrote, or what they liked.
+type Notice struct {
+	User    User
+	Action  string // as Douyin words it: 赞了你的作品, 关注了你…
+	Text    string
+	VideoID string
+	Time    time.Time
+}
+
+type noticeUser struct {
+	SecUID   string `json:"sec_uid"`
+	Nickname string
+	Avatar   addr `json:"avatar_thumb"`
+}
+
+func (u noticeUser) user() User {
+	return User{ID: u.SecUID, Name: u.Nickname, Avatar: u.Avatar.first()}
+}
+
+// Notices pages through the logged-in user's notifications, newest first,
+// leaving them unread.
+func (c *Client) Notices() Pager[Notice] {
+	var before int64 // 0: from now
+	return pager(func() ([]Notice, bool, error) {
+		var r struct {
+			status
+			List []struct {
+				Type    int    `json:"type"`
+				Time    int64  `json:"create_time"`
+				VideoID string `json:"aweme_id"`
+				Digg    struct {
+					Type    int          `json:"digg_type"` // 1 a video, 3 a comment
+					From    []noticeUser `json:"from_user"`
+					Comment struct{ Text string }
+					Aweme   struct{ Desc string }
+				}
+				Comment struct {
+					Type    int `json:"comment_type"` // 2 a reply
+					Comment struct {
+						Text string
+						User noticeUser
+					}
+				}
+				Follow struct {
+					From noticeUser `json:"from_user"`
+				}
+			} `json:"notice_list_v2"`
+			HasMore int   `json:"has_more"`
+			MaxTime int64 `json:"max_time"` // the oldest here: the next page's start
+		}
+		q := fmt.Sprintf("is_new_notice=1&is_mark_read=0&notice_group=960&count=20&min_time=0&max_time=%d", before)
+		if err := c.getJSON("/aweme/v1/web/notice/", q, &r); err != nil {
+			return nil, false, err
+		}
+		var out []Notice
+		for _, x := range r.List {
+			n := Notice{VideoID: x.VideoID, Time: time.Unix(x.Time, 0)}
+			switch x.Type {
+			case 41:
+				if len(x.Digg.From) > 0 {
+					n.User = x.Digg.From[0].user()
+				}
+				n.Action, n.Text = "赞了你的作品", x.Digg.Aweme.Desc
+				if x.Digg.Type == 3 {
+					n.Action, n.Text = "赞了你的评论", x.Digg.Comment.Text
+				}
+			case 31:
+				n.User, n.Text = x.Comment.Comment.User.user(), x.Comment.Comment.Text
+				n.Action = "评论了你的作品"
+				if x.Comment.Type == 2 {
+					n.Action = "回复了你的评论"
+				}
+			case 33:
+				n.User, n.Action = x.Follow.From.user(), "关注了你"
+			default: // others (mentions, system notices) wait until a client shows them
+				continue
+			}
+			out = append(out, n)
+		}
+		more := r.HasMore != 0 && r.MaxTime != 0 && (before == 0 || r.MaxTime < before)
+		before = r.MaxTime
+		return out, more, nil
+	})
+}
+
+// Unread counts the notifications not yet seen.
+func (c *Client) Unread() (int, error) {
+	var r struct {
+		status
+		Groups []struct{ Count int } `json:"notice_count"`
+	}
+	if err := c.getJSON("/aweme/v1/web/notice/count/", "is_new_notice=1&need_social_count=1", &r); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, g := range r.Groups {
+		n += g.Count
+	}
+	return n, nil
 }
 
 // Image fetches a picture Douyin serves (a cover, an avatar), whose CDN wants

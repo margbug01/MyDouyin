@@ -5,6 +5,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"os"
 	"testing"
+	"time"
 )
 
 // The signed feed request returns playable videos, and the first one downloads
@@ -132,4 +133,85 @@ func TestLiveLists(t *testing.T) {
 	if len(us) > 0 && (us[0].ID == "" || us[0].Name == "") {
 		t.Fatalf("following entry incomplete: %+v", us[0])
 	}
+}
+
+// 精选's tabs give pages of their own, the next page new videos; a video has
+// bullet comments within its length; notifications page back in time, each
+// with who did it, and the unread count reads. Live: skipped unless LIVE is set.
+func TestLiveTabsDanmakuNotices(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, tab := range []int{0, 300205} { // 全部, 游戏
+		next := c.Picks(tab)
+		for page := range 2 {
+			vs, err := next()
+			if err != nil || len(vs) < 5 {
+				t.Fatalf("tab %d page %d: %d videos, %v", tab, page, len(vs), err)
+			}
+			fresh := 0
+			for _, v := range vs {
+				if !seen[v.ID] {
+					fresh++
+				}
+				seen[v.ID] = true
+			}
+			if fresh < len(vs)/2 {
+				t.Fatalf("tab %d page %d: only %d of %d new", tab, page, fresh, len(vs))
+			}
+		}
+	}
+
+	v := pick(t, c)
+	ds, err := c.Danmaku(v.ID, v.Duration, 0, 32*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range ds {
+		if d.At < 0 || d.At >= 32*time.Second || d.Text == "" {
+			t.Fatalf("danmaku %+v outside 0-32s or empty", d)
+		}
+	}
+	t.Logf("%d danmaku in the first 32s of %s", len(ds), v.ID)
+
+	next := c.Notices()
+	var last time.Time
+	for page := range 2 {
+		ns, err := next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if page == 0 && len(ns) == 0 {
+			t.Fatal("no notifications")
+		}
+		for _, n := range ns {
+			if n.User.Name == "" || n.Action == "" || !last.IsZero() && n.Time.After(last) {
+				t.Fatalf("page %d: %+v", page, n)
+			}
+			last = n.Time
+		}
+	}
+	if _, err := c.Unread(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// pick is a video of 精选's 知识 with bullet comments likely: a long one with many comments.
+func pick(t *testing.T, c *Client) Video {
+	vs, err := c.Picks(300213)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	best := vs[0]
+	for _, v := range vs {
+		if v.Comments > best.Comments {
+			best = v
+		}
+	}
+	return best
 }
