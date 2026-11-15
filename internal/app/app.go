@@ -107,13 +107,22 @@ func (a *app) more(p *page) {
 
 // fill prepares the videos around the current one, frees the ones far from
 // it, and asks for more of the list near its end.
+// The current video comes first: the ones around it start once it plays (or
+// failed), so they do not share its bandwidth.
 func (a *app) fill() {
 	p := a.cur()
+	ready := false
+	if p.idx < len(p.list) {
+		s := p.list[p.idx]
+		a.prepare(s)
+		ready = s.vp != nil || s.err != nil
+	}
 	for i, s := range p.list {
-		if i >= p.idx-behind && i <= p.idx+ahead {
-			a.prepare(s)
-		} else {
+		switch {
+		case i < p.idx-behind || i > p.idx+ahead:
 			a.release(s)
+		case ready:
+			a.prepare(s)
 		}
 	}
 	if len(p.list)-p.idx <= ahead+2 {
@@ -161,7 +170,7 @@ func (a *app) prepare(s *slot) {
 				return
 			}
 			s.file, s.vp, s.ap, s.err = f, vp, ap, err
-			a.sync()
+			a.fill() // plays it if current, and starts the ones around it
 		})
 	}()
 }
