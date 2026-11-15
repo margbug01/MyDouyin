@@ -428,6 +428,15 @@ func (c *Client) Search(keyword string) Pager[Video] {
 
 // Posts pages through a user's videos, newest first.
 func (c *Client) Posts(secUID string) Pager[Video] {
+	return c.posts(secUID, "&publish_video_strategy_type=2")
+}
+
+// MyPosts pages through the logged-in user's own videos, whose secUID it
+// takes: with the strategy the web page asks others' with, they come back
+// none (8 against 0 on 2026-11-16).
+func (c *Client) MyPosts(secUID string) Pager[Video] { return c.posts(secUID, "") }
+
+func (c *Client) posts(secUID, strategy string) Pager[Video] {
 	var cursor int64
 	return pager(func() ([]Video, bool, error) {
 		var r struct {
@@ -435,7 +444,7 @@ func (c *Client) Posts(secUID string) Pager[Video] {
 			HasMore int   `json:"has_more"`
 			Cursor  int64 `json:"max_cursor"`
 		}
-		q := fmt.Sprintf("sec_user_id=%s&max_cursor=%d&count=18&locate_query=false&show_live_replay_strategy=1&need_time_list=1&time_list_query=0&whale_cut_token=&cut_version=1&publish_video_strategy_type=2", url.QueryEscape(secUID), cursor)
+		q := fmt.Sprintf("sec_user_id=%s&max_cursor=%d&count=18&locate_query=false&show_live_replay_strategy=1&need_time_list=1&time_list_query=0&whale_cut_token=&cut_version=1%s", url.QueryEscape(secUID), cursor, strategy)
 		if err := c.getJSON("/aweme/v1/web/aweme/post/", q, &r); err != nil {
 			return nil, false, err
 		}
@@ -798,6 +807,20 @@ func (c *Client) MixVideos(mixID string) Pager[Video] {
 // FollowFeed pages through the videos of the accounts the user follows, the
 // latest first, as 关注 shows them.
 func (c *Client) FollowFeed() Pager[Video] {
+	return c.socialFeed("GET", "/aweme/v1/web/follow/feed/",
+		"level=1&count=20&pull_type=0&aweme_ids=&room_ids=&webcast_sdk_version=170400&webcast_version_code=170400")
+}
+
+// FriendFeed pages through the videos of the user's friends, those who
+// follow back, as 朋友 shows them.
+// shortcut: its entries are read as 关注's are (data[].aweme); the account it was mapped on had no friends' videos to show the shape.
+func (c *Client) FriendFeed() Pager[Video] {
+	return c.socialFeed("POST", "/aweme/v1/web/familiar/feed/", "level=1&pull_type=0&address_book_access=2&gps_access=2")
+}
+
+// socialFeed pages through a feed of entries that each hold a video, by
+// the cursor each page gives the next.
+func (c *Client) socialFeed(method, path, query string) Pager[Video] {
 	var cursor int64
 	empty := 0
 	return pager(func() ([]Video, bool, error) {
@@ -809,8 +832,7 @@ func (c *Client) FollowFeed() Pager[Video] {
 			Cursor  int64
 			HasMore int `json:"has_more"`
 		}
-		q := fmt.Sprintf("cursor=%d&level=1&count=20&pull_type=0&aweme_ids=&room_ids=&webcast_sdk_version=170400&webcast_version_code=170400", cursor)
-		if err := c.getJSON("/aweme/v1/web/follow/feed/", q, &r); err != nil {
+		if err := c.callJSON(method, path, fmt.Sprintf("cursor=%d&%s", cursor, query), "", &r); err != nil {
 			return nil, false, err
 		}
 		var list []aweme

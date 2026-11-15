@@ -79,8 +79,15 @@ func (a *app) view(c *ui.Context) {
 			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
 			ui.Column(c.Key("main")).Grow(1).Children(func() {
 				a.topBar(c, p)
-				if p == a.picks && !p.plays() {
-					a.tabsRow(c)
+				if !p.plays() {
+					switch {
+					case p == a.picks:
+						a.tabsRow(c)
+					case p == a.follow:
+						a.followsRow(c)
+					case a.isMine(p):
+						a.mineHeader(c)
+					}
 				}
 				ui.Row(c).Grow(1).Padding(0, 16, 16, 0).Gap(16).AlignItems(ui.Stretch).Children(func() {
 					if p.plays() {
@@ -156,44 +163,131 @@ func (a *app) hotList(c *ui.Context) {
 	})
 }
 
+// sidebar is Douyin's: 精选 and 推荐; the user's 关注, 朋友 and 我的; then
+// 直播 and 短剧. A root not there (no client, or the account not yet known)
+// leaves its row out.
 func (a *app) sidebar(c *ui.Context) {
 	// Below the window buttons, which sit over it.
-	ui.Column(c).Fill().Padding(52, 12, 14, 12).Gap(4).DragWindow().Children(func() {
-		ui.Text(c, "抖音").FontSize(20).FontWeight(800).TextColor(white).Margin(0, 10, 14, 10)
-		if a.navItem(c, iconGrid, "精选", a.pages[0] == a.picks).Clicked() {
+	ui.Column(c).Fill().Padding(48, 12, 14, 12).Gap(4).DragWindow().Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(0, 10, 14, 10).Children(func() {
+			ui.Box(c).Size(26, 26).Radius(7).Center().Gradient(ui.Hex("#25f4ee"), ui.Hex("#fe2c55"), 135).Children(func() {
+				ui.Icon(c, iconNote).Size(16, 16).TextColor(white)
+			})
+			ui.Text(c, "抖音").FontSize(20).FontWeight(800).TextColor(white)
+		})
+		root := a.pages[0]
+		nav := func(icon *ui.SVG, label string, r *page, on bool) bool {
+			return r != nil && a.navItem(c, icon, label, on).Clicked()
+		}
+		if nav(iconCompass, "精选", a.picks, root == a.picks) {
 			a.root(a.picks)
 		}
-		if a.navItem(c, iconSpark, "推荐", a.pages[0] == a.feed).Clicked() {
+		if nav(iconSpark, "推荐", a.feed, root == a.feed) {
 			a.root(a.feed)
 		}
-		if a.liked != nil && a.navItem(c, iconHeart, "喜欢", a.pages[0] == a.liked).Clicked() {
-			a.root(a.liked)
+		divider := func() { ui.Box(c).Height(1).Background(pal.hairline).Margin(8, 10) }
+		divider()
+		if nav(iconFollow, "关注", a.follow, root == a.follow) {
+			a.root(a.follow)
 		}
-		ui.Box(c).Height(1).Background(pal.hairline).Margin(10, 10)
-		ui.Scroll(c.Key("follows")).Grow(1).Margin(0, -6).Padding(0, 6).Gap(2).Children(func() {
-			if len(a.follows) > 0 || a.followMsg != "" {
-				ui.Text(c, "关注").FontSize(11.5).FontWeight(600).TextColor(pal.faint).Margin(4, 10, 6, 10)
+		if nav(iconFriends, "朋友", a.friends, root == a.friends) {
+			a.root(a.friends)
+		}
+		if nav(iconUser, "我的", a.mine[a.mineTab], a.isMine(root)) {
+			a.showMine(a.mineTab)
+		}
+		divider()
+		if a.live != nil {
+			b := a.listItem(c.Key("直播"), root == a.live, "直播")
+			color := pal.muted
+			if root == a.live {
+				color = white
 			}
-			if a.followMsg != "" {
-				ui.Text(c, a.followMsg).FontSize(12).TextColor(pal.faint).Margin(0, 10)
+			b.Children(func() {
+				ui.Icon(c, iconLive).Size(18, 18).TextColor(color)
+				ui.Text(c, "直播").FontSize(14.5).FontWeight(600).TextColor(color).Grow(1)
+				ui.Text(c, "LIVE").FontSize(9.5).FontWeight(800).TextColor(pal.accent).PaddingX(5).Height(16).Radius(4).
+					Background(ui.RGBA(254, 44, 85, 0.16)).Center()
+			})
+			if b.Clicked() {
+				a.root(a.live)
 			}
-			cur := a.cur().title
-			for _, u := range a.follows {
-				b := a.listItem(c.Key("u:"+u.ID), cur == "@"+u.Name, u.Name)
-				b.Children(func() {
-					a.avatar(c, u.Avatar, u.Name, 24)
-					ui.Text(c, u.Name).FontSize(13).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0)
-				})
-				if b.Clicked() {
-					a.openAuthor(a.cur(), u.Name, u.ID)
+		}
+		if nav(iconDrama, "短剧", a.drama, root == a.drama) {
+			a.root(a.drama)
+		}
+	})
+}
+
+// followsRow runs along the top of 关注: the accounts followed, each a
+// picture over its name, which opens its videos.
+func (a *app) followsRow(c *ui.Context) {
+	if a.followMsg != "" {
+		ui.Text(c, a.followMsg).FontSize(12).TextColor(pal.faint).Margin(4, 24, 8, 24)
+		return
+	}
+	if len(a.follows) == 0 {
+		return
+	}
+	ui.ScrollHorizontal(c.Key("follows")).Height(84).PaddingX(18).Gap(4).AlignItems(ui.Center).Children(func() {
+		for _, u := range a.follows {
+			b := ui.ButtonBase(c.Key("u:"+u.ID)).Column().Width(68).Padding(6, 2).Gap(6).Radius(10).AlignItems(ui.Center).FocusRing(false).Label(u.Name)
+			if b.Hovered() {
+				b.Background(pal.hover)
+			}
+			b.Children(func() {
+				a.avatar(c, u.Avatar, u.Name, 44)
+				ui.Text(c, u.Name).FontSize(11.5).TextColor(pal.muted).SingleLine().MaxWidth(64)
+			})
+			if b.Clicked() {
+				a.openAuthor(a.cur(), u.Name, u.ID)
+			}
+		}
+	})
+}
+
+// mineHeader tops 我的: the user's picture, name and counts, and the tabs of
+// their videos, likes, saves and watch history.
+func (a *app) mineHeader(c *ui.Context) {
+	me := a.me
+	ui.Row(c).Padding(6, 24, 14, 24).Gap(18).AlignItems(ui.Center).Children(func() {
+		a.avatar(c, me.Avatar, me.Name, 72)
+		ui.Column(c).Gap(8).Shrink(1).MinWidth(0).Children(func() {
+			ui.Text(c, me.Name).FontSize(20).FontWeight(700).TextColor(white).SingleLine()
+			ui.Row(c).Gap(18).Children(func() {
+				for _, kv := range [][2]string{{"关注", count(me.Following)}, {"粉丝", count(me.Followers)}, {"获赞", count(me.Liked)}} {
+					ui.Row(c).Gap(5).AlignItems(ui.Baseline).Children(func() {
+						ui.Text(c, kv[0]).FontSize(13).TextColor(pal.muted)
+						ui.Text(c, kv[1]).FontSize(15).FontWeight(700).TextColor(pal.text)
+					})
 				}
+			})
+			if me.Signature != "" {
+				ui.Text(c, me.Signature).FontSize(12.5).TextColor(pal.faint).MaxLines(2)
 			}
 		})
-		if a.me.Name != "" {
-			ui.Row(c).Height(40).PaddingX(8).Gap(10).AlignItems(ui.Center).Children(func() {
-				a.avatar(c, a.me.Avatar, a.me.Name, 28)
-				ui.Text(c, a.me.Name).FontSize(13).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0)
+	})
+	ui.Row(c).Height(40).PaddingX(24).Gap(26).AlignItems(ui.Center).Children(func() {
+		for _, name := range mineTabs {
+			on := name == a.mineTab
+			b := ui.ButtonBase(c.Key("mine:" + name)).Column().Gap(5).AlignItems(ui.Center).FocusRing(false).Label(name)
+			b.Children(func() {
+				color, weight := pal.muted, 500
+				switch {
+				case on:
+					color, weight = white, 700
+				case b.Hovered():
+					color = pal.text
+				}
+				ui.Text(c, name).FontSize(15).FontWeight(weight).TextColor(color).SingleLine()
+				bar := ui.Box(c).Width(16).Height(3).Radius(2)
+				if on {
+					bar.Background(pal.accent)
+				}
 			})
+			if b.Clicked() && !on {
+				a.showMine(name)
+			}
 		}
 	})
 }
@@ -420,7 +514,7 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 		if b.Hovered() {
 			title.TextColor(white)
 		}
-		ui.Text(c, "@"+v.Author+" · "+ago(v.Created, time.Now())).FontSize(12).TextColor(pal.faint).SingleLine()
+		ui.Text(c, byline(v)).FontSize(12).TextColor(pal.faint).SingleLine()
 	})
 	if b.Clicked() {
 		a.play(p, i)
@@ -443,7 +537,7 @@ func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32)
 		}
 		ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(60, 18, 16, 18).Gap(6).
 			Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {
-			ui.Text(c, "@"+v.Author+" · "+ago(v.Created, time.Now())).FontSize(15).FontWeight(700).TextColor(white)
+			ui.Text(c, byline(v)).FontSize(15).FontWeight(700).TextColor(white)
 			ui.Text(c, v.Desc).FontSize(13.5).TextColor(ui.RGBA(255, 255, 255, 0.85)).MaxLines(2)
 		})
 	})
@@ -946,6 +1040,15 @@ func (a *app) liveControls(c *ui.Context, s *slot) {
 	})
 }
 
+// byline is a card's author and when the video came out; a live room has
+// no date.
+func byline(v dy.Video) string {
+	if v.Live != nil {
+		return "@" + v.Author
+	}
+	return "@" + v.Author + " · " + ago(v.Created, time.Now())
+}
+
 // liveBadge marks a live room's cover, at its top left.
 func liveBadge(c *ui.Context) {
 	ui.Row(c).Absolute().Top(8).Left(8).Height(20).PaddingX(7).Gap(4).Radius(5).AlignItems(ui.Center).Background(pal.accent).Children(func() {
@@ -1189,6 +1292,13 @@ var (
 	iconComment    = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
 	iconDownload   = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
 	iconCheck      = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
+	iconNote       = fillIcon(`<path d="M16.5 3c.4 2.2 1.9 3.7 4 4v3.2c-1.5 0-2.9-.5-4-1.3v6.3a5.7 5.7 0 1 1-5.7-5.7c.3 0 .6 0 .9.1v3.3a2.5 2.5 0 1 0 1.6 2.3V3z"/>`)
+	iconCompass    = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>`)
+	iconFollow     = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6 1.3 0 2.5.3 3.5.8"/><path d="m15 17 2 2 4-4"/>`)
+	iconFriends    = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M16 4.2a4 4 0 0 1 0 7.6"/><path d="M19 14.5c1.8.9 3 2.9 3 5.5"/>`)
+	iconUser       = strokeIcon(`<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>`)
+	iconLive       = strokeIcon(`<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/>`)
+	iconDrama      = strokeIcon(`<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m10 9 5 3-5 3z"/>`)
 	iconLayers     = strokeIcon(`<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>`)
 	iconShare      = fillIcon(`<path d="M13.5 4.5v3.6C7.2 8.8 3.6 12.7 3 19.5c2.3-3.2 5.4-4.9 10.5-5v3.9L21 11z"/>`)
 	iconHeadphones = strokeIcon(`<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>`)

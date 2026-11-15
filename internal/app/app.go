@@ -134,18 +134,22 @@ type app struct {
 	searchBox ui.Handle
 	toast     string    // a message to show once
 	me        dy.User   // the account logged in, once known
-	follows   []dy.User // the accounts it follows, in the sidebar
+	follows   []dy.User // the accounts it follows, atop 关注
 	followMsg string    // why they did not load
 
 	picks, feed *page   // the roots: 精选's covers, 推荐's videos one by one
 	img         *images // covers and avatars
+
+	// The sidebar's other roots, each a grid; nil where there is no client.
+	follow, friends, live, drama *page
+	mine                         map[string]*page // 我的's tabs, by name, once the account is known
+	mineTab                      string
 
 	tab      int           // 精选's tab shown, a dy.Tabs ID
 	tabPages map[int]*page // 精选's tabs opened, kept as they were scrolled
 
 	notes  *notes // the notifications open beside the page, or nil
 	unread int
-	liked  *page    // the root of the videos the user liked, once the account is known
 	hot    []dy.Hot // the hot search list, under the search box
 	dms    *dms     // the direct messages open beside the page, or nil
 
@@ -216,6 +220,27 @@ func (a *app) moreNotes() {
 			n.items = append(n.items, ns...)
 		})
 	}()
+}
+
+// mineTabs are 我的's tabs, in order.
+var mineTabs = []string{"作品", "喜欢", "收藏", "观看历史"}
+
+// isMine tells whether p is one of 我的's tabs.
+func (a *app) isMine(p *page) bool {
+	for _, q := range a.mine {
+		if p == q {
+			return true
+		}
+	}
+	return false
+}
+
+// showMine shows 我的, at its tab name, as it was left.
+func (a *app) showMine(name string) {
+	if p := a.mine[name]; p != nil {
+		a.mineTab = name
+		a.root(p)
+	}
 }
 
 // showTab shows 精选's tab id, as it was left if it was open before.
@@ -493,8 +518,14 @@ func (a *app) loadAccount() {
 		}
 		a.post(func() {
 			a.me, a.follows = me, us
-			if me.ID != "" && a.liked == nil {
-				a.liked = &page{title: "喜欢", next: a.c.Liked(me.ID), grid: true}
+			if me.ID != "" && a.mine == nil {
+				a.mine = map[string]*page{
+					"作品":   {title: "作品", next: a.c.MyPosts(me.ID), grid: true},
+					"喜欢":   {title: "喜欢", next: a.c.Liked(me.ID), grid: true},
+					"收藏":   {title: "收藏", next: a.c.Collected(), grid: true},
+					"观看历史": {title: "观看历史", next: a.c.History(), grid: true},
+				}
+				a.mineTab = "作品"
 			}
 			if err != nil {
 				a.followMsg = "关注列表没载入：" + err.Error()
@@ -746,8 +777,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now a live room found in
-// 精选, playing, and paused.
+// clicks would, saves a shot of each step and quits: now the sidebar's
+// pages, 关注, 我的, 直播 and 短剧.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -773,32 +804,10 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	var room *dy.Video
-	next := a.c.Picks(0)
-	for range 15 {
-		vs, err := next()
-		if err != nil {
-			log.Println("picks:", err)
-			break
-		}
-		for _, v := range vs {
-			if v.Live != nil {
-				room = &v
-				break
-			}
-		}
-		if room != nil {
-			break
-		}
-	}
-	if room == nil {
-		log.Println("no live room found")
-		os.Exit(1)
-	}
-	log.Printf("room: %s %q, %s watching", room.Author, room.Desc, room.Live.Viewers)
-	a.post(func() { a.open(&page{title: "直播", list: []*slot{{v: *room}}, done: true}) })
+	time.Sleep(4 * time.Second) // the account, which 我的 needs
+	a.post(func() { a.showMine("收藏") })
 	shot("1.png")
-	a.post(a.toggle)
+	a.post(func() { a.root(a.live) })
 	shot("2.png")
 	os.Exit(0)
 }
@@ -817,6 +826,10 @@ func Run() error {
 		feed: &page{title: "推荐", next: c.Feed}, tabPages: map[int]*page{}}
 	a.picks = &page{title: "精选", next: c.Picks(0), grid: true}
 	a.tabPages[0] = a.picks
+	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true}
+	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true}
+	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true}
+	a.drama = &page{title: "短剧", next: c.Picks(300214), grid: true} // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.picks}
 	a.img = newImages(c.Image, a.post)
 	a.setSpeed(1)

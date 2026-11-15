@@ -145,12 +145,31 @@ func TestLiveAuthor(t *testing.T) {
 	}
 }
 
-// An account followed, in the sidebar, opens its videos and shows chosen
-// while they do; 精选 goes to its covers, with nothing over them. Live: the videos load in the background.
+// The sidebar is Douyin's: 关注 shows the accounts followed along its top,
+// a name of which opens its videos; 精选 goes back to the root with every
+// page on it let go. Live: the author's videos load in the background.
 func TestLiveSidebar(t *testing.T) {
 	c := live(t)
 	a := withRoots(&app{c: c, pages: []*page{stub("推荐", 1)}, follows: []dy.User{{ID: "x", Name: "某人"}}, me: dy.User{Name: "我"}})
+	a.follow = stub("关注", 2)
+	a.follow.grid = true
+	a.live, a.drama, a.friends = stub("直播", 1), stub("短剧", 1), stub("朋友", 1)
 	tt := newTester(a)
+	for _, want := range []string{"精选", "推荐", "关注", "朋友", "直播", "LIVE", "短剧"} {
+		if !tt.HasText(want) {
+			t.Fatalf("sidebar lacks %q: %q", want, tt.Texts())
+		}
+	}
+	if tt.HasText("某人") || tt.HasText("我的") {
+		t.Fatalf("follows or 我的 before 关注 or the account: %q", tt.Texts())
+	}
+	if err := tt.Click("关注"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.cur() != a.follow || !tt.HasText("某人") {
+		t.Fatalf("关注 shows %q", tt.Texts())
+	}
 	if err := tt.Click("某人"); err != nil {
 		t.Fatal(err)
 	}
@@ -158,8 +177,6 @@ func TestLiveSidebar(t *testing.T) {
 	if len(a.pages) != 2 || a.cur().title != "@某人" || a.paused {
 		t.Fatalf("after clicking a name: %d pages, paused %v", len(a.pages), a.paused)
 	}
-	tt.Click("某人") // already shown: nothing more
-	tt.Frame()
 	a.pages = append(a.pages, stub("搜索：猫", 1))
 	tt.Frame()
 	if err := tt.Click("精选"); err != nil {
@@ -686,22 +703,41 @@ func TestLiveHotList(t *testing.T) {
 	}
 }
 
-// 喜欢 shows in the sidebar once the account is known, and opens its grid.
-func TestLikedNav(t *testing.T) {
-	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+// 我的 shows in the sidebar once the account is known, with the user's
+// counts and four tabs, each its own grid, which 我的 comes back to.
+func TestMine(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, me: dy.User{Name: "我自己", Following: 13, Followers: 2, Liked: 45}})
 	tt := newTester(a)
-	if tt.HasText("喜欢") {
-		t.Fatal("喜欢 before the account is known")
+	if tt.HasText("我的") {
+		t.Fatal("我的 before the account is known")
 	}
-	a.liked = stub("喜欢", 2)
-	a.liked.grid = true
+	a.mine = map[string]*page{}
+	for _, n := range mineTabs {
+		a.mine[n] = stub(n, 1)
+		a.mine[n].grid = true
+	}
+	a.mineTab = "作品"
 	tt.Frame()
-	if err := tt.Click("喜欢"); err != nil {
+	if err := tt.Click("我的"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if a.cur() != a.liked || len(a.pages) != 1 {
-		t.Fatal("喜欢 did not open its grid")
+	if a.cur() != a.mine["作品"] || !tt.HasText("我自己") || !tt.HasText("45") || !tt.HasText("观看历史") {
+		t.Fatalf("我的 shows %q", tt.Texts())
+	}
+	if err := tt.Click("收藏"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.cur() != a.mine["收藏"] || len(a.pages) != 1 {
+		t.Fatal("收藏 did not show its grid")
+	}
+	tt.Click("精选")
+	tt.Frame()
+	tt.Click("我的")
+	tt.Frame()
+	if a.cur() != a.mine["收藏"] {
+		t.Fatal("我的 did not come back to the tab left")
 	}
 }
 
@@ -718,7 +754,7 @@ func TestLiveRoomUI(t *testing.T) {
 	grid.list[1].v = room
 	a.pages = append(a.pages, grid)
 	tt := newTester(a)
-	if !tt.HasText("直播中") || !tt.HasText("41 人在看") {
+	if !tt.HasText("直播中") || !tt.HasText("41 人在看") || !tt.HasText("@主播") {
 		t.Fatalf("card: %q", tt.Texts())
 	}
 	p := stub("推荐", 1)

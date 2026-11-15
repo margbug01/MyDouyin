@@ -412,6 +412,10 @@ func TestLiveSidebarPages(t *testing.T) {
 			t.Logf("follow feed has %q, not among the first %d followed", v.Author, len(follows))
 		}
 	}
+	mine, err := c.MyPosts(me.ID)()
+	if err != nil || len(mine) == 0 {
+		t.Fatalf("my posts: %d %v", len(mine), err)
+	}
 	saved, err := c.Collected()()
 	if err != nil || len(saved) == 0 {
 		t.Fatalf("collected: %d %v", len(saved), err)
