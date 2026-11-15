@@ -1,6 +1,7 @@
 package dy
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -43,5 +44,67 @@ func TestLiveFeed(t *testing.T) {
 	b, _ := os.ReadFile(dst)
 	if len(b) < 1000 || string(b[4:8]) != "ftyp" {
 		t.Fatalf("not an mp4: %d bytes", len(b))
+	}
+}
+
+// pager skips pages left empty by dropped entries and stops after the last.
+func TestPager(t *testing.T) {
+	pages := [][]int{{}, {1, 2}, {}, {3}}
+	i := 0
+	p := pager(func() ([]int, bool, error) {
+		i++
+		return pages[i-1], i < len(pages), nil
+	})
+	var got []int
+	for range 4 {
+		page, err := p()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, page...)
+	}
+	if fmt.Sprint(got) != "[1 2 3]" || i != len(pages) {
+		t.Fatalf("got %v after %d fetches", got, i)
+	}
+}
+
+// Search (two pages), a user's posts and the logged-in user's following list.
+// Live: skipped unless LIVE is set.
+func TestLiveLists(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	search := c.Search("猫")
+	vs, err := search()
+	if err != nil || len(vs) == 0 {
+		t.Fatalf("search: %d videos, %v", len(vs), err)
+	}
+	more, err := search()
+	if err != nil || len(more) == 0 || more[0].ID == vs[0].ID {
+		t.Fatalf("search page 2: %d videos, %v", len(more), err)
+	}
+	t.Logf("search: %d + %d videos, first by %q", len(vs), len(more), vs[0].Author)
+
+	posts, err := c.Posts(vs[0].AuthorID)()
+	if err != nil || len(posts) == 0 || posts[0].Author != vs[0].Author {
+		t.Fatalf("posts: %d videos, %v", len(posts), err)
+	}
+	t.Logf("posts: %d videos", len(posts))
+
+	me, err := c.Self()
+	if err != nil || me.ID == "" {
+		t.Fatalf("self: %v", err)
+	}
+	us, err := c.Following(me.ID)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("following: %d accounts", len(us))
+	if len(us) > 0 && (us[0].ID == "" || us[0].Name == "") {
+		t.Fatalf("following entry incomplete: %+v", us[0])
 	}
 }

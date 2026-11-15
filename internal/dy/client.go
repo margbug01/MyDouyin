@@ -29,12 +29,14 @@ type Client struct {
 	http    *http.Client
 	signer  *sign.Signer
 	cookie  string
+	uifid   string // the UIFID cookie, sent again as a header
 	refresh int
 }
 
 // Video is one entry of the recommend feed that has a playable video.
 type Video struct {
 	ID, Desc, Author string
+	AuthorID         string // sec_uid, which Posts takes
 	Size             int64
 	PlayURL          string // carries audio; the bit_rate gears named adapt_* are video-only
 	W, H             int
@@ -63,6 +65,9 @@ func New() (*Client, error) {
 	parts := make([]string, len(cookies))
 	for i, ck := range cookies {
 		parts[i] = ck.Name + "=" + ck.Value
+		if ck.Name == "UIFID" {
+			c.uifid = ck.Value
+		}
 	}
 	c.cookie = strings.Join(parts, "; ")
 	return c, nil
@@ -116,6 +121,14 @@ func (c *Client) Get(path, extra string) ([]byte, error) {
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Referer", "https://www.douyin.com/")
 	req.Header.Set("Cookie", c.cookie)
+	if c.uifid != "" {
+		// Douyin's gateway (ArgusSecurityPlugin) refuses a user's posts with 403
+		// "Uifid Not Found" without uifid, then "Signature Not Found" without x-tt-argus.
+		// shortcut: the gateway does not check x-tt-argus's value yet (as MediaCrawler
+		// found); once it does, compute x-secsdk-web-signature instead.
+		req.Header.Set("uifid", c.uifid)
+		req.Header.Set("x-tt-argus", "1")
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -166,26 +179,70 @@ func playURL(top addr, gears []struct {
 	return find(best), best
 }
 
-type awemeList struct {
-	StatusCode int `json:"status_code"`
-	List       []struct {
-		ID     string `json:"aweme_id"`
-		Desc   string
-		Author struct{ Nickname string }
-		Video  struct {
-			Duration int  `json:"duration"`
-			PlayAddr addr `json:"play_addr"`
-			Gears    []struct {
-				Name string `json:"gear_name"`
-				H265 int    `json:"is_h265"`
-				Addr addr   `json:"play_addr"`
-			} `json:"bit_rate"`
+type aweme struct {
+	ID     string `json:"aweme_id"`
+	Desc   string
+	Author struct {
+		Nickname string
+		SecUID   string `json:"sec_uid"`
+	}
+	Video struct {
+		Duration int  `json:"duration"`
+		PlayAddr addr `json:"play_addr"`
+		Gears    []struct {
+			Name string `json:"gear_name"`
+			H265 int    `json:"is_h265"`
+			Addr addr   `json:"play_addr"`
+		} `json:"bit_rate"`
+	}
+	Stats struct {
+		Likes    int `json:"digg_count"`
+		Comments int `json:"comment_count"`
+	} `json:"statistics"`
+}
+
+// videos keeps the entries with a play address: ads and photo posts have none.
+func videos(list []aweme) []Video {
+	var out []Video
+	for _, a := range list {
+		play, pa := playURL(a.Video.PlayAddr, a.Video.Gears)
+		if play == "" {
+			continue
 		}
-		Stats struct {
-			Likes    int `json:"digg_count"`
-			Comments int `json:"comment_count"`
-		} `json:"statistics"`
-	} `json:"aweme_list"`
+		out = append(out, Video{ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, PlayURL: play,
+			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
+			Likes: a.Stats.Likes, Comments: a.Stats.Comments})
+	}
+	return out
+}
+
+// getJSON calls Get and decodes the body into v, which must carry status_code.
+func (c *Client) getJSON(path, extra string, v interface{ code() int }) error {
+	b, err := c.Get(path, extra)
+	if err != nil {
+		return err
+	}
+	if len(b) == 0 {
+		return fmt.Errorf("dy: %s: empty reply (signature or login refused)", path)
+	}
+	if err := json.Unmarshal(b, v); err != nil {
+		return fmt.Errorf("dy: %s: %w", path, err)
+	}
+	if s := v.code(); s != 0 {
+		return fmt.Errorf("dy: %s: status %d", path, s)
+	}
+	return nil
+}
+
+type status struct {
+	Code int `json:"status_code"`
+}
+
+func (s status) code() int { return s.Code }
+
+type awemeList struct {
+	status
+	List []aweme `json:"aweme_list"`
 }
 
 // Feed returns the next page of the recommend feed: about 6 videos when
@@ -193,28 +250,136 @@ type awemeList struct {
 // address, are dropped.
 func (c *Client) Feed() ([]Video, error) {
 	c.refresh++
-	b, err := c.Get("/aweme/v1/web/tab/feed/", fmt.Sprintf("count=10&refresh_index=%d&video_type_select=1&aweme_pc_rec_raw_data=%%7B%%7D&globalwid=&pull_type=0", c.refresh))
-	if err != nil {
-		return nil, err
-	}
 	var r awemeList
-	if err := json.Unmarshal(b, &r); err != nil {
+	if err := c.getJSON("/aweme/v1/web/tab/feed/", fmt.Sprintf("count=10&refresh_index=%d&video_type_select=1&aweme_pc_rec_raw_data=%%7B%%7D&globalwid=&pull_type=0", c.refresh), &r); err != nil {
 		return nil, err
 	}
-	if r.StatusCode != 0 {
-		return nil, fmt.Errorf("dy: feed status %d", r.StatusCode)
-	}
-	var out []Video
-	for _, a := range r.List {
-		play, pa := playURL(a.Video.PlayAddr, a.Video.Gears)
-		if play == "" {
-			continue
+	return videos(r.List), nil
+}
+
+// A Pager returns the next page of a list each call, and an empty page after
+// the last. Pages are fetched until one has an entry, as ads and photo posts
+// are dropped and can make up a whole page.
+type Pager[T any] func() ([]T, error)
+
+// pager makes a Pager of fetch, which returns a page and whether more follow.
+func pager[T any](fetch func() ([]T, bool, error)) Pager[T] {
+	done := false
+	return func() ([]T, error) {
+		for !done {
+			page, more, err := fetch()
+			if err != nil {
+				return nil, err
+			}
+			done = !more
+			if len(page) > 0 {
+				return page, nil
+			}
 		}
-		out = append(out, Video{ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, PlayURL: play,
-			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
-			Likes: a.Stats.Likes, Comments: a.Stats.Comments})
+		return nil, nil
 	}
-	return out, nil
+}
+
+// Search pages through the videos found for keyword.
+func (c *Client) Search(keyword string) Pager[Video] {
+	offset, id := 0, "" // later pages carry the search_id the first one returned
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			status
+			Data []struct {
+				Aweme *aweme `json:"aweme_info"`
+			}
+			HasMore int `json:"has_more"`
+			Cursor  int `json:"cursor"`
+			Extra   struct {
+				LogID string `json:"logid"`
+			}
+		}
+		q := fmt.Sprintf("search_channel=aweme_video_web&keyword=%s&search_source=normal_search&query_correct_type=1&is_filter_search=0&offset=%d&count=10", url.QueryEscape(keyword), offset)
+		if id != "" {
+			q += "&search_id=" + url.QueryEscape(id)
+		}
+		if err := c.getJSON("/aweme/v1/web/search/item/", q, &r); err != nil {
+			return nil, false, err
+		}
+		var list []aweme
+		for _, d := range r.Data {
+			if d.Aweme != nil {
+				list = append(list, *d.Aweme)
+			}
+		}
+		more := r.HasMore != 0 && r.Cursor > offset
+		offset = r.Cursor
+		if id == "" {
+			id = r.Extra.LogID
+		}
+		return videos(list), more, nil
+	})
+}
+
+// Posts pages through a user's videos, newest first.
+func (c *Client) Posts(secUID string) Pager[Video] {
+	var cursor int64
+	return pager(func() ([]Video, bool, error) {
+		var r struct {
+			awemeList
+			HasMore int   `json:"has_more"`
+			Cursor  int64 `json:"max_cursor"`
+		}
+		q := fmt.Sprintf("sec_user_id=%s&max_cursor=%d&count=18&locate_query=false&show_live_replay_strategy=1&need_time_list=1&time_list_query=0&whale_cut_token=&cut_version=1&publish_video_strategy_type=2", url.QueryEscape(secUID), cursor)
+		if err := c.getJSON("/aweme/v1/web/aweme/post/", q, &r); err != nil {
+			return nil, false, err
+		}
+		cursor = r.Cursor
+		return videos(r.List), r.HasMore != 0, nil
+	})
+}
+
+// User is an account in a list such as the ones a user follows.
+type User struct {
+	ID, Name, Signature string // ID is the sec_uid
+}
+
+// Self returns the logged-in user.
+func (c *Client) Self() (User, error) {
+	var r struct {
+		status
+		User struct {
+			SecUID    string `json:"sec_uid"`
+			Nickname  string
+			Signature string
+		}
+	}
+	if err := c.getJSON("/aweme/v1/web/user/profile/self/", "", &r); err != nil {
+		return User{}, err
+	}
+	return User{r.User.SecUID, r.User.Nickname, r.User.Signature}, nil
+}
+
+// Following pages through the accounts secUID follows.
+func (c *Client) Following(secUID string) Pager[User] {
+	offset := 0
+	return pager(func() ([]User, bool, error) {
+		var r struct {
+			status
+			List []struct {
+				SecUID    string `json:"sec_uid"`
+				Nickname  string
+				Signature string
+			} `json:"followings"`
+			HasMore bool `json:"has_more"`
+		}
+		q := fmt.Sprintf("user_id=&sec_user_id=%s&offset=%d&min_time=0&max_time=0&count=20&source_type=4&gps_access=0&address_book_access=0", url.QueryEscape(secUID), offset)
+		if err := c.getJSON("/aweme/v1/web/user/following/list/", q, &r); err != nil {
+			return nil, false, err
+		}
+		out := make([]User, len(r.List))
+		for i, u := range r.List {
+			out[i] = User{u.SecUID, u.Nickname, u.Signature}
+		}
+		offset += len(out)
+		return out, r.HasMore && len(out) > 0, nil
+	})
 }
 
 // Download saves a video to dst. The CDN refuses a request without the Referer.
