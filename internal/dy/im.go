@@ -120,7 +120,7 @@ func (c *Client) imCall(path string, cmd int, body pb) ([]byte, error) {
 	hr.Header.Set("Accept", "application/x-protobuf")
 	hr.Header.Set("User-Agent", ua)
 	hr.Header.Set("Referer", "https://www.douyin.com/")
-	hr.Header.Set("Cookie", c.cookie)
+	hr.Header.Set("Cookie", c.cookies().cookie)
 	resp, err := c.http.Do(hr)
 	if err != nil {
 		return nil, err

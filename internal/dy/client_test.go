@@ -436,3 +436,62 @@ func TestLiveSidebarPages(t *testing.T) {
 	t.Logf("%s follows %d, %d followers, %d likes; feed %d (first %s), %d saved, %d watched, %d rooms (first %s, %s)",
 		me.Name, me.Following, me.Followers, me.Liked, len(feed), feed[0].Author, len(saved), len(seen), len(rooms), rooms[0].Author, rooms[0].Live.Viewers)
 }
+
+// Liking and saving go through ego lite and change what Douyin says of the
+// video; taking them back restores it; the client reads on with the cookies
+// the browser renewed. It writes to the account (a like and a save, each
+// taken back), so it runs only when LIVE_WRITE names a video to try it on.
+func TestLiveWrite(t *testing.T) {
+	id := os.Getenv("LIVE_WRITE")
+	if id == "" {
+		t.Skip("LIVE_WRITE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func() Video {
+		t.Helper()
+		v, err := c.Video(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	v := state()
+	if v.Liked || v.Saved {
+		t.Fatalf("pick a video neither liked nor saved: %+v", v)
+	}
+	steps := []struct {
+		name         string
+		do           func() error
+		liked, saved bool
+	}{
+		{"like", func() error { return c.SetLiked(id, true) }, true, false},
+		{"unlike", func() error { return c.SetLiked(id, false) }, false, false},
+		{"save", func() error { return c.SetSaved(id, true) }, false, true},
+		{"unsave", func() error { return c.SetSaved(id, false) }, false, false},
+	}
+	for _, s := range steps {
+		start := time.Now()
+		if err := s.do(); err != nil {
+			t.Fatalf("%s: %v", s.name, err)
+		}
+		took := time.Since(start)
+		// What Douyin says of the video catches up in a few seconds.
+		var v Video
+		for range 10 {
+			time.Sleep(time.Second)
+			if v = state(); v.Liked == s.liked && v.Saved == s.saved {
+				break
+			}
+		}
+		if v.Liked != s.liked || v.Saved != s.saved {
+			t.Errorf("after %s: liked %v saved %v", s.name, v.Liked, v.Saved)
+		}
+		t.Logf("%s in %v", s.name, took.Round(100*time.Millisecond))
+	}
+	if _, err := c.Self(); err != nil {
+		t.Fatalf("the client's login after the writes: %v", err)
+	}
+}

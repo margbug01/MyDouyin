@@ -29,10 +29,9 @@ const baseQuery = "device_platform=webapp&aid=6383&channel=channel_pc_web&pc_cli
 type Client struct {
 	http    *http.Client
 	signer  *sign.Signer
-	cookie  string
-	uifid   string       // the UIFID cookie, sent again as a header
-	imSeq   atomic.Int32 // the IM requests' sequence
-	refresh atomic.Int32 // the feed's page, which two lists of it share
+	login   atomic.Pointer[login] // the cookies, which a write through the browser renews
+	imSeq   atomic.Int32          // the IM requests' sequence
+	refresh atomic.Int32          // the feed's page, which two lists of it share
 }
 
 // Video is one entry of the recommend feed that has a playable video.
@@ -49,6 +48,19 @@ type Video struct {
 	Mix              Mix    // the series the video is an episode of, if any
 	Live             *Live  // a live room in the list, which has no PlayURL
 	Created          time.Time
+
+	Liked, Saved bool // whether the user logged in has liked it and saved it (收藏)
+}
+
+// login is the cookies a request carries, and the UIFID among them, which a
+// request sends again as a header.
+type login struct{ cookie, uifid string }
+
+func (c *Client) cookies() login {
+	if l := c.login.Load(); l != nil {
+		return *l
+	}
+	return login{}
 }
 
 // Live is a room broadcasting now: its stream as HLS, which AVFoundation
@@ -107,30 +119,48 @@ type Mix struct {
 // New loads the cookies the login step saved; without them the client is anonymous.
 func New() (*Client, error) {
 	c := &Client{http: &http.Client{Timeout: 60 * time.Second}, signer: sign.New(ua)}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, "Douyin", "cookies.json"))
+	err := c.ReloadCookies()
 	if errors.Is(err, os.ErrNotExist) {
 		return c, c.anonymous()
 	}
+	return c, err
+}
+
+// cookieFile is where the login's cookies are kept, as ego lite exports them.
+func cookieFile() (string, error) {
+	dir, err := os.UserConfigDir()
 	if err != nil {
-		return nil, err
+		return "", err
+	}
+	return filepath.Join(dir, "Douyin", "cookies.json"), nil
+}
+
+// ReloadCookies reads the login's cookies again, as a write through the
+// browser leaves them renewed.
+func (c *Client) ReloadCookies() error {
+	path, err := cookieFile()
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
 	}
 	var cookies []struct{ Name, Value string }
 	if err := json.Unmarshal(raw, &cookies); err != nil {
-		return nil, err
+		return err
 	}
+	var l login
 	parts := make([]string, len(cookies))
 	for i, ck := range cookies {
 		parts[i] = ck.Name + "=" + ck.Value
 		if ck.Name == "UIFID" {
-			c.uifid = ck.Value
+			l.uifid = ck.Value
 		}
 	}
-	c.cookie = strings.Join(parts, "; ")
-	return c, nil
+	l.cookie = strings.Join(parts, "; ")
+	c.login.Store(&l)
+	return nil
 }
 
 // anonymous registers a device cookie (ttwid), which is all a logged-out feed needs.
@@ -143,7 +173,7 @@ func (c *Client) anonymous() error {
 	resp.Body.Close()
 	for _, ck := range resp.Cookies() {
 		if ck.Name == "ttwid" {
-			c.cookie = "ttwid=" + ck.Value
+			c.login.Store(&login{cookie: "ttwid=" + ck.Value})
 			return nil
 		}
 	}
@@ -188,13 +218,14 @@ func (c *Client) call(method, path, extra, body string) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Referer", "https://www.douyin.com/")
-	req.Header.Set("Cookie", c.cookie)
-	if c.uifid != "" {
+	l := c.cookies()
+	req.Header.Set("Cookie", l.cookie)
+	if l.uifid != "" {
 		// Douyin's gateway (ArgusSecurityPlugin) refuses a user's posts with 403
 		// "Uifid Not Found" without uifid, then "Signature Not Found" without x-tt-argus.
 		// shortcut: the gateway does not check x-tt-argus's value yet (as MediaCrawler
 		// found); once it does, compute x-secsdk-web-signature instead.
-		req.Header.Set("uifid", c.uifid)
+		req.Header.Set("uifid", l.uifid)
 		req.Header.Set("x-tt-argus", "1")
 	}
 	resp, err := c.http.Do(req)
@@ -254,6 +285,8 @@ type aweme struct {
 	} `json:"cell_room"` // a live room, in place of a video
 	Desc    string
 	Created int64 `json:"create_time"`
+	Digged  int   `json:"user_digged"`
+	Saved   int   `json:"collect_stat"`
 	Author  struct {
 		Nickname string
 		SecUID   string `json:"sec_uid"`
@@ -314,7 +347,8 @@ func videos(list []aweme) []Video {
 		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
-			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0)})
+			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),
+			Liked: a.Digged == 1, Saved: a.Saved == 1})
 	}
 	return out
 }
@@ -802,6 +836,25 @@ func (c *Client) MixVideos(mixID string) Pager[Video] {
 		cursor = r.Cursor
 		return videos(r.List), more, nil
 	})
+}
+
+// Video reads one video as it is now, the user's like and save of it included.
+func (c *Client) Video(id string) (Video, error) {
+	var r struct {
+		status
+		Aweme *aweme `json:"aweme_detail"`
+	}
+	if err := c.getJSON("/aweme/v1/web/aweme/detail/", "aweme_id="+id, &r); err != nil {
+		return Video{}, err
+	}
+	if r.Aweme == nil {
+		return Video{}, fmt.Errorf("dy: video %s not found", id)
+	}
+	vs := videos([]aweme{*r.Aweme})
+	if len(vs) == 0 {
+		return Video{}, fmt.Errorf("dy: video %s has nothing to play", id)
+	}
+	return vs[0], nil
 }
 
 // FollowFeed pages through the videos of the accounts the user follows, the
