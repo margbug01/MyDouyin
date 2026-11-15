@@ -382,6 +382,44 @@ func (c *Client) Following(secUID string) Pager[User] {
 	})
 }
 
+// Comment is a top-level comment on a video.
+type Comment struct {
+	Author, Text, Place string // Place is the region Douyin shows, as 广东
+	Likes, Replies      int
+	Time                time.Time
+}
+
+// Comments pages through a video's comments, as Douyin orders them.
+func (c *Client) Comments(videoID string) Pager[Comment] {
+	cursor := 0
+	return pager(func() ([]Comment, bool, error) {
+		var r struct {
+			status
+			List []struct {
+				Text    string
+				User    struct{ Nickname string }
+				Likes   int    `json:"digg_count"`
+				Replies int    `json:"reply_comment_total"`
+				Time    int64  `json:"create_time"`
+				Place   string `json:"ip_label"`
+			} `json:"comments"`
+			Cursor  int `json:"cursor"`
+			HasMore int `json:"has_more"`
+		}
+		q := fmt.Sprintf("aweme_id=%s&cursor=%d&count=20&item_type=0&insert_ids=&whale_cut_token=&cut_version=1&rcFT=", videoID, cursor)
+		if err := c.getJSON("/aweme/v1/web/comment/list/", q, &r); err != nil {
+			return nil, false, err
+		}
+		out := make([]Comment, len(r.List))
+		for i, x := range r.List {
+			out[i] = Comment{x.User.Nickname, x.Text, x.Place, x.Likes, x.Replies, time.Unix(x.Time, 0)}
+		}
+		more := r.HasMore != 0 && r.Cursor > cursor
+		cursor = r.Cursor
+		return out, more, nil
+	})
+}
+
 // MyFollowing pages through the accounts the logged-in user follows.
 func (c *Client) MyFollowing() Pager[User] {
 	var next Pager[User]

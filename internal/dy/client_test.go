@@ -95,6 +95,17 @@ func TestLiveLists(t *testing.T) {
 	}
 	t.Logf("posts: %d videos", len(posts))
 
+	comments := c.Comments(vs[0].ID)
+	cs, err := comments()
+	if err != nil || len(cs) == 0 || cs[0].Text == "" || cs[0].Author == "" || cs[0].Time.Year() < 2016 {
+		t.Fatalf("comments: %d, %v", len(cs), err)
+	}
+	cs2, err := comments()
+	if err != nil || len(cs2) == 0 || cs2[0].Text == cs[0].Text {
+		t.Fatalf("comments page 2: %d, %v", len(cs2), err)
+	}
+	t.Logf("comments: %d + %d, first %q by %q (%s, %d likes)", len(cs), len(cs2), cs[0].Text, cs[0].Author, cs[0].Place, cs[0].Likes)
+
 	me, err := c.Self()
 	if err != nil || me.ID == "" {
 		t.Fatalf("self: %v", err)

@@ -59,6 +59,52 @@ type app struct {
 	query   string  // the search box
 	paused  bool
 	lastNav time.Time
+	sheet   *sheet // the comments open over the video, or nil
+}
+
+// sheet is the comments of the current video, loaded a page at a time.
+type sheet struct {
+	total    int
+	items    []dy.Comment
+	next     dy.Pager[dy.Comment]
+	fetching bool
+	done     bool
+	msg      string
+}
+
+// comments opens v's comments over it; the video goes on playing.
+func (a *app) comments(v dy.Video) {
+	a.sheet = &sheet{total: v.Comments, next: a.c.Comments(v.ID)}
+	a.moreComments()
+}
+
+func (a *app) moreComments() {
+	sh := a.sheet
+	if sh == nil || sh.fetching || sh.done {
+		return
+	}
+	sh.fetching = true
+	go func() {
+		cs, err := sh.next()
+		a.post(func() {
+			sh.fetching = false
+			if err != nil {
+				sh.msg = err.Error()
+				return
+			}
+			sh.msg, sh.done = "", len(cs) == 0
+			sh.items = append(sh.items, cs...)
+		})
+	}()
+}
+
+// escape closes the comments, or else the page on top.
+func (a *app) escape() {
+	if a.sheet != nil {
+		a.sheet = nil
+		return
+	}
+	a.back()
 }
 
 func (a *app) cur() *page { return a.pages[len(a.pages)-1] }
@@ -138,6 +184,7 @@ func (a *app) open(p *page) {
 		a.release(s)
 	}
 	a.pages = append(a.pages, p)
+	a.sheet = nil
 	a.paused = false
 	a.fill()
 }
@@ -151,6 +198,7 @@ func (a *app) back() {
 		a.release(s)
 	}
 	a.pages = a.pages[:len(a.pages)-1]
+	a.sheet = nil
 	a.paused = false
 	a.fill()
 }
@@ -260,6 +308,7 @@ func (a *app) step(d int) {
 	}
 	a.lastNav = now
 	p.idx, a.paused = i, false
+	a.sheet = nil // the comments were the last video's
 	a.fill()
 }
 
@@ -301,7 +350,7 @@ func (a *app) view(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
 	c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
 	c.OnShortcut(0, ui.KeySpace, a.toggle)
-	c.OnShortcut(0, ui.KeyEscape, a.back)
+	c.OnShortcut(0, ui.KeyEscape, a.escape)
 	p := a.cur()
 	ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).Children(func() {
 		// The video area takes the wheel and clicks. The top bar lies over it,
@@ -320,12 +369,19 @@ func (a *app) view(c *ui.Context) {
 			case ev.Kind == ui.InputPointerDown && ev.Button == 0:
 				return true
 			case ev.Kind == ui.InputPointerUp && !ev.Canceled && ev.Button == 0:
-				a.toggle()
+				if a.sheet != nil { // a click beside the comments closes them
+					a.sheet = nil
+				} else {
+					a.toggle()
+				}
 				return true
 			}
 			return false
 		}).Children(func() { a.content(c, p) })
 		a.topBar(c, p)
+		if a.sheet != nil {
+			a.commentSheet(c, a.sheet)
+		}
 	})
 }
 
@@ -361,15 +417,74 @@ func (a *app) content(c *ui.Context, p *page) {
 			ui.Text(c, "@"+s.v.Author).Bold().FontSize(16).TextColor(white)
 		})
 		ui.Text(c, s.v.Desc).FontSize(14).TextColor(white).MaxLines(3)
-		status := fmt.Sprintf("♥ %s   💬 %s   %d/%d", count(s.v.Likes), count(s.v.Comments), p.idx+1, len(p.list))
+		grey := ui.RGB(200, 200, 200)
 		switch {
 		case s.err != nil:
-			status = "无法播放：" + s.err.Error()
+			ui.Text(c, "无法播放："+s.err.Error()).FontSize(12).TextColor(grey)
 		case s.vp == nil:
-			status = "缓冲中…"
+			ui.Text(c, "缓冲中…").FontSize(12).TextColor(grey)
+		default:
+			ui.Row(c).Gap(14).Children(func() {
+				ui.Text(c, "♥ "+count(s.v.Likes)).FontSize(12).TextColor(grey)
+				tap(c, func() { a.comments(s.v) }).Children(func() {
+					ui.Text(c, "💬 "+count(s.v.Comments)).FontSize(12).TextColor(grey)
+				})
+				ui.Text(c, fmt.Sprintf("%d/%d", p.idx+1, len(p.list))).FontSize(12).TextColor(grey)
+			})
 		}
-		ui.Text(c, status).FontSize(12).TextColor(ui.RGB(200, 200, 200))
 	})
+}
+
+// commentSheet is the comments over the lower part of the video.
+func (a *app) commentSheet(c *ui.Context, sh *sheet) {
+	grey := ui.RGB(150, 150, 150)
+	ui.Column(c).Absolute().Top(160).Left(0).Right(0).Bottom(0).Background(ui.RGB(24, 24, 24)).Radius(12, 12, 0, 0).Children(func() {
+		ui.Row(c).Padding(14, 16).Children(func() {
+			ui.Text(c, count(sh.total)+" 条评论").Bold().FontSize(14).TextColor(white).Grow(1)
+			tap(c, func() { a.sheet = nil }).Children(func() {
+				ui.Text(c, "✕").FontSize(16).TextColor(grey)
+			})
+		})
+		ui.Scroll(c).Grow(1).Children(func() {
+			for _, cm := range sh.items {
+				ui.Column(c).Padding(8, 16).Gap(4).Children(func() {
+					ui.Text(c, cm.Author).FontSize(12).TextColor(grey)
+					ui.Text(c, cm.Text).FontSize(14).TextColor(white)
+					meta := when(cm.Time)
+					if cm.Place != "" {
+						meta += " · " + cm.Place
+					}
+					meta += "   ♥ " + count(cm.Likes)
+					if cm.Replies > 0 {
+						meta += fmt.Sprintf("   %d 条回复", cm.Replies)
+					}
+					ui.Text(c, meta).FontSize(11).TextColor(grey)
+				})
+			}
+			ui.Row(c).Padding(12, 16).Children(func() {
+				switch {
+				case sh.fetching:
+					ui.Text(c, "载入中…").FontSize(12).TextColor(grey)
+				case sh.msg != "":
+					ui.Text(c, sh.msg).FontSize(12).TextColor(grey)
+				case !sh.done:
+					tap(c, a.moreComments).Children(func() {
+						ui.Text(c, "更多评论").FontSize(12).TextColor(white)
+					})
+				case len(sh.items) == 0:
+					ui.Text(c, "还没有评论").FontSize(12).TextColor(grey)
+				}
+			})
+		})
+	})
+}
+
+// when is a comment's time as Douyin shows it: the day, and the year if not this one.
+func when(t time.Time) string {
+	if t.Year() == time.Now().Year() {
+		return t.Format("01-02")
+	}
+	return t.Format("2006-01-02")
 }
 
 // people lists p's accounts; a click opens one's videos.
@@ -418,10 +533,9 @@ func count(n int) string {
 	return fmt.Sprint(n)
 }
 
-// selfCheck (DY_SHOT=dir) walks the pages as clicks would and saves a shot of
-// each: the feed and its next video, a search for 猫, the first result's
-// author, the accounts the user follows, the first one's videos, the list
-// again, and the feed again. Then it quits.
+// selfCheck (DY_SHOT=dir) walks through what the last change touched, as
+// clicks would, saves a shot of each step and quits: now a search for 猫, the
+// first result's comments, and their second page.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -434,6 +548,9 @@ func (a *app) selfCheck(dir string) {
 			state := ""
 			for _, p := range a.pages {
 				state += fmt.Sprintf(" | %q idx=%d users=%d", p.title, p.idx, len(p.users))
+				if a.sheet != nil && p == a.cur() {
+					state += fmt.Sprintf(" comments=%d done=%v msg=%q", len(a.sheet.items), a.sheet.done, a.sheet.msg)
+				}
 				for i, s := range p.list {
 					if s.vp != nil || s.loading || s.err != nil {
 						state += fmt.Sprintf(" %d:vp=%v,loading=%v,err=%v", i, s.vp != nil, s.loading, s.err)
@@ -444,25 +561,12 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	shot("1.png")
-	a.post(func() { a.step(1) })
-	shot("2.png")
 	a.post(func() { a.search("猫") })
+	shot("1.png")
+	a.post(func() { a.comments(a.cur().list[0].v) })
+	shot("2.png")
+	a.post(a.moreComments)
 	shot("3.png")
-	a.post(func() { p := a.cur(); a.openAuthor(p, p.list[0].v.Author, p.list[0].v.AuthorID) })
-	shot("4.png")
-	a.post(func() { a.back(); a.back(); a.open(&page{title: "关注", people: a.c.MyFollowing()}) })
-	shot("5.png")
-	a.post(func() {
-		if p := a.cur(); len(p.users) > 0 {
-			a.openAuthor(p, p.users[0].Name, p.users[0].ID)
-		}
-	})
-	shot("6.png")
-	a.post(a.back)
-	shot("7.png")
-	a.post(a.back)
-	shot("8.png")
 	os.Exit(0)
 }
 

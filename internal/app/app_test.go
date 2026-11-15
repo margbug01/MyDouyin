@@ -152,3 +152,41 @@ func TestLiveFollowing(t *testing.T) {
 		t.Fatalf("after clicking a name: %d pages", len(a.pages))
 	}
 }
+
+// The comments close with their ✕, a click beside them and Escape, none of
+// which pauses or closes the page; moving to another video closes them too.
+func TestCommentSheet(t *testing.T) {
+	a := &app{pages: []*page{stub("", 3), stub("@作者", 3)}}
+	tt := ui.NewTester(a.view, 405, 720)
+	open := func() {
+		a.sheet = &sheet{total: 2, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条"}, {Author: "乙", Text: "第二条"}}}
+		tt.Frame()
+		if !tt.HasText("第一条") || !tt.HasText("2 条评论") {
+			t.Fatalf("sheet shows %q", tt.Texts())
+		}
+	}
+	check := func(how string) {
+		tt.Frame()
+		if a.sheet != nil || a.paused || len(a.pages) != 2 {
+			t.Fatalf("after %s: sheet %v, paused %v, %d pages", how, a.sheet != nil, a.paused, len(a.pages))
+		}
+	}
+	open()
+	if err := tt.Click("✕"); err != nil {
+		t.Fatal(err)
+	}
+	check("✕")
+	open()
+	tt.ClickAt(200, 100) // above the sheet
+	check("a click beside")
+	open()
+	tt.Key(0, ui.KeyEscape)
+	check("Escape")
+	open()
+	tt.ClickAt(200, 400) // on the sheet: nothing
+	if a.sheet == nil {
+		t.Fatal("a click on the sheet closed it")
+	}
+	tt.Key(0, ui.KeyDown)
+	check("the next video")
+}
