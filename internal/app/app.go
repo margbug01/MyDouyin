@@ -131,6 +131,8 @@ type app struct {
 	speedBits atomic.Uint64 // speed for the decoders
 	autoNext  bool          // 连播: the next video once one ends, rather than again
 	dmOff     bool          // bullet comments hidden
+	listen    bool          // 听抖音: the cover in the picture's place, the sound on
+	moreOpen  bool          // the rail's 更多 menu
 }
 
 // notes is the notifications, loaded a page at a time.
@@ -655,8 +657,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now the inbox, and a
-// chat with messages of the user's own.
+// clicks would, saves a shot of each step and quits: now 推荐 playing with
+// the rail, and the rail's 更多 menu open.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -682,29 +684,9 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	a.post(a.openDMs)
+	a.post(func() { a.root(a.feed) })
 	shot("1.png")
-	picked := make(chan string)
-	a.post(func() {
-		d := a.dms
-		if d == nil { // closed meanwhile, from the window
-			picked <- "the inbox was closed"
-			return
-		}
-		for i, ch := range d.chats {
-			mine, theirs := false, false
-			for _, m := range ch.Msgs {
-				mine = mine || m.Mine && !m.Tip
-				theirs = theirs || !m.Mine && !m.Tip
-			}
-			if mine && theirs {
-				d.open = i
-				break
-			}
-		}
-		picked <- fmt.Sprintf("chats=%d open=%d msg=%q", len(d.chats), d.open, d.msg)
-	})
-	log.Println(<-picked)
+	a.post(func() { a.moreOpen = true })
 	shot("2.png")
 	os.Exit(0)
 }

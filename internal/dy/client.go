@@ -44,7 +44,7 @@ type Video struct {
 	W, H             int
 	Duration         time.Duration
 	Likes, Comments  int
-	Collects         int
+	Collects, Shares int
 	Cover, Avatar    string // image addresses: the frame the video shows first, the author's picture
 	Created          time.Time
 }
@@ -215,6 +215,7 @@ type aweme struct {
 		Likes    int `json:"digg_count"`
 		Comments int `json:"comment_count"`
 		Collects int `json:"collect_count"`
+		Shares   int `json:"share_count"`
 	} `json:"statistics"`
 }
 
@@ -236,7 +237,7 @@ func videos(list []aweme) []Video {
 		}
 		out = append(out, Video{ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
-			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects,
+			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
 			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0)})
 	}
 	return out

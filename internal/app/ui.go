@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"douyin/internal/dy"
@@ -432,7 +434,15 @@ func (a *app) stage(c *ui.Context, p *page) {
 		}
 		s := p.list[p.idx]
 		picture.Children(func() {
-			if s.vp != nil {
+			if s.vp != nil && a.listen { // 听抖音: the sound goes on, the picture gives way to the cover
+				if bmp := a.img.get(s.v.Cover); bmp != nil {
+					ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.35)
+				}
+				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(10).Children(func() {
+					ui.Icon(c, iconHeadphones).Size(48, 48).TextColor(white)
+					ui.Text(c, "听抖音中").FontSize(15).FontWeight(600).TextColor(white)
+				})
+			} else if s.vp != nil {
 				ui.Video(c, s.vp).Fill().Fit(ui.Contain)
 			} else if bmp := a.img.get(s.v.Cover); bmp != nil {
 				// The cover stands in while the video downloads.
@@ -458,7 +468,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 			c.After(500 * time.Millisecond) // the time moves on
 		}
 		a.caption(c, p, s)
-		a.rail(c, p, s)
+		a.rail(c, p, s, box.Bounds().H)
 		a.controls(c, s, at)
 	})
 }
@@ -564,25 +574,47 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 	})
 }
 
-// rail is the column of actions down the right of the video, as Douyin's:
-// the author, the likes, the comments, the saves and the download.
-func (a *app) rail(c *ui.Context, p *page, s *slot) {
-	ui.Column(c).Absolute().Right(12).Bottom(64).Gap(12).AlignItems(ui.Center).Children(func() {
-		ab := ui.ButtonBase(c.Key("avatar")).FocusRing(false).Label("作者主页").Margin(0, 0, 8, 0).
+// rail is the column down the right of the video, as Douyin's: the author,
+// the likes, the comments, the saves, sharing, listening, and more. Liking
+// and saving need Douyin's write endpoints, which the client cannot sign
+// yet, so their counts show as text, not buttons. On a short stage the
+// column shrinks to fit.
+func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
+	icon, gap := float32(34), float32(14)
+	if height > 0 && height < 680 {
+		icon, gap = 28, 8
+	}
+	shadow := ui.RGBA(0, 0, 0, 0.45)
+	ui.Column(c).Absolute().Right(14).Bottom(64).Gap(gap).AlignItems(ui.Center).Children(func() {
+		ab := ui.ButtonBase(c.Key("avatar")).FocusRing(false).Label("作者主页").Margin(0, 0, 4, 0).
 			Radius(999).Border(2, white)
-		ab.Children(func() { a.avatar(c, s.v.Avatar, s.v.Author, 44) })
+		ab.Children(func() { a.avatar(c, s.v.Avatar, s.v.Author, icon+16) })
 		if ab.Clicked() {
 			a.openAuthor(p, s.v.Author, s.v.AuthorID)
 		}
-		action := func(key string, icon *ui.SVG, label, count string, color ui.Color) ui.Element {
+		under := func(text string) {
+			ui.Text(c, text).FontSize(14).FontWeight(600).TextColor(ui.RGBA(255, 255, 255, 0.9)).TextShadow(0, 1, 3, shadow).SingleLine()
+		}
+		// shown is a count with its icon, which does nothing.
+		shown := func(ic *ui.SVG, label, n string) {
+			ui.Column(c).Gap(2).AlignItems(ui.Center).Label(label + " " + n).Children(func() {
+				ui.Box(c).Size(icon+16, icon+16).Center().Children(func() {
+					ui.Icon(c, ic).Size(icon, icon).TextColor(white)
+				})
+				under(n)
+			})
+		}
+		action := func(key string, ic *ui.SVG, label, text string, color ui.Color) ui.Element {
 			var b ui.Element
-			ui.Column(c).Gap(0).AlignItems(ui.Center).Children(func() {
-				b = iconButton(c.Key(key), icon, 28, color, label)
-				ui.Text(c, count).FontSize(12).FontWeight(600).TextColor(ui.RGBA(255, 255, 255, 0.86)).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.4))
+			ui.Column(c).Gap(2).AlignItems(ui.Center).Children(func() {
+				b = iconButton(c.Key(key), ic, icon, color, label)
+				if text != "" {
+					under(text)
+				}
 			})
 			return b
 		}
-		action("likes", iconHeartFill, "点赞数", count(s.v.Likes), white)
+		shown(iconHeartFill, "点赞", count(s.v.Likes))
 		color := white
 		if a.sheet != nil {
 			color = pal.accent
@@ -594,22 +626,87 @@ func (a *app) rail(c *ui.Context, p *page, s *slot) {
 				a.comments(s.v)
 			}
 		}
-		action("collects", iconStar, "收藏数", count(s.v.Collects), white)
-		label, icon := "下载", iconDownload
+		shown(iconStar, "收藏", count(s.v.Collects))
+		if action("share", iconShare, "分享：复制链接", count(s.v.Shares), white).Clicked() {
+			a.copyLink(s.v)
+		}
+		color = white
+		if a.listen {
+			color = pal.accent
+		}
+		if action("listen", iconHeadphones, "听抖音", "听抖音", color).Clicked() {
+			a.listen = !a.listen
+		}
+		more := action("more", iconMore, "更多", "", white)
+		if more.Clicked() {
+			a.moreOpen = !a.moreOpen
+		}
+		a.moreMenu(c, more, s)
+	})
+}
+
+// moreMenu drops from the rail's 更多: saving the video to Downloads,
+// copying its link, and opening it on the web.
+func (a *app) moreMenu(c *ui.Context, anchor ui.Element, s *slot) {
+	ui.PopoverBase(c.Key("more-menu"), anchor, &a.moreOpen, func(panel ui.Element) {
+		panel.AttachTo(anchor, ui.AnchorStart, ui.AnchorEnd).Margin(0, 8, 0, 0).Padding(5).Gap(1).Width(200).
+			Radius(12).Background(ui.Hex("#2b2b2e")).Border(0.5, ui.RGBA(255, 255, 255, 0.14)).Shadow(0, 8, 24, -4, ui.RGBA(0, 0, 0, 0.35)).
+			Role(ui.RoleMenu).FocusGroup(ui.Vertical).Label("更多").
+			Transition(ui.ElementTransition{Animation: &ui.Snappy, Enter: &ui.Motion{Scale: 0.96}, Exit: &ui.Motion{Scale: 0.98}})
+		label, ic := "下载到「下载」文件夹", iconDownload
 		switch {
 		case s.saved == "保存中…":
-			label = "保存中"
+			label = "保存中…"
 		case strings.HasPrefix(s.saved, "已存到"):
-			label, icon = "已下载", iconCheck
+			label, ic = "已下载", iconCheck
 		}
-		b := action("save", icon, "下载到「下载」文件夹", label, white)
-		if s.vp == nil || s.saved == "保存中…" {
+		if b := menuItem(c, ic, label); s.vp == nil || s.saved == "保存中…" {
 			b.Disabled(true).Opacity(0.4)
 		} else if b.Clicked() {
+			a.moreOpen = false
 			a.save(s)
+		}
+		if menuItem(c, iconLink, "复制链接").Clicked() {
+			a.moreOpen = false
+			a.copyLink(s.v)
+		}
+		if menuItem(c, iconGlobe, "在浏览器中打开").Clicked() {
+			a.moreOpen = false
+			if err := mygo.Shell.OpenExternal(videoURL(s.v)); err != nil {
+				a.toast = "打不开浏览器：" + err.Error()
+			}
 		}
 	})
 }
+
+// menuItem is an item of a dropdown: an icon and its label, MySpotify's.
+func menuItem(c *ui.Context, ic *ui.SVG, label string) ui.Element {
+	b := ui.ButtonBase(c.Key(label)).Role(ui.RoleMenuItem).Label(label).Height(32).PaddingX(9).Gap(9).Radius(7).
+		AlignItems(ui.Center).Justify(ui.Start).FocusRing(false)
+	if b.Hovered() || b.FocusVisible() {
+		b.Background(pal.press)
+	}
+	return b.Children(func() {
+		ui.Icon(c, ic).Size(15, 15).TextColor(pal.muted)
+		ui.Text(c, label).FontSize(13).TextColor(pal.text)
+	})
+}
+
+// videoURL is a video's page on the web.
+func videoURL(v dy.Video) string { return "https://www.douyin.com/video/" + v.ID }
+
+// copyLink puts v's link on the clipboard, as Douyin's share does with no app
+// to share to.
+func (a *app) copyLink(v dy.Video) {
+	if err := copyText(videoURL(v)); err != nil {
+		a.toast = "复制失败：" + err.Error()
+		return
+	}
+	a.toast = "已复制视频链接"
+}
+
+// copyText writes text to the clipboard; a test puts its own.
+var copyText = func(text string) error { return mygo.Clipboard.Write(transfer.TextData(text)) }
 
 // commentPanel is the comments of the video beside it, loaded a page at a time.
 func (a *app) commentPanel(c *ui.Context, sh *sheet) {
@@ -880,19 +977,24 @@ func fillIcon(paths string) *ui.SVG {
 const heartPath = `<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>`
 
 var (
-	iconPlay      = fillIcon(`<path d="M7 4.6v14.8c0 .8.9 1.3 1.6.9l12-7.4c.6-.4.6-1.3 0-1.7l-12-7.4C7.9 3.3 7 3.8 7 4.6z"/>`)
-	iconPause     = fillIcon(`<rect x="5.5" y="4" width="4.5" height="16" rx="1.4"/><rect x="14" y="4" width="4.5" height="16" rx="1.4"/>`)
-	iconHeartFill = fillIcon(heartPath)
-	iconHeart     = strokeIcon(heartPath)
-	iconStar      = fillIcon(`<path d="M12 2.8l2.8 5.7 6.3.9-4.6 4.4 1.1 6.3L12 17.1l-5.6 3 1.1-6.3L2.9 9.4l6.3-.9z"/>`)
-	iconSearch    = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>`)
-	iconGrid      = strokeIcon(`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>`)
-	iconSpark     = strokeIcon(`<path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m6 6 2.5 2.5"/><path d="m15.5 15.5 2.5 2.5"/><path d="m6 18 2.5-2.5"/><path d="m15.5 8.5 2.5-2.5"/>`)
-	iconBack      = strokeIcon(`<path d="m15 18-6-6 6-6"/>`)
-	iconComment   = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
-	iconDownload  = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
-	iconCheck     = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
-	iconChat      = strokeIcon(`<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`)
-	iconBell      = strokeIcon(`<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>`)
-	iconClose     = strokeIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
+	iconPlay       = fillIcon(`<path d="M7 4.6v14.8c0 .8.9 1.3 1.6.9l12-7.4c.6-.4.6-1.3 0-1.7l-12-7.4C7.9 3.3 7 3.8 7 4.6z"/>`)
+	iconPause      = fillIcon(`<rect x="5.5" y="4" width="4.5" height="16" rx="1.4"/><rect x="14" y="4" width="4.5" height="16" rx="1.4"/>`)
+	iconHeartFill  = fillIcon(heartPath)
+	iconHeart      = strokeIcon(heartPath)
+	iconStar       = fillIcon(`<path d="M12 2.8l2.8 5.7 6.3.9-4.6 4.4 1.1 6.3L12 17.1l-5.6 3 1.1-6.3L2.9 9.4l6.3-.9z"/>`)
+	iconSearch     = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>`)
+	iconGrid       = strokeIcon(`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>`)
+	iconSpark      = strokeIcon(`<path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m6 6 2.5 2.5"/><path d="m15.5 15.5 2.5 2.5"/><path d="m6 18 2.5-2.5"/><path d="m15.5 8.5 2.5-2.5"/>`)
+	iconBack       = strokeIcon(`<path d="m15 18-6-6 6-6"/>`)
+	iconComment    = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
+	iconDownload   = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
+	iconCheck      = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
+	iconShare      = fillIcon(`<path d="M13.5 4.5v3.6C7.2 8.8 3.6 12.7 3 19.5c2.3-3.2 5.4-4.9 10.5-5v3.9L21 11z"/>`)
+	iconHeadphones = strokeIcon(`<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>`)
+	iconMore       = fillIcon(`<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>`)
+	iconLink       = strokeIcon(`<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>`)
+	iconGlobe      = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>`)
+	iconChat       = strokeIcon(`<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`)
+	iconBell       = strokeIcon(`<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>`)
+	iconClose      = strokeIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
 )

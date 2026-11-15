@@ -286,13 +286,17 @@ func TestSave(t *testing.T) {
 	}
 }
 
-// The download button is off until the video is ready, does not pause, and
-// shows its progress.
+// 下载, in the rail's 更多, is off until the video is ready, does not pause,
+// and shows its progress.
 func TestSaveButton(t *testing.T) {
 	p := stub("推荐", 1)
 	s := p.list[0]
 	a := withRoots(&app{pages: []*page{p}, dir: t.TempDir()})
 	tt := newTester(a)
+	if err := tt.Click("更多"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
 	tt.Click("下载到「下载」文件夹")
 	if s.saved != "" {
 		t.Fatal("saving before the video is ready")
@@ -303,8 +307,45 @@ func TestSaveButton(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if a.paused || s.saved != "保存中…" || !tt.HasText("保存中") {
-		t.Fatalf("after click: paused %v, saved %q", a.paused, s.saved)
+	if a.paused || s.saved != "保存中…" || a.moreOpen {
+		t.Fatalf("after click: paused %v, saved %q, menu open %v", a.paused, s.saved, a.moreOpen)
+	}
+}
+
+// The rail has Douyin's column: the counts, sharing, which copies the
+// video's link, 听抖音, which puts the cover in the picture's place and plays
+// on, and 更多's menu, whose 复制链接 copies it too.
+func TestRail(t *testing.T) {
+	var copied []string
+	copyText = func(s string) error { copied = append(copied, s); return nil }
+	p := stub("推荐", 1)
+	p.list[0].v = dy.Video{ID: "42", Author: "作者", Likes: 12000, Comments: 3, Collects: 4, Shares: 5}
+	ready(t, p.list[0])
+	a := withRoots(&app{pages: []*page{p}})
+	tt := newTester(a)
+	for _, want := range []string{"1.2万", "3", "4", "5", "听抖音"} {
+		if !tt.HasText(want) {
+			t.Fatalf("rail lacks %q: %q", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("分享：复制链接"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("听抖音"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.listen || a.paused || !tt.HasText("听抖音中") {
+		t.Fatalf("听抖音: listen %v paused %v", a.listen, a.paused)
+	}
+	tt.Click("更多")
+	tt.Frame()
+	if err := tt.Click("复制链接"); err != nil {
+		t.Fatal(err)
+	}
+	want := "https://www.douyin.com/video/42"
+	if len(copied) != 2 || copied[0] != want || copied[1] != want || a.paused {
+		t.Fatalf("copied %q, paused %v", copied, a.paused)
 	}
 }
 
