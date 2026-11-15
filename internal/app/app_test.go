@@ -229,7 +229,7 @@ func TestComments(t *testing.T) {
 	open := func() {
 		a.sheet = &sheet{total: 2, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条"}, {Author: "乙", Text: "第二条"}}}
 		tt.Frame()
-		if !tt.HasText("第一条") || !tt.HasText("2 条评论") {
+		if !tt.HasText("第一条") || !tt.HasText("评论 2") {
 			t.Fatalf("panel shows %q", tt.Texts())
 		}
 	}
@@ -606,5 +606,101 @@ func TestDMs(t *testing.T) {
 	tt.Frame()
 	if a.dms != nil || len(a.pages) != 1 {
 		t.Fatal("Escape on the list did not close it, or closed the page")
+	}
+}
+
+// The comments' 相关推荐 tab lists the related videos; one clicked plays in
+// a page of them, at its place, the list loaded with it.
+func TestRelatedTab(t *testing.T) {
+	p := stub("推荐", 1)
+	ready(t, p.list[0])
+	a := withRoots(&app{pages: []*page{p}})
+	a.sheet = &sheet{done: true, relDone: true, rel: []dy.Video{{ID: "1", Desc: "相关一", Author: "甲"}, {ID: "2", Desc: "相关二", Author: "乙"}}}
+	tt := newTester(a)
+	if tt.HasText("相关二") {
+		t.Fatal("related shown before its tab")
+	}
+	if err := tt.Click("相关推荐"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("相关一") || !tt.HasText("相关二") {
+		t.Fatalf("tab shows %q", tt.Texts())
+	}
+	if err := tt.Click("相关二"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	q := a.cur()
+	if len(a.pages) != 2 || q.title != "相关推荐" || q.idx != 1 || len(q.list) != 2 || !q.done || a.sheet != nil {
+		t.Fatalf("after a click: %d pages, %q idx %d", len(a.pages), q.title, q.idx)
+	}
+}
+
+// A video of a series shows it under its text, with its episode; a click
+// opens the series' grid. Live: the series loads in the background.
+func TestLiveMixChip(t *testing.T) {
+	c := live(t)
+	p := stub("推荐", 1)
+	p.list[0].v.Mix = dy.Mix{ID: "1", Name: "某合集", Episode: 2, Updated: 9}
+	a := withRoots(&app{c: c, pages: []*page{p}})
+	tt := newTester(a)
+	if !tt.HasText("合集 · 某合集 · 第2集，更新至第9集") {
+		t.Fatalf("no series: %q", tt.Texts())
+	}
+	if err := tt.Click("合集：某合集"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.pages) != 2 || a.cur().title != "合集：某合集" || !a.cur().grid {
+		t.Fatalf("after a click: %d pages %q", len(a.pages), a.cur().title)
+	}
+}
+
+// The empty search field drops the hot search list, which a press searches
+// for; typed into, the field hides it. Live: the search runs in the background.
+func TestLiveHotList(t *testing.T) {
+	c := live(t)
+	a := withRoots(&app{c: c, pages: []*page{stub("推荐", 1)}, hot: []dy.Hot{{Word: "置顶词"}, {Word: "第一热", Value: 120000}}})
+	tt := newTester(a)
+	if tt.HasText("第一热") {
+		t.Fatal("hot list before the field has the focus")
+	}
+	tt.Click("搜索")
+	tt.Frame()
+	if !tt.HasText("第一热") || !tt.HasText("12.0万") {
+		t.Fatalf("focused: %q", tt.Texts())
+	}
+	tt.Type("x")
+	tt.Frame()
+	if tt.HasText("第一热") {
+		t.Fatal("hot list over what is typed")
+	}
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if err := tt.Click("第一热"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.cur().title != "搜索：第一热" {
+		t.Fatalf("after a press: %q", a.cur().title)
+	}
+}
+
+// 喜欢 shows in the sidebar once the account is known, and opens its grid.
+func TestLikedNav(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+	tt := newTester(a)
+	if tt.HasText("喜欢") {
+		t.Fatal("喜欢 before the account is known")
+	}
+	a.liked = stub("喜欢", 2)
+	a.liked.grid = true
+	tt.Frame()
+	if err := tt.Click("喜欢"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.cur() != a.liked || len(a.pages) != 1 {
+		t.Fatal("喜欢 did not open its grid")
 	}
 }

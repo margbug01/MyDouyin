@@ -100,10 +100,60 @@ func (a *app) view(c *ui.Context) {
 			})
 		})
 	})
+	if c.Focused(a.searchBox) && strings.TrimSpace(a.query) == "" && len(a.hot) > 0 {
+		a.hotList(c)
+	}
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
+}
+
+// searchField is where the search field sits in the window: its left edge
+// and width, centered over the content.
+func searchField(c *ui.Context) (left, width float32) {
+	w, _ := c.Size()
+	width = min(460, w-sidebarWidth-2*260)
+	return sidebarWidth + (w-sidebarWidth-width)/2, width
+}
+
+// hotList drops from the empty search field: the hot search list's first
+// ten, which a press searches for. A press, not a click: the field loses the
+// focus as it is pressed, which takes the list away before a release.
+func (a *app) hotList(c *ui.Context) {
+	left, width := searchField(c)
+	ui.Column(c.Key("hot")).Absolute().Top(52).Left(left).Width(width).Padding(8, 6).Radius(12).
+		Background(ui.Hex("#252733")).Border(0.5, pal.hairline).Shadow(0, 10, 30, -6, ui.RGBA(0, 0, 0, 0.5)).Children(func() {
+		ui.Text(c, "抖音热搜").FontSize(12).FontWeight(600).TextColor(pal.faint).Margin(2, 10, 6, 10)
+		for i, h := range a.hot[:min(10, len(a.hot))] {
+			row := ui.Row(c.Key(h.Word)).Height(34).PaddingX(10).Gap(10).Radius(8).AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(h.Word)
+			row.HandleInput(func(ev ui.InputEvent) bool {
+				if ev.Kind == ui.InputPointerDown && ev.Button == 0 {
+					a.query = h.Word
+					a.search(h.Word)
+					return true
+				}
+				return false
+			})
+			if row.Hovered() {
+				row.Background(pal.hover)
+			}
+			row.Children(func() {
+				rank, color := fmt.Sprint(i), pal.faint
+				switch {
+				case i == 0:
+					rank, color = "顶", pal.accent
+				case i <= 3:
+					color = ui.Hex("#ff9f43")
+				}
+				ui.Text(c, rank).FontSize(13).FontWeight(700).TextColor(color).Width(20)
+				ui.Text(c, h.Word).FontSize(13.5).TextColor(pal.text).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+				if h.Value > 0 {
+					ui.Text(c, count(h.Value)).FontSize(11.5).TextColor(pal.faint)
+				}
+			})
+		}
+	})
 }
 
 func (a *app) sidebar(c *ui.Context) {
@@ -115,6 +165,9 @@ func (a *app) sidebar(c *ui.Context) {
 		}
 		if a.navItem(c, iconSpark, "推荐", a.pages[0] == a.feed).Clicked() {
 			a.root(a.feed)
+		}
+		if a.liked != nil && a.navItem(c, iconHeart, "喜欢", a.pages[0] == a.liked).Clicked() {
+			a.root(a.liked)
 		}
 		ui.Box(c).Height(1).Background(pal.hairline).Margin(10, 10)
 		ui.Scroll(c.Key("follows")).Grow(1).Margin(0, -6).Padding(0, 6).Gap(2).Children(func() {
@@ -230,9 +283,8 @@ func (a *app) topBar(c *ui.Context, p *page) {
 					})
 			}
 		})
-		w, _ := c.Size()
-		fieldW := min(460, w-sidebarWidth-2*260)
-		left := (w - sidebarWidth - fieldW) / 2
+		left, fieldW := searchField(c)
+		left -= sidebarWidth // the bar starts beside the sidebar
 		field := ui.Row(c).Absolute().Top(10).Left(left).Width(fieldW).Height(36).Radius(10).PaddingStart(14).
 			AlignItems(ui.Center).Background(pal.hover)
 		if c.Focused(a.searchBox) {
@@ -521,6 +573,27 @@ func (a *app) caption(c *ui.Context, p *page, s *slot) {
 			ui.Text(c, "· "+ago(s.v.Created, time.Now())).FontSize(12.5).TextColor(ui.RGBA(255, 255, 255, 0.6))
 		})
 		ui.Text(c, s.v.Desc).FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.88)).MaxLines(2).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.4))
+		if m := s.v.Mix; m.ID != "" {
+			text := "合集 · " + m.Name
+			if m.Episode > 0 {
+				text += fmt.Sprintf(" · 第%d集", m.Episode)
+			}
+			if m.Updated > 0 {
+				text += fmt.Sprintf("，更新至第%d集", m.Updated)
+			}
+			b := ui.ButtonBase(c.Key("mix")).AlignSelf(ui.Start).Height(30).PaddingX(12).Gap(6).Radius(8).AlignItems(ui.Center).FocusRing(false).Label("合集："+m.Name).Margin(4, 0, 0, 0)
+			bg := ui.RGBA(255, 255, 255, 0.14)
+			if b.Hovered() {
+				bg = ui.RGBA(255, 255, 255, 0.22)
+			}
+			b.Background(bg).Children(func() {
+				ui.Icon(c, iconLayers).Size(14, 14).TextColor(white)
+				ui.Text(c, text).FontSize(12.5).FontWeight(500).TextColor(white).SingleLine()
+			})
+			if b.Clicked() {
+				a.openMix(p, s.v)
+			}
+		}
 	})
 }
 
@@ -711,12 +784,40 @@ var copyText = func(text string) error { return mygo.Clipboard.Write(transfer.Te
 // commentPanel is the comments of the video beside it, loaded a page at a time.
 func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 	ui.Column(c.Key("comments")).Width(360).Radius(12).Background(pal.raised).Children(func() {
-		ui.Row(c).Padding(10, 8, 6, 16).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, count(sh.total)+" 条评论").FontSize(14).FontWeight(600).TextColor(pal.text).Grow(1)
+		ui.Row(c).Padding(10, 8, 6, 16).Gap(18).AlignItems(ui.Center).Children(func() {
+			tab := func(label string, on bool) bool {
+				b := ui.ButtonBase(c.Key(label)).Column().Gap(4).AlignItems(ui.Center).FocusRing(false).Label(label)
+				b.Children(func() {
+					color, weight := pal.muted, 500
+					if on {
+						color, weight = white, 700
+					}
+					ui.Text(c, label).FontSize(14).FontWeight(weight).TextColor(color)
+					bar := ui.Box(c).Width(14).Height(2).Radius(1)
+					if on {
+						bar.Background(pal.accent)
+					}
+				})
+				return b.Clicked()
+			}
+			if tab("评论 "+count(sh.total), !sh.related) {
+				sh.related = false
+			}
+			if tab("相关推荐", sh.related) {
+				sh.related = true
+				if len(sh.rel) == 0 {
+					a.moreRelated()
+				}
+			}
+			ui.Box(c).Grow(1)
 			if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭评论").Clicked() {
 				a.sheet = nil
 			}
 		})
+		if sh.related {
+			a.relatedList(c, sh)
+			return
+		}
 		ui.Scroll(c.Key("comment-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
 			for _, cm := range sh.items {
 				ui.Row(c).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
@@ -750,6 +851,48 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 					ui.Text(c, "还没有评论").FontSize(12).TextColor(pal.faint)
 				}
 			})
+		})
+	})
+}
+
+// relatedList is the 相关推荐 tab: the videos Douyin relates to the one
+// playing, each a cover beside its text, which plays it.
+func (a *app) relatedList(c *ui.Context, sh *sheet) {
+	ui.Scroll(c.Key("related-list")).Grow(1).Padding(4, 12, 12, 12).Gap(6).Children(func() {
+		for i, v := range sh.rel {
+			b := ui.ButtonBase(c.Key(fmt.Sprint(i))).Row().Padding(6).Gap(10).Radius(10).AlignItems(ui.Start).Justify(ui.Start).FocusRing(false).Label(v.Desc)
+			if b.Hovered() {
+				b.Background(pal.hover)
+			}
+			b.Children(func() {
+				ui.Box(c).Width(128).AspectRatio(16.0 / 9).Radius(8).Clip().Background(pal.press).Children(func() {
+					if bmp := a.img.get(v.Cover); bmp != nil {
+						ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+					}
+					ui.Text(c, clock(v.Duration)).Absolute().Right(5).Bottom(4).FontSize(10.5).FontWeight(600).TextColor(white).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.6))
+				})
+				ui.Column(c).Gap(5).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+					ui.Text(c, v.Desc).FontSize(13).TextColor(pal.text).MaxLines(2)
+					ui.Text(c, "@"+v.Author+" · ♥ "+count(v.Likes)).FontSize(11.5).TextColor(pal.faint).SingleLine()
+				})
+			})
+			if b.Clicked() {
+				a.playRelated(i)
+			}
+		}
+		ui.Row(c).Padding(12, 0).Justify(ui.Center).Children(func() {
+			switch {
+			case sh.relBusy:
+				ui.Text(c, "载入中…").FontSize(12).TextColor(pal.faint)
+			case sh.relMsg != "":
+				ui.Text(c, sh.relMsg).FontSize(12).TextColor(pal.faint)
+			case !sh.relDone && len(sh.rel) > 0:
+				if ui.Button(c.Key("more-related"), "更多").Clicked() {
+					a.moreRelated()
+				}
+			case len(sh.rel) == 0:
+				ui.Text(c, "没有相关推荐").FontSize(12).TextColor(pal.faint)
+			}
 		})
 	})
 }
@@ -989,6 +1132,7 @@ var (
 	iconComment    = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
 	iconDownload   = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
 	iconCheck      = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
+	iconLayers     = strokeIcon(`<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>`)
 	iconShare      = fillIcon(`<path d="M13.5 4.5v3.6C7.2 8.8 3.6 12.7 3 19.5c2.3-3.2 5.4-4.9 10.5-5v3.9L21 11z"/>`)
 	iconHeadphones = strokeIcon(`<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>`)
 	iconMore       = fillIcon(`<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>`)

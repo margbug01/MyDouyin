@@ -125,7 +125,9 @@ type app struct {
 
 	notes  *notes // the notifications open beside the page, or nil
 	unread int
-	dms    *dms // the direct messages open beside the page, or nil
+	liked  *page    // the root of the videos the user liked, once the account is known
+	hot    []dy.Hot // the hot search list, under the search box
+	dms    *dms     // the direct messages open beside the page, or nil
 
 	speed     float64       // 1 as recorded
 	speedBits atomic.Uint64 // speed for the decoders
@@ -250,13 +252,64 @@ type sheet struct {
 	fetching bool
 	done     bool
 	msg      string
+
+	related bool // the 相关推荐 tab shown rather than the comments
+	v       dy.Video
+	rel     []dy.Video // the videos related to v, loaded once the tab shows
+	relNext dy.Pager[dy.Video]
+	relBusy bool
+	relDone bool
+	relMsg  string
 }
 
 // comments opens v's comments over it; the video goes on playing.
 func (a *app) comments(v dy.Video) {
 	a.notes, a.dms = nil, nil
-	a.sheet = &sheet{total: v.Comments, next: a.c.Comments(v.ID)}
+	a.sheet = &sheet{total: v.Comments, next: a.c.Comments(v.ID), v: v}
 	a.moreComments()
+}
+
+// moreRelated loads the next page of the videos related to the sheet's.
+func (a *app) moreRelated() {
+	sh := a.sheet
+	if sh == nil || sh.relBusy || sh.relDone {
+		return
+	}
+	if sh.relNext == nil {
+		sh.relNext = a.c.Related(sh.v.ID)
+	}
+	sh.relBusy = true
+	go func() {
+		vs, err := sh.relNext()
+		a.post(func() {
+			sh.relBusy = false
+			if err != nil {
+				sh.relMsg = err.Error()
+				return
+			}
+			sh.relMsg, sh.relDone = "", len(vs) == 0
+			sh.rel = append(sh.rel, vs...)
+		})
+	}()
+}
+
+// playRelated plays the related video i, in a page of them, which goes on
+// with more of them as it nears their end.
+func (a *app) playRelated(i int) {
+	sh := a.sheet
+	p := &page{title: "相关推荐", next: sh.relNext, done: sh.relDone || sh.relNext == nil}
+	for _, v := range sh.rel {
+		p.list = append(p.list, &slot{v: v})
+	}
+	p.idx = i
+	a.open(p)
+}
+
+// openMix opens v's series, unless p is it already.
+func (a *app) openMix(p *page, v dy.Video) {
+	if title := "合集：" + v.Mix.Name; p.title != title {
+		a.open(&page{title: title, next: a.c.MixVideos(v.Mix.ID), grid: true})
+	}
 }
 
 func (a *app) moreComments() {
@@ -420,6 +473,9 @@ func (a *app) loadAccount() {
 		}
 		a.post(func() {
 			a.me, a.follows = me, us
+			if me.ID != "" && a.liked == nil {
+				a.liked = &page{title: "喜欢", next: a.c.Liked(me.ID), grid: true}
+			}
 			if err != nil {
 				a.followMsg = "关注列表没载入：" + err.Error()
 			}
@@ -657,8 +713,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now 推荐 playing with
-// the rail, and the rail's 更多 menu open.
+// clicks would, saves a shot of each step and quits: now 喜欢, a video of a
+// series playing with its related videos beside it, and the series.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -684,10 +740,38 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	a.post(func() { a.root(a.feed) })
+	time.Sleep(3 * time.Second) // the account, which 喜欢 needs
+	a.post(func() {
+		if a.liked != nil {
+			a.root(a.liked)
+		}
+	})
 	shot("1.png")
-	a.post(func() { a.moreOpen = true })
+	found := make(chan string)
+	a.post(func() {
+		a.root(a.picks)
+		p := a.picks
+		for i, s := range p.list {
+			if s.v.Mix.ID != "" {
+				a.play(p, i)
+				a.comments(s.v)
+				a.sheet.related = true
+				a.moreRelated()
+				found <- fmt.Sprintf("series %q at #%d", s.v.Mix.Name, i)
+				return
+			}
+		}
+		found <- "no series among " + fmt.Sprint(len(p.list))
+	})
+	log.Println(<-found)
 	shot("2.png")
+	a.post(func() {
+		p := a.cur()
+		if p.plays() && p.idx < len(p.list) && p.list[p.idx].v.Mix.ID != "" {
+			a.openMix(p, p.list[p.idx].v)
+		}
+	})
+	shot("3.png")
 	os.Exit(0)
 }
 
@@ -729,6 +813,9 @@ func Run() error {
 		go func() {
 			if n, err := c.Unread(); err == nil {
 				a.post(func() { a.unread = n })
+			}
+			if hot, err := c.HotSearch(); err == nil {
+				a.post(func() { a.hot = hot })
 			}
 		}()
 		if dir := os.Getenv("DY_SHOT"); dir != "" {
