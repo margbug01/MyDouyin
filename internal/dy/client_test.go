@@ -29,6 +29,13 @@ func TestLiveFeed(t *testing.T) {
 		}
 		vs = append(vs, more...)
 	}
+	var clips []Video // live rooms come in the feed too, with no file to fetch
+	for _, v := range vs {
+		if v.Live == nil {
+			clips = append(clips, v)
+		}
+	}
+	vs = clips
 	if len(vs) < 3 {
 		t.Fatalf("only %d videos", len(vs))
 	}
@@ -293,7 +300,14 @@ func TestLiveHotLikedRelatedMix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rel, err := c.Related(vs[0].ID)()
+	v := vs[0]
+	for _, x := range vs {
+		if x.Live == nil { // a room has no related videos
+			v = x
+			break
+		}
+	}
+	rel, err := c.Related(v.ID)()
 	if err != nil || len(rel) < 3 {
 		t.Fatalf("related: %d, %v", len(rel), err)
 	}
