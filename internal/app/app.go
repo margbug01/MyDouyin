@@ -4,6 +4,7 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ type slot struct {
 	loading bool
 	gone    bool // dropped while loading: close what arrives
 	err     error
+	saved   string // what saving to Downloads came to: "" before the click
 }
 
 const (
@@ -221,6 +223,66 @@ func (a *app) prepare(s *slot) {
 			a.fill() // plays it if current, and starts the ones around it
 		})
 	}()
+}
+
+// save copies s's video, already downloaded to play, to the Downloads folder.
+func (a *app) save(s *slot) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		s.saved = "下载失败：" + err.Error()
+		return
+	}
+	s.saved = "保存中…"
+	src := filepath.Join(a.dir, s.v.ID+".mp4")
+	go func() {
+		dst, err := copyTo(src, filepath.Join(home, "Downloads"), fileName(s.v))
+		a.post(func() {
+			if err != nil {
+				s.saved = "下载失败：" + err.Error()
+			} else {
+				s.saved = "已存到 下载/" + filepath.Base(dst)
+			}
+		})
+	}()
+}
+
+// fileName is a video's name in Downloads: its author and id, without the
+// characters a file name cannot have.
+func fileName(v dy.Video) string {
+	name := strings.Map(func(r rune) rune {
+		if strings.ContainsRune(`/\:*?"<>|`, r) || r < ' ' {
+			return '_'
+		}
+		return r
+	}, v.Author)
+	return "抖音-" + name + "-" + v.ID + ".mp4"
+}
+
+// copyTo copies src into dir as name, through a .part file so a failed copy
+// leaves nothing half-written, and returns the path.
+func copyTo(src, dir, name string) (string, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	dst := filepath.Join(dir, name)
+	out, err := os.Create(dst + ".part")
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(dst+".part", dst)
+	}
+	if err != nil {
+		os.Remove(dst + ".part")
+		return "", err
+	}
+	return dst, nil
 }
 
 func (a *app) build(v dy.Video) (f *media.File, vp *ui.VideoPlayer, ap *audio.Player, err error) {
@@ -429,6 +491,13 @@ func (a *app) content(c *ui.Context, p *page) {
 				tap(c, func() { a.comments(s.v) }).Children(func() {
 					ui.Text(c, "💬 "+count(s.v.Comments)).FontSize(12).TextColor(grey)
 				})
+				if s.saved == "" {
+					tap(c, func() { a.save(s) }).Children(func() {
+						ui.Text(c, "⤓ 下载").FontSize(12).TextColor(grey)
+					})
+				} else {
+					ui.Text(c, s.saved).FontSize(12).TextColor(grey).MaxLines(1).Shrink(1)
+				}
 				ui.Text(c, fmt.Sprintf("%d/%d", p.idx+1, len(p.list))).FontSize(12).TextColor(grey)
 			})
 		}
@@ -534,8 +603,8 @@ func count(n int) string {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now a search for 猫, the
-// first result's comments, and their second page.
+// clicks would, saves a shot of each step and quits: now the feed, and its
+// current video saved to Downloads.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -561,12 +630,15 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	a.post(func() { a.search("猫") })
 	shot("1.png")
-	a.post(func() { a.comments(a.cur().list[0].v) })
+	cur := make(chan *slot)
+	a.post(func() { p := a.cur(); cur <- p.list[p.idx] })
+	s := <-cur
+	a.post(func() { a.save(s) })
 	shot("2.png")
-	a.post(a.moreComments)
-	shot("3.png")
+	saved := make(chan string)
+	a.post(func() { saved <- s.saved })
+	log.Println("saved:", s.v.ID, <-saved)
 	os.Exit(0)
 }
 

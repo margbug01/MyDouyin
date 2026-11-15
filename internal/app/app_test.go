@@ -1,6 +1,7 @@
 package app
 
 import (
+	"image"
 	"os"
 	"testing"
 
@@ -190,3 +191,59 @@ func TestCommentSheet(t *testing.T) {
 	tt.Key(0, ui.KeyDown)
 	check("the next video")
 }
+
+// A video saves under a clean name with its bytes intact and no .part left;
+// a missing source fails without leaving anything.
+func TestSave(t *testing.T) {
+	if got := fileName(dy.Video{ID: "7", Author: "a/b:c*"}); got != "抖音-a_b_c_-7.mp4" {
+		t.Fatalf("name %q", got)
+	}
+	src, dir := t.TempDir(), t.TempDir()
+	os.WriteFile(src+"/v.mp4", []byte("video bytes"), 0o644)
+	dst, err := copyTo(src+"/v.mp4", dir, "x.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "video bytes" {
+		t.Fatalf("copied %q", b)
+	}
+	if _, err := copyTo(src+"/none.mp4", dir, "y.mp4"); err == nil {
+		t.Fatal("a missing source saved")
+	}
+	if ls, _ := os.ReadDir(dir); len(ls) != 1 {
+		t.Fatalf("left %d files", len(ls))
+	}
+}
+
+// The download button does not pause and turns into its progress.
+func TestSaveButton(t *testing.T) {
+	p := stub("", 1)
+	s := p.list[0]
+	s.loading, s.vp = false, nil
+	a := &app{pages: []*page{p}, dir: t.TempDir()}
+	tt := ui.NewTester(a.view, 405, 720)
+	if tt.HasText("⤓ 下载") {
+		t.Fatal("download offered before the video is ready")
+	}
+	vp, err := ui.NewVideoPlayer(still{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.vp = vp
+	tt.Frame()
+	if err := tt.Click("⤓ 下载"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.paused || s.saved != "保存中…" || !tt.HasText("保存中…") {
+		t.Fatalf("after click: paused %v, saved %q", a.paused, s.saved)
+	}
+}
+
+// still is a video of one black frame.
+type still struct{}
+
+func (still) Next() (ui.VideoFrame, error) {
+	return ui.VideoFrame{Image: image.NewRGBA(image.Rect(0, 0, 4, 4))}, nil
+}
+func (still) Rewind() error { return nil }
