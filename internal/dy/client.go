@@ -42,6 +42,9 @@ type Video struct {
 	W, H             int
 	Duration         time.Duration
 	Likes, Comments  int
+	Collects         int
+	Cover, Avatar    string // image addresses: the frame the video shows first, the author's picture
+	Created          time.Time
 }
 
 // New loads the cookies the login step saved; without them the client is anonymous.
@@ -180,14 +183,17 @@ func playURL(top addr, gears []struct {
 }
 
 type aweme struct {
-	ID     string `json:"aweme_id"`
-	Desc   string
-	Author struct {
+	ID      string `json:"aweme_id"`
+	Desc    string
+	Created int64 `json:"create_time"`
+	Author  struct {
 		Nickname string
 		SecUID   string `json:"sec_uid"`
+		Avatar   addr   `json:"avatar_thumb"`
 	}
 	Video struct {
 		Duration int  `json:"duration"`
+		Cover    addr `json:"cover"`
 		PlayAddr addr `json:"play_addr"`
 		Gears    []struct {
 			Name string `json:"gear_name"`
@@ -198,7 +204,16 @@ type aweme struct {
 	Stats struct {
 		Likes    int `json:"digg_count"`
 		Comments int `json:"comment_count"`
+		Collects int `json:"collect_count"`
 	} `json:"statistics"`
+}
+
+// first is an address's first URL, or "".
+func (a addr) first() string {
+	if len(a.URLs) == 0 {
+		return ""
+	}
+	return a.URLs[0]
 }
 
 // videos keeps the entries with a play address: ads and photo posts have none.
@@ -211,7 +226,8 @@ func videos(list []aweme) []Video {
 		}
 		out = append(out, Video{ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
-			Likes: a.Stats.Likes, Comments: a.Stats.Comments})
+			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects,
+			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0)})
 	}
 	return out
 }
@@ -338,6 +354,7 @@ func (c *Client) Posts(secUID string) Pager[Video] {
 // User is an account in a list such as the ones a user follows.
 type User struct {
 	ID, Name, Signature string // ID is the sec_uid
+	Avatar              string // the picture's address
 }
 
 // Self returns the logged-in user.
@@ -348,12 +365,13 @@ func (c *Client) Self() (User, error) {
 			SecUID    string `json:"sec_uid"`
 			Nickname  string
 			Signature string
+			Avatar    addr `json:"avatar_thumb"`
 		}
 	}
 	if err := c.getJSON("/aweme/v1/web/user/profile/self/", "", &r); err != nil {
 		return User{}, err
 	}
-	return User{r.User.SecUID, r.User.Nickname, r.User.Signature}, nil
+	return User{r.User.SecUID, r.User.Nickname, r.User.Signature, r.User.Avatar.first()}, nil
 }
 
 // Following pages through the accounts secUID follows.
@@ -366,6 +384,7 @@ func (c *Client) Following(secUID string) Pager[User] {
 				SecUID    string `json:"sec_uid"`
 				Nickname  string
 				Signature string
+				Avatar    addr `json:"avatar_thumb"`
 			} `json:"followings"`
 			HasMore bool `json:"has_more"`
 		}
@@ -375,7 +394,7 @@ func (c *Client) Following(secUID string) Pager[User] {
 		}
 		out := make([]User, len(r.List))
 		for i, u := range r.List {
-			out[i] = User{u.SecUID, u.Nickname, u.Signature}
+			out[i] = User{u.SecUID, u.Nickname, u.Signature, u.Avatar.first()}
 		}
 		offset += len(out)
 		return out, r.HasMore && len(out) > 0, nil
@@ -418,6 +437,26 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 		cursor = r.Cursor
 		return out, more, nil
 	})
+}
+
+// Image fetches a picture Douyin serves (a cover, an avatar), whose CDN wants
+// the page's Referer as its videos' does.
+func (c *Client) Image(u string) ([]byte, error) {
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Referer", "https://www.douyin.com/")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("dy: image %s", resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 }
 
 // Download saves a video to dst. The CDN refuses a request without the Referer.

@@ -2,6 +2,7 @@ package dy
 
 import (
 	"fmt"
+	"github.com/egoist/mygo/ui"
 	"os"
 	"testing"
 )
@@ -26,6 +27,19 @@ func TestLiveFeed(t *testing.T) {
 	}
 	if len(vs) < 3 {
 		t.Fatalf("only %d videos", len(vs))
+	}
+	// Each has a cover and an author's picture that load as images.
+	for _, u := range []string{vs[0].Cover, vs[0].Avatar} {
+		b, err := c.Image(u)
+		if err != nil {
+			t.Fatalf("image %.60s: %v", u, err)
+		}
+		if _, err := ui.DecodeBitmap(b); err != nil {
+			t.Fatalf("image %.60s: %v", u, err)
+		}
+	}
+	if vs[0].Created.Year() < 2016 {
+		t.Fatalf("created %v", vs[0].Created)
 	}
 	for _, v := range vs {
 		t.Logf("%s %q %dx%d %v %.1fMB", v.ID[len(v.ID)-5:], v.Author, v.W, v.H, v.Duration, float64(v.Size)/1e6)
