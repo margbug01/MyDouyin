@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -38,14 +39,11 @@ const (
 )
 
 // page is a list of videos the window steps through: the recommend feed at
-// the bottom, and search results or a user's videos opened over it. A page
-// with people lists accounts instead, as the ones the user follows.
+// the bottom, and search results or a user's videos opened over it.
 type page struct {
 	title    string // "" for the recommend feed
 	next     dy.Pager[dy.Video]
 	list     []*slot
-	people   dy.Pager[dy.User]
-	users    []dy.User
 	idx      int
 	fetching bool
 	done     bool // next returned its last page
@@ -61,7 +59,14 @@ type app struct {
 	query   string  // the search box
 	paused  bool
 	lastNav time.Time
-	sheet   *sheet // the comments open over the video, or nil
+	sheet   *sheet // the comments open beside the video, or nil
+
+	pal       palette
+	searchBox ui.Handle
+	toast     string    // a message to show once
+	me        dy.User   // the account logged in, once known
+	follows   []dy.User // the accounts it follows, in the sidebar
+	followMsg string    // why they did not load
 }
 
 // sheet is the comments of the current video, loaded a page at a time.
@@ -118,31 +123,21 @@ func (a *app) post(fn func()) {
 	a.win.Update(func() { fn(); a.win.Invalidate() })
 }
 
-// more fetches the next page of p's list. A list of people loads to its end
-// while it shows, as fill asks again each time.
-// shortcut: loads all of a list of people; page it on scroll if lists of thousands matter.
+// more fetches the next page of p's list.
 func (a *app) more(p *page) {
 	if p.fetching || p.done {
 		return
 	}
 	p.fetching = true
 	go func() {
-		var vs []dy.Video
-		var us []dy.User
-		var err error
-		if p.people != nil {
-			us, err = p.people()
-		} else {
-			vs, err = p.next()
-		}
+		vs, err := p.next()
 		a.post(func() {
 			p.fetching = false
 			if err != nil {
 				p.msg = err.Error()
 				return
 			}
-			p.msg, p.done = "", len(vs)+len(us) == 0
-			p.users = append(p.users, us...)
+			p.msg, p.done = "", len(vs) == 0
 			for _, v := range vs {
 				p.list = append(p.list, &slot{v: v})
 			}
@@ -189,6 +184,41 @@ func (a *app) open(p *page) {
 	a.sheet = nil
 	a.paused = false
 	a.fill()
+}
+
+// home closes every page over the recommend feed.
+func (a *app) home() {
+	for len(a.pages) > 1 {
+		a.back()
+	}
+}
+
+// loadAccount fetches the account logged in and all it follows, for the sidebar.
+// shortcut: loads every account followed at once; page it on scroll if lists of thousands matter.
+func (a *app) loadAccount() {
+	go func() {
+		me, err := a.c.Self()
+		var us []dy.User
+		if err == nil {
+			next := a.c.Following(me.ID)
+			for {
+				page, perr := next()
+				if perr != nil {
+					err = perr
+				}
+				if perr != nil || len(page) == 0 {
+					break
+				}
+				us = append(us, page...)
+			}
+		}
+		a.post(func() {
+			a.me, a.follows = me, us
+			if err != nil {
+				a.followMsg = "关注列表没载入：" + err.Error()
+			}
+		})
+	}()
 }
 
 // back closes the page on top and goes on with the one under it.
@@ -242,6 +272,7 @@ func (a *app) save(s *slot) {
 			} else {
 				s.saved = "已存到 下载/" + filepath.Base(dst)
 			}
+			a.toast = s.saved
 		})
 	}()
 }
@@ -393,218 +424,10 @@ func (a *app) openAuthor(p *page, name, id string) {
 	}
 }
 
-// tap is a box that runs fn when clicked. Not a Button: one keeps the focus
-// after the click, and Space would then click it again instead of pausing.
-func tap(c *ui.Context, fn func()) ui.Element {
-	return ui.Box(c).Cursor(ui.CursorPointer).HandleInput(func(ev ui.InputEvent) bool {
-		switch {
-		case ev.Kind == ui.InputPointerDown && ev.Button == 0:
-			return true // taking the press is what brings its release here
-		case ev.Kind == ui.InputPointerUp && !ev.Canceled && ev.Button == 0:
-			fn()
-			return true
-		}
-		return false
-	})
-}
-
-func (a *app) view(c *ui.Context) {
-	c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
-	c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
-	c.OnShortcut(0, ui.KeySpace, a.toggle)
-	c.OnShortcut(0, ui.KeyEscape, a.escape)
-	p := a.cur()
-	ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).Children(func() {
-		// The video area takes the wheel and clicks. The top bar lies over it,
-		// not in it, so a click in the search box does not pause.
-		ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).HandleInput(func(ev ui.InputEvent) bool {
-			switch {
-			case p.people != nil:
-				return false // a list of people scrolls itself
-			case ev.Kind == ui.InputScroll && !ev.Momentum && ev.DY != 0:
-				if ev.DY > 0 {
-					a.step(1)
-				} else {
-					a.step(-1)
-				}
-				return true
-			case ev.Kind == ui.InputPointerDown && ev.Button == 0:
-				return true
-			case ev.Kind == ui.InputPointerUp && !ev.Canceled && ev.Button == 0:
-				if a.sheet != nil { // a click beside the comments closes them
-					a.sheet = nil
-				} else {
-					a.toggle()
-				}
-				return true
-			}
-			return false
-		}).Children(func() { a.content(c, p) })
-		a.topBar(c, p)
-		if a.sheet != nil {
-			a.commentSheet(c, a.sheet)
-		}
-	})
-}
-
-var white = ui.RGB(255, 255, 255)
-
-// content is p's current video with its author and text, or what stands for it.
-func (a *app) content(c *ui.Context, p *page) {
-	if len(p.users) > 0 {
-		a.people(c, p)
-		return
-	}
-	if p.idx >= len(p.list) {
-		text := "载入中…"
-		switch {
-		case p.msg != "":
-			text = p.msg
-		case p.done:
-			text = "没有结果"
-		}
-		ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Children(func() {
-			ui.Text(c, text).TextColor(white)
-		})
-		return
-	}
-	s := p.list[p.idx]
-	if s.vp != nil {
-		ui.Video(c, s.vp).Fill().Fit(ui.Contain)
-	}
-	// The fade keeps the white text readable over a bright frame.
-	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(48, 16, 20, 16).Gap(6).
-		Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {
-		tap(c, func() { a.openAuthor(p, s.v.Author, s.v.AuthorID) }).Children(func() {
-			ui.Text(c, "@"+s.v.Author).Bold().FontSize(16).TextColor(white)
-		})
-		ui.Text(c, s.v.Desc).FontSize(14).TextColor(white).MaxLines(3)
-		grey := ui.RGB(200, 200, 200)
-		switch {
-		case s.err != nil:
-			ui.Text(c, "无法播放："+s.err.Error()).FontSize(12).TextColor(grey)
-		case s.vp == nil:
-			ui.Text(c, "缓冲中…").FontSize(12).TextColor(grey)
-		default:
-			ui.Row(c).Gap(14).Children(func() {
-				ui.Text(c, "♥ "+count(s.v.Likes)).FontSize(12).TextColor(grey)
-				tap(c, func() { a.comments(s.v) }).Children(func() {
-					ui.Text(c, "💬 "+count(s.v.Comments)).FontSize(12).TextColor(grey)
-				})
-				if s.saved == "" {
-					tap(c, func() { a.save(s) }).Children(func() {
-						ui.Text(c, "⤓ 下载").FontSize(12).TextColor(grey)
-					})
-				} else {
-					ui.Text(c, s.saved).FontSize(12).TextColor(grey).MaxLines(1).Shrink(1)
-				}
-				ui.Text(c, fmt.Sprintf("%d/%d", p.idx+1, len(p.list))).FontSize(12).TextColor(grey)
-			})
-		}
-	})
-}
-
-// commentSheet is the comments over the lower part of the video.
-func (a *app) commentSheet(c *ui.Context, sh *sheet) {
-	grey := ui.RGB(150, 150, 150)
-	ui.Column(c).Absolute().Top(160).Left(0).Right(0).Bottom(0).Background(ui.RGB(24, 24, 24)).Radius(12, 12, 0, 0).Children(func() {
-		ui.Row(c).Padding(14, 16).Children(func() {
-			ui.Text(c, count(sh.total)+" 条评论").Bold().FontSize(14).TextColor(white).Grow(1)
-			tap(c, func() { a.sheet = nil }).Children(func() {
-				ui.Text(c, "✕").FontSize(16).TextColor(grey)
-			})
-		})
-		ui.Scroll(c).Grow(1).Children(func() {
-			for _, cm := range sh.items {
-				ui.Column(c).Padding(8, 16).Gap(4).Children(func() {
-					ui.Text(c, cm.Author).FontSize(12).TextColor(grey)
-					ui.Text(c, cm.Text).FontSize(14).TextColor(white)
-					meta := when(cm.Time)
-					if cm.Place != "" {
-						meta += " · " + cm.Place
-					}
-					meta += "   ♥ " + count(cm.Likes)
-					if cm.Replies > 0 {
-						meta += fmt.Sprintf("   %d 条回复", cm.Replies)
-					}
-					ui.Text(c, meta).FontSize(11).TextColor(grey)
-				})
-			}
-			ui.Row(c).Padding(12, 16).Children(func() {
-				switch {
-				case sh.fetching:
-					ui.Text(c, "载入中…").FontSize(12).TextColor(grey)
-				case sh.msg != "":
-					ui.Text(c, sh.msg).FontSize(12).TextColor(grey)
-				case !sh.done:
-					tap(c, a.moreComments).Children(func() {
-						ui.Text(c, "更多评论").FontSize(12).TextColor(white)
-					})
-				case len(sh.items) == 0:
-					ui.Text(c, "还没有评论").FontSize(12).TextColor(grey)
-				}
-			})
-		})
-	})
-}
-
-// when is a comment's time as Douyin shows it: the day, and the year if not this one.
-func when(t time.Time) string {
-	if t.Year() == time.Now().Year() {
-		return t.Format("01-02")
-	}
-	return t.Format("2006-01-02")
-}
-
-// people lists p's accounts; a click opens one's videos.
-func (a *app) people(c *ui.Context, p *page) {
-	ui.Scroll(c).Absolute().Top(56).Left(0).Right(0).Bottom(0).Children(func() {
-		for _, u := range p.users {
-			tap(c, func() { a.openAuthor(p, u.Name, u.ID) }).Column().Padding(10, 16).Gap(3).Children(func() {
-				ui.Text(c, u.Name).Bold().FontSize(15).TextColor(white)
-				if u.Signature != "" {
-					ui.Text(c, u.Signature).FontSize(12).TextColor(ui.RGB(160, 160, 160)).MaxLines(1)
-				}
-			})
-		}
-	})
-}
-
-// topBar is the search box over the feed, and the way back over anything else.
-func (a *app) topBar(c *ui.Context, p *page) {
-	ui.Row(c).Absolute().Top(0).Left(0).Right(0).Padding(12, 12, 32, 12).Gap(8).
-		Gradient(ui.RGBA(0, 0, 0, 0.6), ui.RGBA(0, 0, 0, 0), 180).Children(func() {
-		if p.title == "" {
-			ui.TextInput(c, &a.query).Placeholder("搜索").Grow(1).OnTextKey(func(k ui.TextKey) bool {
-				if k.Key != ui.KeyEnter || k.Mods != 0 {
-					return false
-				}
-				a.search(k.Text())
-				return true
-			})
-			tap(c, func() { a.open(&page{title: "关注", people: a.c.MyFollowing()}) }).
-				Background(white).Radius(6).Padding(5, 10).Children(func() {
-				ui.Text(c, "关注").FontSize(13).TextColor(ui.RGB(0, 0, 0))
-			})
-			return
-		}
-		if ui.Button(c, "‹ 返回").Clicked() {
-			a.back()
-		}
-		ui.Text(c, p.title).Bold().FontSize(15).TextColor(white).MaxLines(1).Shrink(1)
-	})
-}
-
-func count(n int) string {
-	if n >= 10000 {
-		return fmt.Sprintf("%.1f万", float64(n)/10000)
-	}
-	return fmt.Sprint(n)
-}
-
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now the feed, and its
-// current video saved to Downloads.
+// clicks would, saves a shot of each step and quits: now the whole window,
+// with the feed, its comments, a search for 猫, the first result's author,
+// and the feed again from the sidebar.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -616,7 +439,7 @@ func (a *app) selfCheck(dir string) {
 		a.post(func() {
 			state := ""
 			for _, p := range a.pages {
-				state += fmt.Sprintf(" | %q idx=%d users=%d", p.title, p.idx, len(p.users))
+				state += fmt.Sprintf(" | %q idx=%d", p.title, p.idx)
 				if a.sheet != nil && p == a.cur() {
 					state += fmt.Sprintf(" comments=%d done=%v msg=%q", len(a.sheet.items), a.sheet.done, a.sheet.msg)
 				}
@@ -631,15 +454,29 @@ func (a *app) selfCheck(dir string) {
 		log.Println("shot", name, err, <-done)
 	}
 	shot("1.png")
-	cur := make(chan *slot)
-	a.post(func() { p := a.cur(); cur <- p.list[p.idx] })
-	s := <-cur
-	a.post(func() { a.save(s) })
+	a.post(func() { p := a.cur(); a.comments(p.list[p.idx].v) })
 	shot("2.png")
-	saved := make(chan string)
-	a.post(func() { saved <- s.saved })
-	log.Println("saved:", s.v.ID, <-saved)
+	a.post(func() { a.search("猫") })
+	shot("3.png")
+	a.post(func() { p := a.cur(); a.openAuthor(p, p.list[0].v.Author, p.list[0].v.AuthorID) })
+	shot("4.png")
+	a.post(a.home)
+	shot("5.png")
+	follows := make(chan string)
+	a.post(func() {
+		follows <- fmt.Sprintf("me=%v follows=%d msg=%q", a.me.Name != "", len(a.follows), a.followMsg)
+	})
+	log.Println(<-follows)
 	os.Exit(0)
+}
+
+// sidebarVibrancy is the material behind the sidebar: macOS's. Windows'
+// stays light under a dark theme, so the sidebar is painted there.
+func sidebarVibrancy() mygo.Vibrancy {
+	if runtime.GOOS == "darwin" {
+		return mygo.VibrancySidebar
+	}
+	return mygo.VibrancyNone
 }
 
 // Run opens the window and blocks until it closes.
@@ -655,8 +492,23 @@ func Run() error {
 	a := &app{c: c, dir: filepath.Join(cache, "Douyin", "videos"), pages: []*page{{next: c.Feed}}}
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {
-		a.win = mygo.NewWindow(mygo.WindowOptions{Title: "抖音", Width: 405, Height: 720, Content: ui.View(a.view)})
+		a.win = mygo.NewWindow(mygo.WindowOptions{
+			Title:     "抖音",
+			Width:     1100,
+			Height:    760,
+			MinWidth:  820,
+			MinHeight: 560,
+			StateKey:  "main",
+			// As MySpotify's: no title bar, the window buttons inset within the sidebar.
+			TitleBarStyle:        mygo.TitleBarHidden,
+			TitleBarHeight:       topBarHeight + 6,
+			TrafficLightPosition: &mygo.Point{X: 20, Y: 20},
+			Vibrancy:             sidebarVibrancy(),
+			BackgroundColor:      "light-dark(#ffffff, #141416)",
+			Content:              ui.View(a.view),
+		})
 		a.fill()
+		a.loadAccount()
 		if dir := os.Getenv("DY_SHOT"); dir != "" {
 			go a.selfCheck(dir)
 		}

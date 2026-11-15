@@ -420,21 +420,6 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 	})
 }
 
-// MyFollowing pages through the accounts the logged-in user follows.
-func (c *Client) MyFollowing() Pager[User] {
-	var next Pager[User]
-	return func() ([]User, error) {
-		if next == nil {
-			me, err := c.Self()
-			if err != nil {
-				return nil, err
-			}
-			next = c.Following(me.ID)
-		}
-		return next()
-	}
-}
-
 // Download saves a video to dst. The CDN refuses a request without the Referer.
 func (c *Client) Download(u, dst string) error {
 	req, err := http.NewRequest("GET", u, nil)
