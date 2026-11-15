@@ -215,3 +215,51 @@ func pick(t *testing.T, c *Client) Video {
 	}
 	return best
 }
+
+// The inbox reads without a browser: conversations, latest first, each with
+// someone named on the other side and messages in time order, some of them
+// the user's own. Live: skipped unless LIVE is set.
+func TestLiveChats(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	chats, err := c.Chats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chats) == 0 {
+		t.Fatal("no chats")
+	}
+	mine, named := 0, 0
+	for i, ch := range chats {
+		if ch.Peer.Name != "" {
+			named++
+		}
+		for j, m := range ch.Msgs {
+			if j > 0 && m.Time.Before(ch.Msgs[j-1].Time) {
+				t.Fatalf("chat %d: messages out of order", i)
+			}
+			if m.Mine {
+				mine++
+			}
+		}
+		if i > 0 && last(ch).After(last(chats[i-1])) {
+			t.Fatalf("chat %d is newer than the one before it", i)
+		}
+	}
+	if named < len(chats)*3/4 || mine == 0 {
+		t.Fatalf("%d chats, %d named, %d messages mine", len(chats), named, mine)
+	}
+	t.Logf("%d chats, %d named, %d of the messages mine; first with %s: %q", len(chats), named, mine, chats[0].Peer.Name, last1(chats[0]))
+}
+
+func last1(ch Chat) string {
+	if len(ch.Msgs) == 0 {
+		return ""
+	}
+	return ch.Msgs[len(ch.Msgs)-1].Text
+}

@@ -524,3 +524,46 @@ func TestPacedSilent(t *testing.T) {
 		t.Fatalf("after a rewind the clock is at %v (%v)", s.at(), err)
 	}
 }
+
+// The inbox lists chats beside the page; a chat shows its messages, tips
+// included, and Escape or its back button go back to the list, Escape again
+// closes it; the comments and the notifications give way to it.
+func TestDMs(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+	a.notes = &notes{done: true}
+	a.dms = &dms{open: -1, chats: []dy.Chat{
+		{ID: "a", Peer: dy.User{Name: "甲"}, Msgs: []dy.Message{{Tip: true, Text: "提示"}, {Text: "你好"}, {Mine: true, Text: "在的"}}},
+		{ID: "b", Peer: dy.User{Name: "乙"}, Msgs: []dy.Message{{Text: "早"}}},
+	}}
+	a.notes = nil
+	tt := newTester(a)
+	if !tt.HasText("甲") || !tt.HasText("在的") || !tt.HasText("乙") || tt.HasText("提示") {
+		t.Fatalf("list shows %q", tt.Texts())
+	}
+	if err := tt.Click("甲"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.dms.open != 0 || !tt.HasText("提示") || !tt.HasText("你好") || tt.HasText("乙") {
+		t.Fatalf("chat shows %q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.dms == nil || a.dms.open != -1 {
+		t.Fatal("Escape in a chat did not go back to the list")
+	}
+	tt.Click("甲")
+	tt.Frame()
+	if err := tt.Click("返回私信列表"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.dms.open != -1 {
+		t.Fatal("the back button left the chat open")
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.dms != nil || len(a.pages) != 1 {
+		t.Fatal("Escape on the list did not close it, or closed the page")
+	}
+}

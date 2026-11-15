@@ -125,6 +125,7 @@ type app struct {
 
 	notes  *notes // the notifications open beside the page, or nil
 	unread int
+	dms    *dms // the direct messages open beside the page, or nil
 
 	speed     float64       // 1 as recorded
 	speedBits atomic.Uint64 // speed for the decoders
@@ -141,9 +142,34 @@ type notes struct {
 	msg      string
 }
 
+// dms is the inbox, and the chat open in it, -1 for the list.
+type dms struct {
+	chats   []dy.Chat
+	open    int
+	loading bool
+	msg     string
+}
+
+// openDMs shows the direct messages, in the place of the comments and the
+// notifications; reading them marks nothing read.
+func (a *app) openDMs() {
+	a.sheet, a.notes = nil, nil
+	d := &dms{open: -1, loading: true}
+	a.dms = d
+	go func() {
+		chats, err := a.c.Chats()
+		a.post(func() {
+			d.loading, d.chats = false, chats
+			if err != nil {
+				d.msg = err.Error()
+			}
+		})
+	}()
+}
+
 // openNotes shows the notifications, in the place of the comments.
 func (a *app) openNotes() {
-	a.sheet, a.unread = nil, 0
+	a.sheet, a.dms, a.unread = nil, nil, 0
 	a.notes = &notes{next: a.c.Notices()}
 	a.moreNotes()
 }
@@ -226,6 +252,7 @@ type sheet struct {
 
 // comments opens v's comments over it; the video goes on playing.
 func (a *app) comments(v dy.Video) {
+	a.notes, a.dms = nil, nil
 	a.sheet = &sheet{total: v.Comments, next: a.c.Comments(v.ID)}
 	a.moreComments()
 }
@@ -250,10 +277,15 @@ func (a *app) moreComments() {
 	}()
 }
 
-// escape closes the comments or the notifications, or else the page on top.
+// escape leaves a chat for the inbox, closes what is open beside the page,
+// or else the page on top.
 func (a *app) escape() {
-	if a.sheet != nil || a.notes != nil {
-		a.sheet, a.notes = nil, nil
+	if a.dms != nil && a.dms.open >= 0 {
+		a.dms.open = -1
+		return
+	}
+	if a.sheet != nil || a.notes != nil || a.dms != nil {
+		a.sheet, a.notes, a.dms = nil, nil, nil
 		return
 	}
 	a.back()
@@ -623,9 +655,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now 推荐's shortest
-// video at 1.5x with 连播 on, logging its sound's clock against its
-// picture's until the next video plays.
+// clicks would, saves a shot of each step and quits: now the inbox, and a
+// chat with messages of the user's own.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -651,56 +682,29 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	a.post(func() { a.root(a.feed) })
+	a.post(a.openDMs)
 	shot("1.png")
-	type probe struct {
-		idx, n int
-		id     string
-		of     time.Duration
-		snd    time.Duration
-		pic    time.Duration
-	}
-	look := func() probe {
-		ch := make(chan probe)
-		a.post(func() {
-			p := a.cur()
-			s := p.list[p.idx]
-			pr := probe{idx: p.idx, n: len(p.list), id: s.v.ID, of: s.v.Duration}
-			if s.ap != nil {
-				pr.snd = s.ap.Position()
-			}
-			if s.dec != nil {
-				pr.pic = time.Duration(s.dec.done.Load())
-			}
-			ch <- pr
-		})
-		return <-ch
-	}
+	picked := make(chan string)
 	a.post(func() {
-		p := a.cur()
-		best := p.idx
-		for i, s := range p.list {
-			if s.v.Duration > 8*time.Second && s.v.Duration < p.list[best].v.Duration {
-				best = i
+		d := a.dms
+		if d == nil { // closed meanwhile, from the window
+			picked <- "the inbox was closed"
+			return
+		}
+		for i, ch := range d.chats {
+			mine, theirs := false, false
+			for _, m := range ch.Msgs {
+				mine = mine || m.Mine && !m.Tip
+				theirs = theirs || !m.Mine && !m.Tip
+			}
+			if mine && theirs {
+				d.open = i
+				break
 			}
 		}
-		p.idx = best
-		a.setSpeed(1.5)
-		a.autoNext = true
-		a.fill()
+		picked <- fmt.Sprintf("chats=%d open=%d msg=%q", len(d.chats), d.open, d.msg)
 	})
-	start := look()
-	log.Printf("playing #%d %s of %v at 1.5x", start.idx, start.id, start.of)
-	deadline := time.Now().Add(start.of*2/3 + 25*time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(2 * time.Second)
-		pr := look()
-		log.Printf("idx=%d sound=%v picture=%v picture-sound=%v", pr.idx, pr.snd.Round(10*time.Millisecond), pr.pic.Round(10*time.Millisecond), (pr.pic - pr.snd).Round(10*time.Millisecond))
-		if pr.idx != start.idx {
-			log.Printf("NEXT: moved on to #%d after the video ended", pr.idx)
-			break
-		}
-	}
+	log.Println(<-picked)
 	shot("2.png")
 	os.Exit(0)
 }

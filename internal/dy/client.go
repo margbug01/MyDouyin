@@ -31,6 +31,7 @@ type Client struct {
 	signer  *sign.Signer
 	cookie  string
 	uifid   string       // the UIFID cookie, sent again as a header
+	imSeq   atomic.Int32 // the IM requests' sequence
 	refresh atomic.Int32 // the feed's page, which two lists of it share
 }
 

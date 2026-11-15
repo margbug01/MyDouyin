@@ -89,6 +89,8 @@ func (a *app) view(c *ui.Context) {
 					switch {
 					case a.notes != nil:
 						a.notePanel(c, a.notes)
+					case a.dms != nil:
+						a.dmPanel(c, a.dms)
 					case a.sheet != nil && p.plays():
 						a.commentPanel(c, a.sheet)
 					}
@@ -194,6 +196,17 @@ func (a *app) topBar(c *ui.Context, p *page) {
 				ui.Text(c, p.title).FontSize(15).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).MaxWidth(220)
 			}
 		}
+		dm := pal.muted
+		if a.dms != nil {
+			dm = white
+		}
+		if iconButton(c.Key("dm"), iconChat, 20, dm, "私信").Absolute().Top(6).Right(16 + 36 + 4).Clicked() {
+			if a.dms != nil {
+				a.dms = nil
+			} else {
+				a.openDMs()
+			}
+		}
 		bell := ui.Box(c).Absolute().Top(6).Right(16)
 		bell.Children(func() {
 			color := pal.muted
@@ -284,7 +297,7 @@ func (a *app) tabsRow(c *ui.Context) {
 func (a *app) grid(c *ui.Context, p *page) {
 	w, h := c.Size()
 	inner := w - sidebarWidth - 24 - 16 // the grid's padding, the row's
-	if a.notes != nil {
+	if a.notes != nil || a.dms != nil {
 		inner -= 360 + 16
 	}
 	cols := max(2, int((inner+16)/(260+16)))
@@ -710,6 +723,96 @@ func (a *app) notePanel(c *ui.Context, n *notes) {
 	})
 }
 
+// dmPanel is the inbox beside the page: the chats, each its peer and last
+// message, and a chat's messages once one is clicked, the user's on the
+// right. It only reads: replies are for the Douyin app.
+func (a *app) dmPanel(c *ui.Context, d *dms) {
+	ui.Column(c.Key("dms")).Width(360).Radius(12).Background(pal.raised).Children(func() {
+		var open *dy.Chat
+		if d.open >= 0 && d.open < len(d.chats) {
+			open = &d.chats[d.open]
+		}
+		ui.Row(c).Padding(10, 8, 6, 8).Gap(2).AlignItems(ui.Center).Children(func() {
+			title := "私信"
+			if open != nil {
+				if iconButton(c.Key("inbox"), iconBack, 16, pal.muted, "返回私信列表").Clicked() {
+					d.open = -1
+				}
+				title = open.Peer.Name
+			}
+			ui.Text(c, title).FontSize(14).FontWeight(600).TextColor(pal.text).Grow(1).SingleLine().Shrink(1).MinWidth(0).Margin(0, 8)
+			if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭私信").Clicked() {
+				a.dms = nil
+			}
+		})
+		if open != nil {
+			a.chatView(c, open)
+		} else {
+			ui.Scroll(c.Key("chat-list")).Grow(1).Padding(0, 0, 8, 0).Children(func() {
+				for i, ch := range d.chats {
+					b := ui.ButtonBase(c.Key(ch.ID)).Row().Padding(10, 16).Gap(10).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(ch.Peer.Name)
+					if b.Hovered() {
+						b.Background(pal.hover)
+					}
+					b.Children(func() {
+						a.avatar(c, ch.Peer.Avatar, ch.Peer.Name, 40)
+						ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+							var m dy.Message
+							if len(ch.Msgs) > 0 {
+								m = ch.Msgs[len(ch.Msgs)-1]
+							}
+							ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+								ui.Text(c, ch.Peer.Name).FontSize(13.5).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).Grow(1)
+								ui.Text(c, ago(m.Time, time.Now())).FontSize(11).TextColor(pal.faint)
+							})
+							ui.Text(c, m.Text).FontSize(12.5).TextColor(pal.muted).SingleLine()
+						})
+					})
+					if b.Clicked() {
+						d.open = i
+					}
+				}
+				ui.Row(c).Padding(12, 16).Justify(ui.Center).Children(func() {
+					switch {
+					case d.loading:
+						ui.Text(c, "载入中…").FontSize(12).TextColor(pal.faint)
+					case d.msg != "":
+						ui.Text(c, d.msg).FontSize(12).TextColor(pal.faint)
+					case len(d.chats) == 0:
+						ui.Text(c, "没有私信").FontSize(12).TextColor(pal.faint)
+					}
+				})
+			})
+		}
+		ui.Text(c, "只读，不会标为已读；回复请用抖音 App").FontSize(11).TextColor(pal.faint).Margin(6, 16, 12, 16)
+	})
+}
+
+// chatView is a chat's messages as bubbles, the user's on the right in the
+// accent, the peer's on the left, Douyin's tips small in the middle.
+func (a *app) chatView(c *ui.Context, ch *dy.Chat) {
+	ui.Scroll(c.Key("chat:"+ch.ID)).Grow(1).Padding(8, 14).Gap(10).Children(func() {
+		for i, m := range ch.Msgs {
+			if m.Tip {
+				ui.Text(c.Key(fmt.Sprint(i)), m.Text).FontSize(11).TextColor(pal.faint).TextAlign(ui.Center).Margin(4, 16)
+				continue
+			}
+			row := ui.Row(c.Key(fmt.Sprint(i))).Justify(ui.Start)
+			bg := pal.hover
+			if m.Mine {
+				row.Justify(ui.End)
+				bg = pal.accent
+			}
+			row.Children(func() {
+				ui.Column(c).MaxWidth(250).Padding(8, 12).Radius(12).Background(bg).Gap(3).Children(func() {
+					ui.Text(c, m.Text).FontSize(13.5).TextColor(white).Selectable()
+					ui.Text(c, ago(m.Time, time.Now())).FontSize(10).TextColor(ui.RGBA(255, 255, 255, 0.55))
+				})
+			})
+		}
+	})
+}
+
 // iconButton is a borderless round button showing an icon, which a soft
 // circle marks under the pointer and which gives a little as it is
 // pressed: MySpotify's.
@@ -789,6 +892,7 @@ var (
 	iconComment   = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
 	iconDownload  = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
 	iconCheck     = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
+	iconChat      = strokeIcon(`<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`)
 	iconBell      = strokeIcon(`<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>`)
 	iconClose     = strokeIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
 )
