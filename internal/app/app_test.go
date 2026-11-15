@@ -704,3 +704,40 @@ func TestLikedNav(t *testing.T) {
 		t.Fatal("喜欢 did not open its grid")
 	}
 }
+
+// A live room shows as one: its badge and viewers on its card, and playing,
+// "直播中" with no time, speed or next, no counts or comments in the rail, a
+// share that copies the room's link, and nothing to download.
+func TestLiveRoomUI(t *testing.T) {
+	var copied []string
+	copyText = func(s string) error { copied = append(copied, s); return nil }
+	room := dy.Video{ID: "live:1", Desc: "房间标题", Author: "主播", Live: &dy.Live{RoomID: "1", WebRID: "777", Viewers: "41"}}
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+	grid := stub("搜索：x", 2)
+	grid.grid = true
+	grid.list[1].v = room
+	a.pages = append(a.pages, grid)
+	tt := newTester(a)
+	if !tt.HasText("直播中") || !tt.HasText("41 人在看") {
+		t.Fatalf("card: %q", tt.Texts())
+	}
+	p := stub("推荐", 1)
+	p.list[0].v = room
+	ready(t, p.list[0])
+	a.pages = []*page{p}
+	tt.Frame()
+	if !tt.HasText("直播中 · 41 人在看") || tt.HasText("倍速") || tt.HasText("连播") || tt.HasText("00:00 / 00:00") || tt.HasText("评论") {
+		t.Fatalf("playing: %q", tt.Texts())
+	}
+	if err := tt.Click("分享：复制链接"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Click("更多")
+	tt.Frame()
+	if tt.HasText("下载到「下载」文件夹") || !tt.HasText("在浏览器中打开") {
+		t.Fatalf("more: %q", tt.Texts())
+	}
+	if len(copied) != 1 || copied[0] != "https://live.douyin.com/777" {
+		t.Fatalf("copied %q", copied)
+	}
+}

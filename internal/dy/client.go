@@ -47,7 +47,54 @@ type Video struct {
 	Collects, Shares int
 	Cover, Avatar    string // image addresses: the frame the video shows first, the author's picture
 	Mix              Mix    // the series the video is an episode of, if any
+	Live             *Live  // a live room in the list, which has no PlayURL
 	Created          time.Time
+}
+
+// Live is a room broadcasting now: its stream as HLS, which AVFoundation
+// plays, over https, which an app's transport security allows.
+type Live struct {
+	RoomID, WebRID string // WebRID is the room's address on live.douyin.com
+	HLS            string
+	Viewers        string // as Douyin says it, 41 or 1.2万
+}
+
+// room decodes a live entry's room, which comes as JSON in a string.
+func room(raw string) (v Video, ok bool) {
+	var r struct {
+		ID     string `json:"id_str"`
+		Status int
+		Title  string
+		Cover  addr
+		Owner  struct {
+			Nickname string
+			SecUID   string `json:"sec_uid"`
+			WebRID   string `json:"web_rid"`
+			Avatar   addr   `json:"avatar_thumb"`
+		}
+		Stats struct {
+			Viewers string `json:"user_count_str"`
+		}
+		Stream struct {
+			HLS    string            `json:"hls_pull_url"`
+			HLSMap map[string]string `json:"hls_pull_url_map"`
+		} `json:"stream_url"`
+	}
+	if json.Unmarshal([]byte(raw), &r) != nil || r.Status != 2 { // 2: on air
+		return v, false
+	}
+	hls := r.Stream.HLS
+	for _, q := range []string{"SD2", "HD1"} { // HD1 last: the finest a 1080p screen needs
+		if u := r.Stream.HLSMap[q]; u != "" {
+			hls = u
+		}
+	}
+	if hls == "" {
+		return v, false
+	}
+	return Video{ID: "live:" + r.ID, Desc: r.Title, Author: r.Owner.Nickname, AuthorID: r.Owner.SecUID,
+		Cover: r.Cover.first(), Avatar: r.Owner.Avatar.first(),
+		Live: &Live{RoomID: r.ID, WebRID: r.Owner.WebRID, HLS: strings.Replace(hls, "http://", "https://", 1), Viewers: r.Stats.Viewers}}, true
 }
 
 // Mix is a series of videos an author groups (合集), and the episode a video is of it.
@@ -200,7 +247,10 @@ func playURL(top addr, gears []struct {
 }
 
 type aweme struct {
-	ID      string `json:"aweme_id"`
+	ID   string `json:"aweme_id"`
+	Room *struct {
+		Raw string `json:"rawdata"`
+	} `json:"cell_room"` // a live room, in place of a video
 	Desc    string
 	Created int64 `json:"create_time"`
 	Author  struct {
@@ -246,6 +296,12 @@ func (a addr) first() string {
 func videos(list []aweme) []Video {
 	var out []Video
 	for _, a := range list {
+		if a.Room != nil {
+			if v, ok := room(a.Room.Raw); ok {
+				out = append(out, v)
+			}
+			continue
+		}
 		play, pa := playURL(a.Video.PlayAddr, a.Video.Gears)
 		if play == "" {
 			continue

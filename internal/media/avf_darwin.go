@@ -6,7 +6,6 @@ package media
 import (
 	"errors"
 	"fmt"
-	"image"
 	"io"
 	"structs"
 	"time"
@@ -198,17 +197,7 @@ func (v *VideoDecoder) Next() (ui.VideoFrame, error) {
 	if pb == 0 {
 		return ui.VideoFrame{}, fmt.Errorf("media: sample without image")
 	}
-	cvPixelBufferLock(pb, 1)
-	defer cvPixelBufferUnlock(pb, 1)
-	w, h, stride := int(cvPixelBufferWidth(pb)), int(cvPixelBufferHeight(pb)), int(cvPixelBufferStride(pb))
-	src := unsafe.Slice((*byte)(cvPixelBufferBase(pb)), stride*h)
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		s, d := src[y*stride:y*stride+w*4], img.Pix[y*img.Stride:]
-		for x := 0; x < w*4; x += 4 {
-			d[x], d[x+1], d[x+2], d[x+3] = s[x+2], s[x+1], s[x], 255
-		}
-	}
+	img := bgra(pb)
 	dur := v.f.frameDur
 	if t := cmSampleBufferGetDuration(sb); t.valid() && t.dur() > 0 {
 		dur = t.dur()

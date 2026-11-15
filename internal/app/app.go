@@ -24,11 +24,8 @@ import (
 // slot is one feed entry and, once downloaded and opened, its players. Players
 // are made for the videos around the current one so a swipe starts at once.
 type slot struct {
-	v       dy.Video
-	file    *media.File
-	vp      *ui.VideoPlayer
-	ap      *audio.Player // nil when the clip has no audio
-	dec     *paced        // vp's decoder, whose clock stands in for a missing audio's
+	v dy.Video
+	players
 	loading bool
 	gone    bool // dropped while loading: close what arrives
 	err     error
@@ -38,6 +35,29 @@ type slot struct {
 	dmTo      time.Duration // how far into the video they are loaded
 	dmLoading bool
 	lastAt    time.Duration // where the view last saw it, which a loop goes back from
+}
+
+// players are what plays a video once it is opened: vp shows it, ap plays
+// its sound if it has any, dec decodes a file, live a stream.
+type players struct {
+	file *media.File
+	vp   *ui.VideoPlayer
+	ap   *audio.Player // nil when the clip has no audio, and for a stream, whose sound live plays
+	dec  *paced        // vp's decoder for a file, whose clock stands in for a missing audio's
+	live *media.Live   // vp's decoder for a live room
+}
+
+// close stops and lets go of whatever of pl there is.
+func (pl players) close() {
+	if pl.vp != nil {
+		pl.vp.Close() // closes its decoder, a stream with it
+	}
+	if pl.ap != nil {
+		pl.ap.Close()
+	}
+	if pl.file != nil {
+		pl.file.Close()
+	}
 }
 
 // paced is a video's decoder whose frames last as long as the speed says:
@@ -510,14 +530,14 @@ func (a *app) prepare(s *slot) {
 	}
 	s.loading = true
 	go func() {
-		f, vp, ap, dec, err := a.build(s.v)
+		pl, err := a.build(s.v)
 		a.post(func() {
 			s.loading = false
 			if s.gone {
-				closeAll(f, vp, ap)
+				pl.close()
 				return
 			}
-			s.file, s.vp, s.ap, s.dec, s.err = f, vp, ap, dec, err
+			s.players, s.err = pl, err
 			a.fill() // plays it if current, and starts the ones around it
 		})
 	}()
@@ -584,46 +604,45 @@ func copyTo(src, dir, name string) (string, error) {
 	return dst, nil
 }
 
-func (a *app) build(v dy.Video) (f *media.File, vp *ui.VideoPlayer, ap *audio.Player, dec *paced, err error) {
+func (a *app) build(v dy.Video) (pl players, err error) {
+	if v.Live != nil {
+		if pl.live, err = media.OpenLive(v.Live.HLS); err != nil {
+			return pl, err
+		}
+		if pl.vp, err = ui.NewVideoPlayer(pl.live); err != nil {
+			pl.live.Close()
+			return players{}, err
+		}
+		pl.vp.Pause()
+		return pl, nil
+	}
 	path := filepath.Join(a.dir, v.ID+".mp4")
 	if _, err = os.Stat(path); err != nil {
 		if err = a.c.Download(v.PlayURL, path); err != nil {
 			return
 		}
 	}
-	if f, err = media.Open(path); err != nil {
+	if pl.file, err = media.Open(path); err != nil {
 		return
 	}
-	vd, err := f.Video()
+	vd, err := pl.file.Video()
 	if err == nil {
-		dec = &paced{VideoDecoder: vd, speed: &a.speedBits}
-		vp, err = ui.NewVideoPlayer(dec)
+		pl.dec = &paced{VideoDecoder: vd, speed: &a.speedBits}
+		pl.vp, err = ui.NewVideoPlayer(pl.dec)
 	}
 	if err != nil {
-		f.Close()
-		return nil, nil, nil, nil, err
+		pl.file.Close()
+		return players{}, err
 	}
-	vp.SetLoop(true).Pause()
-	if ad, aerr := f.Audio(); aerr == nil {
-		ap = audio.NewPlayer(ad)
-		ap.SetLoop(true).SetPreservesPitch(true)
+	pl.vp.SetLoop(true).Pause()
+	if ad, aerr := pl.file.Audio(); aerr == nil {
+		pl.ap = audio.NewPlayer(ad)
+		pl.ap.SetLoop(true).SetPreservesPitch(true)
 		if s := math.Float64frombits(a.speedBits.Load()); s > 0 {
-			ap.SetSpeed(s)
+			pl.ap.SetSpeed(s)
 		}
 	}
 	return
-}
-
-func closeAll(f *media.File, vp *ui.VideoPlayer, ap *audio.Player) {
-	if vp != nil {
-		vp.Close()
-	}
-	if ap != nil {
-		ap.Close()
-	}
-	if f != nil {
-		f.Close()
-	}
 }
 
 // release frees a slot's players and its cached file.
@@ -632,9 +651,9 @@ func (a *app) release(s *slot) {
 	if s.vp == nil {
 		return
 	}
-	closeAll(s.file, s.vp, s.ap)
+	s.players.close()
 	os.Remove(filepath.Join(a.dir, s.v.ID+".mp4"))
-	s.file, s.vp, s.ap, s.dec = nil, nil, nil, nil
+	s.players = players{}
 	s.err = nil
 }
 
@@ -643,27 +662,41 @@ func (a *app) release(s *slot) {
 func (a *app) sync() {
 	p := a.cur()
 	for i, s := range p.list {
-		if s.vp == nil {
-			continue
+		switch {
+		case s.vp == nil:
+		case !p.plays() && i == 0:
+			s.play(false)
+		case i == p.idx && !a.paused && p.plays():
+			s.play(true)
+		default:
+			s.pause()
 		}
-		if !p.plays() && i == 0 {
-			s.vp.Play()
-			if s.ap != nil {
-				s.ap.Pause()
-			}
-			continue
+	}
+}
+
+// play plays pl's picture, and its sound if sound, else none of it.
+func (pl players) play(sound bool) {
+	pl.vp.Play()
+	if pl.live != nil {
+		pl.live.SetMuted(!sound)
+		pl.live.Play()
+	}
+	if pl.ap != nil {
+		if sound {
+			pl.ap.Play()
+		} else {
+			pl.ap.Pause()
 		}
-		if i == p.idx && !a.paused && p.plays() {
-			s.vp.Play()
-			if s.ap != nil {
-				s.ap.Play()
-			}
-			continue
-		}
-		s.vp.Pause()
-		if s.ap != nil {
-			s.ap.Pause()
-		}
+	}
+}
+
+func (pl players) pause() {
+	pl.vp.Pause()
+	if pl.live != nil {
+		pl.live.Pause()
+	}
+	if pl.ap != nil {
+		pl.ap.Pause()
 	}
 }
 
@@ -713,8 +746,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now 喜欢, a video of a
-// series playing with its related videos beside it, and the series.
+// clicks would, saves a shot of each step and quits: now a live room found in
+// 精选, playing, and paused.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -740,38 +773,33 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	time.Sleep(3 * time.Second) // the account, which 喜欢 needs
-	a.post(func() {
-		if a.liked != nil {
-			a.root(a.liked)
+	var room *dy.Video
+	next := a.c.Picks(0)
+	for range 15 {
+		vs, err := next()
+		if err != nil {
+			log.Println("picks:", err)
+			break
 		}
-	})
-	shot("1.png")
-	found := make(chan string)
-	a.post(func() {
-		a.root(a.picks)
-		p := a.picks
-		for i, s := range p.list {
-			if s.v.Mix.ID != "" {
-				a.play(p, i)
-				a.comments(s.v)
-				a.sheet.related = true
-				a.moreRelated()
-				found <- fmt.Sprintf("series %q at #%d", s.v.Mix.Name, i)
-				return
+		for _, v := range vs {
+			if v.Live != nil {
+				room = &v
+				break
 			}
 		}
-		found <- "no series among " + fmt.Sprint(len(p.list))
-	})
-	log.Println(<-found)
-	shot("2.png")
-	a.post(func() {
-		p := a.cur()
-		if p.plays() && p.idx < len(p.list) && p.list[p.idx].v.Mix.ID != "" {
-			a.openMix(p, p.list[p.idx].v)
+		if room != nil {
+			break
 		}
-	})
-	shot("3.png")
+	}
+	if room == nil {
+		log.Println("no live room found")
+		os.Exit(1)
+	}
+	log.Printf("room: %s %q, %s watching", room.Author, room.Desc, room.Live.Viewers)
+	a.post(func() { a.open(&page{title: "直播", list: []*slot{{v: *room}}, done: true}) })
+	shot("1.png")
+	a.post(a.toggle)
+	shot("2.png")
 	os.Exit(0)
 }
 

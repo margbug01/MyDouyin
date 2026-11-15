@@ -3,7 +3,10 @@ package dy
 import (
 	"fmt"
 	"github.com/egoist/mygo/ui"
+	"io"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -314,4 +317,45 @@ func TestLiveHotLikedRelatedMix(t *testing.T) {
 		t.Fatalf("series %q: %d videos, first %+v, %v", mix.Name, len(eps), eps[0].Mix, err)
 	}
 	t.Logf("hot %q; %d liked; %d related; series %q has %d", hot[1].Word, len(liked), len(rel), mix.Name, len(eps))
+}
+
+// 精选 now and then carries a live room, which decodes to its owner, its
+// title and an https HLS stream that answers as a playlist. Live: skipped
+// unless LIVE is set, and when no room comes in ten pages.
+func TestLiveRoom(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := c.Picks(0)
+	for range 10 {
+		vs, err := next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range vs {
+			if v.Live == nil {
+				continue
+			}
+			l := v.Live
+			if v.Author == "" || v.AuthorID == "" || l.WebRID == "" || v.Cover == "" || !strings.HasPrefix(l.HLS, "https://") {
+				t.Fatalf("room %+v %+v", v, *l)
+			}
+			resp, err := http.Get(l.HLS)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 16))
+			resp.Body.Close()
+			if !strings.HasPrefix(string(b), "#EXTM3U") {
+				t.Fatalf("stream answers %q", b)
+			}
+			t.Logf("%s: %q, %s watching", v.Author, v.Desc, l.Viewers)
+			return
+		}
+	}
+	t.Skip("no live room in ten pages")
 }

@@ -402,8 +402,15 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 			if b.Hovered() {
 				ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGBA(255, 255, 255, 0.06))
 			}
+			if v.Live != nil {
+				liveBadge(c)
+			}
 			ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Padding(18, 10, 7, 10).AlignItems(ui.Center).
 				Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
+				if v.Live != nil {
+					ui.Text(c, v.Live.Viewers+" 人在看").FontSize(12).FontWeight(500).TextColor(white)
+					return
+				}
 				ui.Icon(c, iconHeart).Size(13, 13).TextColor(white)
 				ui.Text(c, count(v.Likes)).FontSize(12).FontWeight(500).TextColor(white).Margin(0, 0, 0, 4).Grow(1)
 				ui.Text(c, clock(v.Duration)).FontSize(12).FontWeight(500).TextColor(white)
@@ -430,6 +437,9 @@ func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32)
 			ui.Video(c, s.vp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		} else if bmp := a.img.get(v.Cover); bmp != nil {
 			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+		}
+		if v.Live != nil {
+			liveBadge(c)
 		}
 		ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(60, 18, 16, 18).Gap(6).
 			Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {
@@ -570,7 +580,11 @@ func (a *app) caption(c *ui.Context, p *page, s *slot) {
 			if b.Clicked() {
 				a.openAuthor(p, s.v.Author, s.v.AuthorID)
 			}
-			ui.Text(c, "· "+ago(s.v.Created, time.Now())).FontSize(12.5).TextColor(ui.RGBA(255, 255, 255, 0.6))
+			when := ago(s.v.Created, time.Now())
+			if s.v.Live != nil {
+				when = "直播中"
+			}
+			ui.Text(c, "· "+when).FontSize(12.5).TextColor(ui.RGBA(255, 255, 255, 0.6))
 		})
 		ui.Text(c, s.v.Desc).FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.88)).MaxLines(2).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.4))
 		if m := s.v.Mix; m.ID != "" {
@@ -601,6 +615,10 @@ func (a *app) caption(c *ui.Context, p *page, s *slot) {
 // time, and how far it has played, a line over it. Not seekable: the video
 // decoder can only start over.
 func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
+	if s.v.Live != nil {
+		a.liveControls(c, s)
+		return
+	}
 	var of time.Duration
 	if s.ap != nil {
 		of = s.ap.Duration()
@@ -687,23 +705,28 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 			})
 			return b
 		}
-		shown(iconHeartFill, "点赞", count(s.v.Likes))
-		color := white
-		if a.sheet != nil {
-			color = pal.accent
-		}
-		if action("comments", iconComment, "评论", count(s.v.Comments), color).Clicked() {
+		shares := count(s.v.Shares)
+		if s.v.Live == nil { // a room has no counts, nor comments the client reads
+			shown(iconHeartFill, "点赞", count(s.v.Likes))
+			color := white
 			if a.sheet != nil {
-				a.sheet = nil
-			} else {
-				a.comments(s.v)
+				color = pal.accent
 			}
+			if action("comments", iconComment, "评论", count(s.v.Comments), color).Clicked() {
+				if a.sheet != nil {
+					a.sheet = nil
+				} else {
+					a.comments(s.v)
+				}
+			}
+			shown(iconStar, "收藏", count(s.v.Collects))
+		} else {
+			shares = "分享"
 		}
-		shown(iconStar, "收藏", count(s.v.Collects))
-		if action("share", iconShare, "分享：复制链接", count(s.v.Shares), white).Clicked() {
+		if action("share", iconShare, "分享：复制链接", shares, white).Clicked() {
 			a.copyLink(s.v)
 		}
-		color = white
+		color := white
 		if a.listen {
 			color = pal.accent
 		}
@@ -727,17 +750,22 @@ func (a *app) moreMenu(c *ui.Context, anchor ui.Element, s *slot) {
 			Role(ui.RoleMenu).FocusGroup(ui.Vertical).Label("更多").
 			Transition(ui.ElementTransition{Animation: &ui.Snappy, Enter: &ui.Motion{Scale: 0.96}, Exit: &ui.Motion{Scale: 0.98}})
 		label, ic := "下载到「下载」文件夹", iconDownload
+		if s.v.Live != nil { // a stream has no file to keep
+			label = ""
+		}
 		switch {
 		case s.saved == "保存中…":
 			label = "保存中…"
 		case strings.HasPrefix(s.saved, "已存到"):
 			label, ic = "已下载", iconCheck
 		}
-		if b := menuItem(c, ic, label); s.vp == nil || s.saved == "保存中…" {
-			b.Disabled(true).Opacity(0.4)
-		} else if b.Clicked() {
-			a.moreOpen = false
-			a.save(s)
+		if label != "" {
+			if b := menuItem(c, ic, label); s.vp == nil || s.saved == "保存中…" {
+				b.Disabled(true).Opacity(0.4)
+			} else if b.Clicked() {
+				a.moreOpen = false
+				a.save(s)
+			}
 		}
 		if menuItem(c, iconLink, "复制链接").Clicked() {
 			a.moreOpen = false
@@ -766,7 +794,12 @@ func menuItem(c *ui.Context, ic *ui.SVG, label string) ui.Element {
 }
 
 // videoURL is a video's page on the web.
-func videoURL(v dy.Video) string { return "https://www.douyin.com/video/" + v.ID }
+func videoURL(v dy.Video) string {
+	if v.Live != nil {
+		return "https://live.douyin.com/" + v.Live.WebRID
+	}
+	return "https://www.douyin.com/video/" + v.ID
+}
 
 // copyLink puts v's link on the clipboard, as Douyin's share does with no app
 // to share to.
@@ -894,6 +927,30 @@ func (a *app) relatedList(c *ui.Context, sh *sheet) {
 				ui.Text(c, "没有相关推荐").FontSize(12).TextColor(pal.faint)
 			}
 		})
+	})
+}
+
+// liveControls is the control bar of a live room: play and pause, and how
+// many watch; a stream has no time to show, speed or next.
+func (a *app) liveControls(c *ui.Context, s *slot) {
+	ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(40).PaddingX(8).Gap(8).AlignItems(ui.Center).Children(func() {
+		icon, label := iconPause, "暂停"
+		if a.paused {
+			icon, label = iconPlay, "播放"
+		}
+		if iconButton(c.Key("toggle"), icon, 16, white, label).Clicked() {
+			a.toggle()
+		}
+		ui.Box(c).Size(7, 7).Radius(4).Background(pal.accent)
+		ui.Text(c, "直播中 · "+s.v.Live.Viewers+" 人在看").FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8))
+	})
+}
+
+// liveBadge marks a live room's cover, at its top left.
+func liveBadge(c *ui.Context) {
+	ui.Row(c).Absolute().Top(8).Left(8).Height(20).PaddingX(7).Gap(4).Radius(5).AlignItems(ui.Center).Background(pal.accent).Children(func() {
+		ui.Box(c).Size(5, 5).Radius(3).Background(white)
+		ui.Text(c, "直播中").FontSize(11).FontWeight(700).TextColor(white)
 	})
 }
 
