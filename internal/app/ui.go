@@ -66,7 +66,7 @@ func (a *app) view(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
 	c.OnShortcut(0, ui.KeyEscape, a.escape)
 	root := ui.Box(c).Fill().Background(pal.bg)
-	if !c.Focused(a.searchBox) && !c.Focused(a.shareBox) {
+	if !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
 		// Space pauses wherever the focus is, as in MySpotify: on the box
 		// around everything it comes before a button the pointer focused,
 		// which would take it as a click; on the window, as nothing has
@@ -118,6 +118,9 @@ func (a *app) view(c *ui.Context) {
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
+	}
+	if a.pip != nil { // 小窗 follows what this window plays
+		a.pip.Invalidate()
 	}
 }
 
@@ -603,6 +606,17 @@ func (a *app) stage(c *ui.Context, p *page) {
 					ui.Icon(c, iconHeadphones).Size(48, 48).TextColor(white)
 					ui.Text(c, "听抖音中").FontSize(15).FontWeight(600).TextColor(white)
 				})
+			} else if s.vp != nil && a.pipOn { // playing in 小窗: a player shows in one place at a time
+				if bmp := a.img.get(s.v.Cover); bmp != nil {
+					ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.3)
+				}
+				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(14).Children(func() {
+					ui.Icon(c, iconPip).Size(44, 44).TextColor(white)
+					ui.Text(c, "小窗播放中").FontSize(15).FontWeight(600).TextColor(white)
+					if ui.Button(c.Key("pip-back"), "回到这里播放").Clicked() {
+						a.setPip(false)
+					}
+				})
 			} else if s.vp != nil {
 				ui.Video(c, s.vp).Fill().Fit(ui.Contain)
 			} else if bmp := a.img.get(s.v.Cover); bmp != nil {
@@ -749,6 +763,7 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 				if chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
 					a.dmOff = !a.dmOff
 				}
+				a.danmakuInput(c, s)
 			}
 			ui.Box(c).Grow(1)
 			if !live {
@@ -763,6 +778,18 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 				a.qualityMenu(c, s)
 				a.speedMenu(c)
 			}
+			if !live {
+				on := a.later[s.v.ID]
+				b := iconButton(c.Key("later"), onOff(on, iconLaterOn, iconLater), 17, onOff(on, pal.accent, white), onOff(on, "移出稍后再看", "稍后再看"))
+				if a.laterBusy[s.v.ID] {
+					b.Opacity(0.5)
+				} else if b.Clicked() {
+					a.toggleLater(s.v)
+				}
+			}
+			if iconButton(c.Key("pip"), iconPip, 17, onOff(a.pipOn, pal.accent, white), onOff(a.pipOn, "关闭小窗", "小窗")).Clicked() {
+				a.setPip(!a.pipOn)
+			}
 			a.volumeButton(c)
 			if iconButton(c.Key("theater"), onOff(a.theater && !a.fullScreen(), iconUnfill, iconFillWindow), 16, white, onOff(a.theater && !a.fullScreen(), "退出网页全屏", "网页全屏")).Clicked() {
 				if a.fullScreen() {
@@ -776,6 +803,75 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 			}
 		})
 	})
+}
+
+// danmakuInput is where a bullet comment is written, as Douyin's: Enter or
+// 发送 posts it where the video plays, for everyone watching to see.
+func (a *app) danmakuInput(c *ui.Context, s *slot) {
+	w, _ := c.Size()
+	if w < 1180 { // a narrow window keeps the bar's other buttons
+		return
+	}
+	field := ui.Row(c).Width(260).Height(30).Radius(8).PaddingStart(10).Gap(4).AlignItems(ui.Center).Background(ui.RGBA(255, 255, 255, 0.12)).Margin(0, 0, 0, 4)
+	field.Children(func() {
+		in := ui.TextInputBase(c.Key("dm-input"), &a.dmText).Bind(&a.dmBox).Grow(1).Placeholder("发一条友好的弹幕吧").FontSize(12.5).Label("弹幕内容")
+		if in.Submitted() {
+			a.sendBullet(s)
+		}
+		b := ui.ButtonBase(c.Key("dm-send")).Height(30).PaddingX(12).Radius(0, 8, 8, 0).Center().FocusRing(false).Label("发送弹幕")
+		ready := strings.TrimSpace(a.dmText) != ""
+		b.Background(onOff(ready, pal.accent, ui.RGBA(255, 255, 255, 0.08))).Children(func() {
+			ui.Text(c, "发送").FontSize(12.5).FontWeight(600).TextColor(onOff(ready, white, ui.RGBA(255, 255, 255, 0.5)))
+		})
+		if b.Clicked() {
+			a.sendBullet(s)
+		}
+	})
+}
+
+// pipView is 小窗: the current video alone, which drags the window; under
+// the pointer a play button and a close one. Escape closes it.
+func (a *app) pipView(c *ui.Context) {
+	c.OnShortcut(0, ui.KeyEscape, func() { a.setPip(false); a.redraw() })
+	c.OnShortcut(0, ui.KeySpace, func() { a.toggle(); a.redraw() })
+	box := ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).DragWindow()
+	box.Children(func() {
+		var s *slot
+		if p := a.cur(); p.plays() && p.idx < len(p.list) {
+			s = p.list[p.idx]
+		}
+		if s == nil || s.vp == nil {
+			box.Center().Children(func() {
+				ui.Text(c, "在主窗口里选一个视频播放").FontSize(13).TextColor(pal.muted)
+			})
+			return
+		}
+		ui.Video(c, s.vp).Fill().Fit(ui.Contain)
+		if box.Hovered() || a.paused {
+			ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(40).PaddingX(8).Gap(4).AlignItems(ui.Center).
+				Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {
+				if iconButton(c.Key("pip-toggle"), onOff(a.paused, iconPlay, iconPause), 16, white, onOff(a.paused, "播放", "暂停")).Clicked() {
+					a.toggle()
+					a.redraw()
+				}
+				ui.Text(c, "@"+s.v.Author).FontSize(12).TextColor(ui.RGBA(255, 255, 255, 0.85)).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+				if iconButton(c.Key("pip-close"), iconClose, 15, white, "关闭小窗").Clicked() {
+					a.setPip(false)
+					a.redraw()
+				}
+			})
+		}
+	})
+}
+
+// redraw has both windows build again, after a change in the other one.
+func (a *app) redraw() {
+	if a.win != nil {
+		a.win.Invalidate()
+	}
+	if a.pip != nil {
+		a.pip.Invalidate()
+	}
 }
 
 // fullScreen tells whether the window fills the screen.
@@ -1602,6 +1698,9 @@ var (
 	iconUser       = strokeIcon(`<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>`)
 	iconLive       = strokeIcon(`<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/>`)
 	iconDrama      = strokeIcon(`<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m10 9 5 3-5 3z"/>`)
+	iconLater      = strokeIcon(`<path d="M4 6h12"/><path d="M4 12h8"/><path d="M4 18h6"/><circle cx="17" cy="16" r="4"/><path d="M17 14.5V16l1 1"/>`)
+	iconLaterOn    = strokeIcon(`<path d="M4 6h12"/><path d="M4 12h8"/><path d="M4 18h6"/><path d="m14 16 2 2 4-4"/>`)
+	iconPip        = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="12" width="7" height="5" rx="1"/>`)
 	iconVolume     = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>`)
 	iconMuted      = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>`)
 	iconFillWindow = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10V8h2"/><path d="M16 14v2h-2"/>`)

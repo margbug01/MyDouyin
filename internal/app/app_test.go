@@ -1011,3 +1011,76 @@ func TestProgressDrag(t *testing.T) {
 		t.Fatalf("after the release: dragging %v, going to %v", a.dragging, got)
 	}
 }
+
+// The bar puts the video in 稍后再看 and takes it out, dimmed while it goes;
+// a bullet comment typed, spaces and all without pausing, flies at once on
+// Enter and goes back off if Douyin refuses it; 小窗 takes the video out of
+// the window, which says so, and its own view plays it and closes.
+func TestBarExtras(t *testing.T) {
+	p := stub("推荐", 1)
+	p.list[0].v = dy.Video{ID: "42", Author: "作者", Duration: time.Minute}
+	ready(t, p.list[0])
+	s := p.list[0]
+	a := withRoots(&app{pages: []*page{p}, posted: make(chan func(), 8)})
+	answer := make(chan error)
+	var sent []string
+	a.setLater = func(id string, on bool) error {
+		sent = append(sent, fmt.Sprint("later ", id, " ", on))
+		return <-answer
+	}
+	a.sendDanmaku = func(id string, at time.Duration, text string) error {
+		sent = append(sent, "dm "+id+" "+text)
+		return <-answer
+	}
+	tt := ui.NewTester(a.view, 1400, 820)
+	if err := tt.Click("稍后再看"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.later["42"] || !a.laterBusy["42"] {
+		t.Fatal("稍后再看 did not show at once")
+	}
+	answer <- nil
+	waitFor(t, a, tt, func() bool { return !a.laterBusy["42"] })
+	if !a.later["42"] || !tt.HasText("已加入稍后再看") {
+		t.Fatalf("after Douyin took it: %v %q", a.later["42"], tt.Texts())
+	}
+	if err := tt.Click("弹幕内容"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Type("好 看")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if a.paused || a.dmText != "" || len(s.danmaku) != 1 || s.danmaku[0].Text != "好 看" {
+		t.Fatalf("after Enter: paused %v, text %q, danmaku %+v", a.paused, a.dmText, s.danmaku)
+	}
+	answer <- errors.New("太快了")
+	waitFor(t, a, tt, func() bool { return len(s.danmaku) == 0 })
+	if !tt.HasText("弹幕没发出去：太快了") {
+		t.Fatalf("a refused bullet comment: %q", tt.Texts())
+	}
+	if len(sent) != 2 || sent[0] != "later 42 true" || sent[1] != "dm 42 好 看" {
+		t.Fatalf("sent %q", sent)
+	}
+	if err := tt.Click("小窗"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.pipOn || !tt.HasText("小窗播放中") {
+		t.Fatalf("小窗: %v %q", a.pipOn, tt.Texts())
+	}
+	pt := ui.NewTester(a.pipView, 480, 270)
+	pt.Move(240, 135)
+	pt.Frame()
+	if !pt.HasText("@作者") {
+		t.Fatalf("小窗 shows %q", pt.Texts())
+	}
+	if err := pt.Click("关闭小窗"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.pipOn || tt.HasText("小窗播放中") {
+		t.Fatal("closing 小窗 left the window without its video")
+	}
+}

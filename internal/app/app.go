@@ -10,6 +10,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -186,6 +188,15 @@ type app struct {
 	qualityOpen bool // the bar's menus
 	speedOpen   bool
 	volumeOpen  bool
+	pip         *mygo.Window // 小窗, which shows the current video over other windows
+	pipOn       bool
+	dmText      string // the bullet comment being written
+	dmBox       ui.Handle
+	later       map[string]bool // the videos in 稍后再看, by ID, as far as known
+	laterBusy   map[string]bool // those with a change on its way
+	// sendDanmaku and setLater write to Douyin; a test puts its own.
+	sendDanmaku func(id string, at time.Duration, text string) error
+	setLater    func(id string, on bool) error
 	dragging    bool    // the progress pressed, being dragged
 	dragAt      float32 // where along it, 0 to 1
 
@@ -268,7 +279,7 @@ func (a *app) moreNotes() {
 }
 
 // mineTabs are 我的's tabs, in order.
-var mineTabs = []string{"作品", "喜欢", "收藏", "观看历史"}
+var mineTabs = []string{"作品", "喜欢", "收藏", "观看历史", "稍后再看"}
 
 // isMine tells whether p is one of 我的's tabs.
 func (a *app) isMine(p *page) bool {
@@ -429,6 +440,102 @@ func (a *app) setVolume(v float64, muted bool) {
 	}
 }
 
+// toggleLater puts v in 稍后再看, or takes it out: at once on screen, then
+// on Douyin, the screen put back if Douyin did not take it.
+func (a *app) toggleLater(v dy.Video) {
+	if a.setLater == nil || a.laterBusy[v.ID] || v.Live != nil {
+		return
+	}
+	if a.later == nil {
+		a.later, a.laterBusy = map[string]bool{}, map[string]bool{}
+	}
+	on := !a.later[v.ID]
+	a.later[v.ID], a.laterBusy[v.ID] = on, true
+	go func() {
+		err := a.setLater(v.ID, on)
+		a.post(func() {
+			delete(a.laterBusy, v.ID)
+			if err != nil {
+				a.later[v.ID] = !on
+				a.toast = onOff(on, "加入", "移出") + "稍后再看没成功：" + err.Error()
+				return
+			}
+			a.toast = onOff(on, "已加入稍后再看", "已移出稍后再看")
+		})
+	}()
+}
+
+// sendBullet posts what is written as a bullet comment on s's video, where
+// it plays: it flies at once, and goes back off it if Douyin refused it.
+func (a *app) sendBullet(s *slot) {
+	text := strings.TrimSpace(a.dmText)
+	if text == "" || a.sendDanmaku == nil || s.v.Live != nil {
+		return
+	}
+	if n := len([]rune(text)); n > 50 {
+		a.toast = fmt.Sprintf("弹幕最多 50 个字，现在 %d 个", n)
+		return
+	}
+	at := s.at()
+	d := dy.Danmaku{At: at + 300*time.Millisecond, Text: text}
+	i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At > d.At })
+	s.danmaku = slices.Insert(s.danmaku, i, d)
+	a.dmText, a.dmOff = "", false
+	id := s.v.ID
+	go func() {
+		err := a.sendDanmaku(id, at, text)
+		a.post(func() {
+			if err != nil {
+				if j := slices.Index(s.danmaku, d); j >= 0 {
+					s.danmaku = slices.Delete(s.danmaku, j, j+1)
+				}
+				a.toast = "弹幕没发出去：" + err.Error()
+				return
+			}
+			a.toast = "弹幕已发送"
+		})
+	}()
+}
+
+// setPip opens 小窗, which plays the current video over other windows, or
+// closes it; the main window shows the video's cover meanwhile.
+func (a *app) setPip(on bool) {
+	if on == a.pipOn {
+		return
+	}
+	a.pipOn = on
+	if !on {
+		if a.pip != nil {
+			w := a.pip
+			a.pip = nil
+			w.Close()
+		}
+		return
+	}
+	if a.win == nil { // a test's view
+		return
+	}
+	a.pip = mygo.NewWindow(mygo.WindowOptions{
+		Title:           "抖音小窗",
+		Width:           480,
+		Height:          270,
+		MinWidth:        240,
+		MinHeight:       135,
+		StateKey:        "pip",
+		Frameless:       true,
+		BackgroundColor: "#000000",
+		Content:         ui.View(a.pipView),
+	})
+	a.pip.SetAlwaysOnTop(true)
+	w := a.pip
+	w.OnClosed(func() {
+		if a.pip == w { // closed from its own window
+			a.pip, a.pipOn = nil, false
+			a.redraw()
+		}
+	})
+}
+
 // setSpeed plays every video at s, and the ones to come.
 func (a *app) setSpeed(s float64) {
 	a.speed = s
@@ -585,7 +692,13 @@ func (a *app) post(fn func()) {
 		}
 		return
 	}
-	a.win.Update(func() { fn(); a.win.Invalidate() })
+	a.win.Update(func() {
+		fn()
+		a.win.Invalidate()
+		if a.pip != nil {
+			a.pip.Invalidate()
+		}
+	})
 }
 
 // more fetches the next page of p's list.
@@ -688,6 +801,7 @@ func (a *app) loadAccount() {
 	go func() {
 		me, err := a.c.Self()
 		var us []dy.User
+		later, _ := a.c.WatchLater()() // the first page, enough to mark most
 		if err == nil {
 			next := a.c.Following(me.ID)
 			for {
@@ -703,12 +817,19 @@ func (a *app) loadAccount() {
 		}
 		a.post(func() {
 			a.me, a.follows = me, us
+			if a.later == nil {
+				a.later, a.laterBusy = map[string]bool{}, map[string]bool{}
+			}
+			for _, v := range later {
+				a.later[v.ID] = true
+			}
 			if me.ID != "" && a.mine == nil {
 				a.mine = map[string]*page{
 					"作品":   {title: "作品", next: a.c.MyPosts(me.ID), grid: true},
 					"喜欢":   {title: "喜欢", next: a.c.Liked(me.ID), grid: true},
 					"收藏":   {title: "收藏", next: a.c.Collected(), grid: true},
 					"观看历史": {title: "观看历史", next: a.c.History(), grid: true},
+					"稍后再看": {title: "稍后再看", next: a.c.WatchLater(), grid: true},
 				}
 				a.mineTab = "作品"
 			}
@@ -980,8 +1101,8 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now the control bar,
-// a seek, a change of definition, 网页全屏 and the share panel.
+// clicks would, saves a shot of each step and quits: now 小窗, 稍后再看 and
+// a bullet comment, each checked on Douyin and taken back.
 func (a *app) selfCheck(dir string) {
 	shot := func(name string) {
 		time.Sleep(12 * time.Second)
@@ -1007,58 +1128,58 @@ func (a *app) selfCheck(dir string) {
 		})
 		log.Println("shot", name, err, <-done)
 	}
-	v, err := a.c.Video("7694319481270619427") // 3:29, in 1080P, 720P and 540P
+	const id = "7694319481270619427"
+	v, err := a.c.Video(id)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
-	log.Printf("qualities %+v", func() (n []string) {
-		for _, q := range v.Qualities {
-			n = append(n, fmt.Sprintf("%s %.0fMB", q.Name, float64(q.Size)/1e6))
-		}
-		return
-	}())
+	time.Sleep(3 * time.Second) // the account
 	a.post(func() { a.open(&page{title: "测试", list: []*slot{{v: v}}, done: true}) })
-	times := func(what string) {
-		ch := make(chan string)
-		a.post(func() {
-			s := a.cur().list[0]
-			snd, pic := time.Duration(0), time.Duration(0)
-			if s.ap != nil {
-				snd = s.ap.Position()
-			}
-			if s.dec != nil {
-				pic = time.Duration(s.dec.done.Load())
-			}
-			ch <- fmt.Sprintf("%s: sound %v picture %v file %s", what, snd.Round(100*time.Millisecond), pic.Round(100*time.Millisecond), filepath.Base(s.path))
-		})
-		log.Println("TIME", <-ch)
-	}
+	time.Sleep(6 * time.Second)
+	a.post(func() { a.setPip(true) })
 	shot("1.png")
-	times("playing")
-	a.post(func() { a.seek(a.cur().list[0], time.Minute) })
-	time.Sleep(3 * time.Second)
-	times("3 s after seeking to 1:00")
-	a.post(func() { a.setQuality("720P") })
-	for range 60 {
-		time.Sleep(time.Second)
-		ch := make(chan bool)
-		a.post(func() { ch <- a.cur().list[0].vp != nil })
-		if <-ch {
-			break
-		}
+	if b, err := a.pip.CapturePage(); err == nil {
+		os.WriteFile(filepath.Join(dir, "pip.png"), b, 0o644)
 	}
-	time.Sleep(2 * time.Second)
-	times("2 s after 720P opened")
-	a.post(func() { a.qualityOpen = true })
+	a.post(func() { a.setPip(false) })
+	wait := func(what string, ok func() bool) {
+		for range 20 {
+			if ok() {
+				log.Printf("CHECK %s: yes", what)
+				return
+			}
+			time.Sleep(time.Second)
+		}
+		log.Printf("CHECK %s: NO", what)
+	}
+	inLater := func() bool {
+		vs, _ := a.c.WatchLater()()
+		for _, x := range vs {
+			if x.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	a.post(func() { a.toggleLater(a.cur().list[0].v) })
+	wait("in 稍后再看", inLater)
 	shot("2.png")
-	a.post(func() { a.qualityOpen = false; a.theater = true })
+	a.post(func() { a.toggleLater(a.cur().list[0].v) })
+	wait("out of 稍后再看", func() bool { return !inLater() })
+	mine := func() []dy.DanmakuRef {
+		refs, _ := a.c.MyDanmaku(id, a.me.UID, v.Duration)
+		return refs
+	}
+	before := len(mine())
+	a.post(func() { a.dmText = "好看"; a.sendBullet(a.cur().list[0]) })
+	var posted []dy.DanmakuRef
+	wait("bullet comment on Douyin", func() bool { posted = mine(); return len(posted) > before })
 	shot("3.png")
-	a.post(func() { a.theater = false; a.shareOpen = true })
-	shot("4.png")
-	a.post(func() { a.shareOpen = false; a.volumeOpen = true; a.setVolume(0.3, false) })
-	shot("5.png")
-	times("end")
+	for _, d := range posted {
+		log.Printf("DELETE %s %q at %v: %v", d.ID, d.Text, d.At, a.c.DeleteDanmaku(d.ID))
+	}
+	wait("no bullet comment of mine left", func() bool { return len(mine()) == 0 })
 	os.Exit(0)
 }
 
@@ -1084,6 +1205,13 @@ func Run() error {
 	a.img = newImages(c.Image, a.post)
 	a.setLiked, a.setSaved = c.SetLiked, c.SetSaved
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }
+	a.setLater = c.SetWatchLater
+	a.sendDanmaku = func(id string, at time.Duration, text string) error {
+		if a.me.UID == "" {
+			return errors.New("账号还没载入")
+		}
+		return c.SendDanmaku(id, a.me.UID, at, text, false)
+	}
 	a.setSpeed(1)
 	a.setVolume(1, false)
 	os.RemoveAll(a.dir) // leftovers of a crashed run

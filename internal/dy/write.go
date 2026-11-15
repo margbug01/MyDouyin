@@ -371,3 +371,36 @@ func (c *Client) DeleteDanmaku(danmakuID string) error {
 	q := url.Values{"app_name": {"aweme"}, "format": {"json"}, "user_type": {"1"}, "danmaku_id": {danmakuID}}
 	return c.post("/aweme/v1/web/danmaku/delete_v2/", q.Encode(), "", form, false)
 }
+
+// DanmakuRef is a bullet comment as its sender may take it back.
+type DanmakuRef struct {
+	ID, Text string
+	At       time.Duration
+}
+
+// MyDanmaku finds the bullet comments the user (uid, User.UID) left on the
+// video with the given ID, of length dur, reading it 32 seconds at a time.
+func (c *Client) MyDanmaku(id, uid string, dur time.Duration) ([]DanmakuRef, error) {
+	var out []DanmakuRef
+	for from := time.Duration(0); from < dur; from += 32 * time.Second {
+		var r struct {
+			status
+			List []struct {
+				ID     string `json:"danmaku_id"`
+				User   string `json:"user_id"`
+				Text   string
+				Offset int64 `json:"offset_time"`
+			} `json:"danmaku_list"`
+		}
+		q := fmt.Sprintf("format=json&group_id=%s&item_id=%s&start_time=%d&end_time=%d", id, id, from.Milliseconds(), (from + 32*time.Second).Milliseconds())
+		if err := c.getJSON("/aweme/v1/web/danmaku/get_v2/", q, &r); err != nil {
+			return out, err
+		}
+		for _, d := range r.List {
+			if d.User == uid {
+				out = append(out, DanmakuRef{d.ID, d.Text, time.Duration(d.Offset) * time.Millisecond})
+			}
+		}
+	}
+	return out, nil
+}
