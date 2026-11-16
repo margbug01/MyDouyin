@@ -98,7 +98,10 @@ func openStream(url string, headers map[string]string, vod bool) (*Live, error) 
 }
 
 // Play and Pause the stream, its sound with it; SetMuted silences it.
+// Each method drains its own pool: callers include goroutines whose threads
+// never drain one, and a single autoreleased item would outlive Close.
 func (l *Live) Play() {
+	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed {
@@ -109,6 +112,7 @@ func (l *Live) Play() {
 	}
 }
 func (l *Live) Pause() {
+	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed {
@@ -118,6 +122,7 @@ func (l *Live) Pause() {
 }
 
 func (l *Live) SetSpeed(speed float64) {
+	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.speed = float32(speed)
@@ -127,6 +132,7 @@ func (l *Live) SetSpeed(speed float64) {
 }
 
 func (l *Live) Position() time.Duration {
+	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed {
@@ -144,6 +150,7 @@ func (l *Live) Seeking() bool {
 }
 
 func (l *Live) Seek(at time.Duration) {
+	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed && l.vod {
@@ -158,6 +165,7 @@ func (l *Live) Seek(at time.Duration) {
 	}
 }
 func (l *Live) SetMuted(m bool) {
+	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed {
@@ -167,6 +175,7 @@ func (l *Live) SetMuted(m bool) {
 
 // SetVolume sets the stream's sound, from 0 to 1.
 func (l *Live) SetVolume(v float64) {
+	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed {
@@ -180,58 +189,66 @@ func (l *Live) SetVolume(v float64) {
 func (l *Live) Next() (ui.VideoFrame, error) {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		l.mu.Lock()
-		if l.closed {
-			l.mu.Unlock()
-			return ui.VideoFrame{}, io.EOF
+		if f, err, ok := l.poll(&deadline); ok {
+			return f, err
 		}
-		if objc.Send[int](l.item, sel("status")) == 2 { // failed
-			l.mu.Unlock()
-			return ui.VideoFrame{}, errors.New("media: the stream failed to play")
-		}
-		if l.seekDone != nil && l.seekDone.Load() {
-			l.seekDone = nil
-			if !l.paused {
-				l.player.Send(sel("setRate:"), l.speed)
-			}
-		}
-		at := objc.Send[cmTime](l.player, sel("currentTime"))
-		if l.vod && !l.paused && l.seekDone == nil {
-			end := objc.Send[cmTime](l.item, sel("duration"))
-			if at.valid() && end.valid() && at.dur() >= end.dur() {
-				l.mu.Unlock()
-				return ui.VideoFrame{}, io.EOF
-			}
-		}
-		if l.paused {
-			deadline = time.Now().Add(20 * time.Second)
-		}
-		now := caCurrentTime()
-		t := objc.Send[cmTime](l.out, sel("itemTimeForHostTime:"), now)
-		var img *image.RGBA
-		if l.seekDone == nil && objc.Send[bool](l.out, sel("hasNewPixelBufferForItemTime:"), t) {
-			if pb := uintptr(l.out.Send(sel("copyPixelBufferForItemTime:itemTimeForDisplay:"), t, unsafe.Pointer(nil))); pb != 0 {
-				l.frame = bgra(pb, l.frame)
-				img = l.frame
-				cfRelease(pb)
-			}
-		}
-		if img != nil {
-			dur := time.Second / 30
-			if l.last > 0 {
-				// A stalled/hidden view must not display its next frame for the whole gap.
-				dur = min(max(time.Duration((now-l.last)*float64(time.Second)), 5*time.Millisecond), 100*time.Millisecond)
-			}
-			l.last = now
-			l.mu.Unlock()
-			return ui.VideoFrame{Image: img, Duration: dur}, nil
-		}
-		l.mu.Unlock()
 		if time.Now().After(deadline) {
 			return ui.VideoFrame{}, errLiveNoPicture
 		}
 		time.Sleep(4 * time.Millisecond)
 	}
+}
+
+// poll is one look for a due picture. It drains its own autorelease pool:
+// AVPlayer's getters autorelease the item, and this goroutine's OS thread has
+// no pool that ever drains, so without it the item, its asset and its HTTP
+// cache (tens of MB a video) were never freed.
+func (l *Live) poll(deadline *time.Time) (ui.VideoFrame, error, bool) {
+	defer autorelease()()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return ui.VideoFrame{}, io.EOF, true
+	}
+	if objc.Send[int](l.item, sel("status")) == 2 { // failed
+		return ui.VideoFrame{}, errors.New("media: the stream failed to play"), true
+	}
+	if l.seekDone != nil && l.seekDone.Load() {
+		l.seekDone = nil
+		if !l.paused {
+			l.player.Send(sel("setRate:"), l.speed)
+		}
+	}
+	at := objc.Send[cmTime](l.player, sel("currentTime"))
+	if l.vod && !l.paused && l.seekDone == nil {
+		end := objc.Send[cmTime](l.item, sel("duration"))
+		if at.valid() && end.valid() && at.dur() >= end.dur() {
+			return ui.VideoFrame{}, io.EOF, true
+		}
+	}
+	if l.paused {
+		*deadline = time.Now().Add(20 * time.Second)
+	}
+	now := caCurrentTime()
+	t := objc.Send[cmTime](l.out, sel("itemTimeForHostTime:"), now)
+	var img *image.RGBA
+	if l.seekDone == nil && objc.Send[bool](l.out, sel("hasNewPixelBufferForItemTime:"), t) {
+		if pb := uintptr(l.out.Send(sel("copyPixelBufferForItemTime:itemTimeForDisplay:"), t, unsafe.Pointer(nil))); pb != 0 {
+			l.frame = bgra(pb, l.frame)
+			img = l.frame
+			cfRelease(pb)
+		}
+	}
+	if img != nil {
+		dur := time.Second / 30
+		if l.last > 0 {
+			// A stalled/hidden view must not display its next frame for the whole gap.
+			dur = min(max(time.Duration((now-l.last)*float64(time.Second)), 5*time.Millisecond), 100*time.Millisecond)
+		}
+		l.last = now
+		return ui.VideoFrame{Image: img, Duration: dur}, nil, true
+	}
+	return ui.VideoFrame{}, nil, false
 }
 
 // Rewind loops a video; live rooms have no start to go back to.

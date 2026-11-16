@@ -88,6 +88,25 @@ go test ./internal/app -run '^$' -bench BenchmarkPictureDecode -benchtime=5x
 
 测试和截图临时产物保存在 Alma Go 的 `temp/2026-11-16` 目录，不加入仓库。原版本对照在该目录内的独立源码快照运行，没有回退当前工作区。
 
+## 第二轮：AVPlayer 泄漏（2026-11-16 下午）
+
+用户实际使用中 0.1.7 占到 500 MB。`footprint` 显示最大一块是 `CoreMedia HTTP Cache`（118 MB，1902 个区域），关掉视频也不降。
+
+- 原因：`Live.Next` 在 MyGo 解码 goroutine 上每 4 ms 轮询 `currentTime` 等，AVFoundation 内部 autorelease 的 item 落在这个线程从不排空的 pool 里。8 秒播放后 item 的 retainCount 约 1810，Close 后 item、asset 连同它的 HTTP 缓存（每个视频约 32 MB）都无法释放。`build` 在后台 goroutine 上调用的 `Seek`/`Pause` 也有同样问题。
+- 修改：`Next` 的每次轮询、`Live` 每个发 ObjC 消息的方法、解码器的 `Close` 都在自己的 autorelease pool 里执行；`TestStreamFreedOnClose` 用弱引用断言 Close 后 item 和 asset 被释放（修复前的代码上该测试失败）。
+- Go 堆：GC 后活跃约 34 MB，主要是复用的视频帧；默认 GOGC=100 让未回收的垃圾和未归还的页多占几十 MB。改为 `debug.SetGCPercent(25)`，实测 GC CPU 0.02%。
+
+真实窗口、推荐页每 10 秒切一条视频（静音、不写设置），每条采样一次 `footprint`：
+
+| | 修复前 | 只修泄漏 | 修泄漏 + GOGC=25 |
+| --- | ---: | ---: | ---: |
+| 第 12 条 footprint | 426 MB，持续上涨 | 222 MB | — |
+| 8 条内范围 | — | 125–241 MB | 162–186 MB |
+| CoreMedia HTTP Cache | 172 MB | 约 2–3 MB | 约 2–3 MB |
+| Malloc Small | 29→63 MB | 29→38 MB | — |
+
+另外发现：AVPlayer 对普通 MP4 会尽快把整个文件读完（本地服务器上 8 秒读完 72 MB），读完即丢，不占内存，只占带宽；`preferredForwardBufferDuration` 管不住它。本轮未处理。
+
 ## 尚未覆盖
 
 未进行数小时连续滚动、所有直播 CDN、所有编码格式及其他 macOS 版本的验证；没有安装或发布新版本。单次网络首帧仍受 CDN、带宽及视频文件布局影响。观看进度保留在本次应用会话中，不包含退出应用后的持久化历史功能。

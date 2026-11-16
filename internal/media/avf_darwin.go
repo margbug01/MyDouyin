@@ -236,7 +236,7 @@ func (v *VideoDecoder) close() {
 	}
 }
 
-func (v *VideoDecoder) Close() error { v.close(); return nil }
+func (v *VideoDecoder) Close() error { defer autorelease()(); v.close(); return nil }
 
 // AudioDecoder implements audio.Decoder: float32, 48 kHz, stereo, which is
 // what MyGo's mixer plays, so AVFoundation does the resampling.
@@ -314,4 +314,4 @@ func (a *AudioDecoder) close() {
 	}
 }
 
-func (a *AudioDecoder) Close() error { a.close(); return nil }
+func (a *AudioDecoder) Close() error { defer autorelease()(); a.close(); return nil }
