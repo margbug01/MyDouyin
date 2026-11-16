@@ -173,6 +173,12 @@ go test ./internal/app -run '^$' -bench BenchmarkPictureDecode -benchtime=5x
 
 编排、原始 footprint、日志与合成截图位于 Alma Go 的 `temp/2026-11-16/native-default/`，不加入生产构建。
 
+### 本机安装验证
+
+从干净提交 `00ebfd9` 的独立 worktree，使用正式 MyGo 0.8.1 构建 0.2.2；核对 `vcs.modified=false`、版本号和代码签名后，已替换并启动 `/Applications/MyDouyin.app`。产物保留在 `build.noindex/native-0.2.2/darwin-arm64/`，未发布 GitHub release。
+
+新进程 PID 62064 在启动检查中持续存活，三次 RSS 为 229504 / 235712 / 237408 KiB，同次启动后 physical footprint 为 181 MB。该记录仅确认实际安装运行，不与上述固定素材对照或前一版不同启动场景直接比较。旧版 0.2.1 备份在 Alma Go 的 `temp/2026-11-16/native-default/installed-0.2.1.app`，临时目录按 14 天清理。
+
 ## 尚未覆盖
 
 未进行数小时连续滚动、所有直播 CDN、所有编码格式及其他 macOS 版本的验证。单次网络首帧仍受 CDN、带宽及视频文件布局影响。观看进度保留在本次应用会话中，不包含退出应用后的持久化历史功能。
