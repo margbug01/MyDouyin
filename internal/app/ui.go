@@ -208,9 +208,7 @@ func (a *app) sidebar(c *ui.Context) {
 	// Below the window buttons, which sit over it.
 	ui.Column(c).Fill().Padding(48, 12, 14, 12).Gap(4).DragWindow().Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(0, 10, 14, 10).Children(func() {
-			ui.Box(c).Size(26, 26).Radius(7).Center().Gradient(ui.Hex("#25f4ee"), ui.Hex("#fe2c55"), 135).Children(func() {
-				ui.Icon(c, iconNote).Size(16, 16).TextColor(white)
-			})
+			ui.Image(c, logo).Size(26, 26)
 			ui.Text(c, "MyDouyin").FontSize(20).FontWeight(800).TextColor(white)
 		})
 		root := a.pages[0]
@@ -1799,7 +1797,6 @@ var (
 	iconComment    = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
 	iconDownload   = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
 	iconCheck      = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
-	iconNote       = fillIcon(`<path d="M16.5 3c.4 2.2 1.9 3.7 4 4v3.2c-1.5 0-2.9-.5-4-1.3v6.3a5.7 5.7 0 1 1-5.7-5.7c.3 0 .6 0 .9.1v3.3a2.5 2.5 0 1 0 1.6 2.3V3z"/>`)
 	iconCompass    = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>`)
 	iconFollow     = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6 1.3 0 2.5.3 3.5.8"/><path d="m15 17 2 2 4-4"/>`)
 	iconFriends    = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M16 4.2a4 4 0 0 1 0 7.6"/><path d="M19 14.5c1.8.9 3 2.9 3 5.5"/>`)
