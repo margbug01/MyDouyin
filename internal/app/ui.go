@@ -181,7 +181,7 @@ func (a *app) sidebar(c *ui.Context) {
 			ui.Box(c).Size(26, 26).Radius(7).Center().Gradient(ui.Hex("#25f4ee"), ui.Hex("#fe2c55"), 135).Children(func() {
 				ui.Icon(c, iconNote).Size(16, 16).TextColor(white)
 			})
-			ui.Text(c, "抖音").FontSize(20).FontWeight(800).TextColor(white)
+			ui.Text(c, "MyDouyin").FontSize(20).FontWeight(800).TextColor(white)
 		})
 		root := a.pages[0]
 		nav := func(icon *ui.SVG, label string, r *page, on bool) bool {

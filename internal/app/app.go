@@ -516,7 +516,7 @@ func (a *app) setPip(on bool) {
 		return
 	}
 	a.pip = mygo.NewWindow(mygo.WindowOptions{
-		Title:           "抖音小窗",
+		Title:           "MyDouyin 小窗",
 		Width:           480,
 		Height:          270,
 		MinWidth:        240,
@@ -1101,85 +1101,15 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now 小窗, 稍后再看 and
-// a bullet comment, each checked on Douyin and taken back.
+// clicks would, saves a shot of each step and quits: now the name in the
+// sidebar's corner. It only reads.
 func (a *app) selfCheck(dir string) {
-	shot := func(name string) {
-		time.Sleep(12 * time.Second)
-		b, err := a.win.CapturePage()
-		if err == nil {
-			err = os.WriteFile(filepath.Join(dir, name), b, 0o644)
-		}
-		done := make(chan string)
-		a.post(func() {
-			state := ""
-			for _, p := range a.pages {
-				state += fmt.Sprintf(" | %q idx=%d n=%d playing=%v scrollY=%.0f", p.title, p.idx, len(p.list), p.plays(), p.scroll.Y)
-				if a.sheet != nil && p == a.cur() {
-					state += fmt.Sprintf(" comments=%d done=%v msg=%q", len(a.sheet.items), a.sheet.done, a.sheet.msg)
-				}
-				for i, s := range p.list {
-					if s.vp != nil || s.loading || s.err != nil {
-						state += fmt.Sprintf(" %d:vp=%v,loading=%v,err=%v", i, s.vp != nil, s.loading, s.err)
-					}
-				}
-			}
-			done <- state
-		})
-		log.Println("shot", name, err, <-done)
+	time.Sleep(12 * time.Second) // the account and the first videos
+	b, err := a.win.CapturePage()
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "1.png"), b, 0o644)
 	}
-	const id = "7694319481270619427"
-	v, err := a.c.Video(id)
-	if err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-	time.Sleep(3 * time.Second) // the account
-	a.post(func() { a.open(&page{title: "测试", list: []*slot{{v: v}}, done: true}) })
-	time.Sleep(6 * time.Second)
-	a.post(func() { a.setPip(true) })
-	shot("1.png")
-	if b, err := a.pip.CapturePage(); err == nil {
-		os.WriteFile(filepath.Join(dir, "pip.png"), b, 0o644)
-	}
-	a.post(func() { a.setPip(false) })
-	wait := func(what string, ok func() bool) {
-		for range 20 {
-			if ok() {
-				log.Printf("CHECK %s: yes", what)
-				return
-			}
-			time.Sleep(time.Second)
-		}
-		log.Printf("CHECK %s: NO", what)
-	}
-	inLater := func() bool {
-		vs, _ := a.c.WatchLater()()
-		for _, x := range vs {
-			if x.ID == id {
-				return true
-			}
-		}
-		return false
-	}
-	a.post(func() { a.toggleLater(a.cur().list[0].v) })
-	wait("in 稍后再看", inLater)
-	shot("2.png")
-	a.post(func() { a.toggleLater(a.cur().list[0].v) })
-	wait("out of 稍后再看", func() bool { return !inLater() })
-	mine := func() []dy.DanmakuRef {
-		refs, _ := a.c.MyDanmaku(id, a.me.UID, v.Duration)
-		return refs
-	}
-	before := len(mine())
-	a.post(func() { a.dmText = "好看"; a.sendBullet(a.cur().list[0]) })
-	var posted []dy.DanmakuRef
-	wait("bullet comment on Douyin", func() bool { posted = mine(); return len(posted) > before })
-	shot("3.png")
-	for _, d := range posted {
-		log.Printf("DELETE %s %q at %v: %v", d.ID, d.Text, d.At, a.c.DeleteDanmaku(d.ID))
-	}
-	wait("no bullet comment of mine left", func() bool { return len(mine()) == 0 })
+	log.Println("shot 1.png", err)
 	os.Exit(0)
 }
 
@@ -1217,7 +1147,7 @@ func Run() error {
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
-			Title:     "抖音",
+			Title:     "MyDouyin",
 			Width:     1280,
 			Height:    820,
 			MinWidth:  960,
