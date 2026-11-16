@@ -53,6 +53,20 @@ func TestStreamPlayerDrawsAndLoops(t *testing.T) {
 	pl.pause()
 	tt.Frame()
 	frozen := tt.Image().RGBAAt(80, 45)
+	// Looping seeks and their last decoded picture complete asynchronously after Pause.
+	stableSince := time.Now()
+	end = time.Now().Add(time.Second)
+	for time.Now().Before(end) && (live.Seeking() || time.Since(stableSince) < 100*time.Millisecond) {
+		time.Sleep(10 * time.Millisecond)
+		tt.Advance(10 * time.Millisecond)
+		tt.Frame()
+		if picture := tt.Image().RGBAAt(80, 45); picture != frozen || live.Seeking() {
+			frozen, stableSince = picture, time.Now()
+		}
+	}
+	if live.Seeking() || time.Since(stableSince) < 100*time.Millisecond {
+		t.Fatal("paused picture did not settle after the loop")
+	}
 	time.Sleep(100 * time.Millisecond)
 	tt.Advance(100 * time.Millisecond)
 	tt.Frame()

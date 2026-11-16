@@ -237,6 +237,9 @@ func (l *Live) poll(deadline *time.Time) (ui.VideoFrame, error, bool) {
 	if l.paused {
 		*deadline = time.Now().Add(20 * time.Second)
 	}
+	if l.out == 0 { // AVPlayerLayer owns presentation; only service the clock and seeks.
+		return ui.VideoFrame{}, nil, false
+	}
 	now := caCurrentTime()
 	t := objc.Send[cmTime](l.out, sel("itemTimeForHostTime:"), now)
 	var img *image.RGBA
