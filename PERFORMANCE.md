@@ -145,4 +145,6 @@ go test ./internal/app -run '^$' -bench BenchmarkPictureDecode -benchtime=5x
 
 ## 尚未覆盖
 
-未进行数小时连续滚动、所有直播 CDN、所有编码格式及其他 macOS 版本的验证；没有安装或发布新版本。单次网络首帧仍受 CDN、带宽及视频文件布局影响。观看进度保留在本次应用会话中，不包含退出应用后的持久化历史功能。
+未进行数小时连续滚动、所有直播 CDN、所有编码格式及其他 macOS 版本的验证。单次网络首帧仍受 CDN、带宽及视频文件布局影响。观看进度保留在本次应用会话中，不包含退出应用后的持久化历史功能。
+
+本轮从干净提交 `45f2569` 打包 0.2.1，核验签名及 `vcs.modified=false`，已安装到本机 `/Applications/MyDouyin.app`；没有发布 GitHub release。旧版 0.2.0 保留在本轮临时目录的 `installed-0.2.0.app`，随临时目录在 14 天后清理。构建产物位于 `build.noindex/memory-0.2.1/darwin-arm64/`。
