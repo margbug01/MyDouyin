@@ -23,15 +23,10 @@ func TestUpdateBanner(t *testing.T) {
 		tt.Frame()
 	}
 	a.upd.check = func(context.Context) (*release, error) { return nil, nil }
-	a.checkUpdate()
-	tt.Frame()
-	select {
-	case <-a.posted:
-		t.Fatal("up to date, yet something was posted")
-	case <-time.After(100 * time.Millisecond):
-	}
-	if tt.HasText("有新版本 v9.9.9") {
-		t.Fatal("a banner while up to date")
+	a.checkUpdate(false)
+	pump("the check, up to date")
+	if tt.HasText("有新版本 v9.9.9") || !a.upd.latest || a.upd.checking {
+		t.Fatalf("up to date: latest %v, checking %v", a.upd.latest, a.upd.checking)
 	}
 	halfway := make(chan bool)
 	a.upd.check = func(context.Context) (*release, error) {
@@ -41,7 +36,7 @@ func TestUpdateBanner(t *testing.T) {
 			return errors.New("boom")
 		}}, nil
 	}
-	a.checkUpdate()
+	a.checkUpdate(false)
 	pump("the check")
 	if !tt.HasText("有新版本 v9.9.9") || !tt.HasText("点击更新并重启") {
 		t.Fatalf("found: %q", tt.Texts())
@@ -54,7 +49,10 @@ func TestUpdateBanner(t *testing.T) {
 	if !tt.HasText("正在下载更新") || !tt.HasText("50%") {
 		t.Fatalf("downloading: %q", tt.Texts())
 	}
-	a.checkUpdate() // a check while it installs changes nothing
+	a.checkUpdate(false) // a check while it installs does nothing
+	if a.upd.checking {
+		t.Fatal("a check while installing")
+	}
 	close(halfway)
 	pump("the failure")
 	if !tt.HasText("更新没装上：boom，点击重试") || a.upd.busy {

@@ -65,6 +65,7 @@ func (a *app) view(c *ui.Context) {
 	t.Font = appFont
 	c.SetTheme(&t)
 	defer a.img.sweep()
+	defer a.saveSettings()
 
 	c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
 	c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
@@ -123,6 +124,7 @@ func (a *app) view(c *ui.Context) {
 	if c.Focused(a.searchBox) {
 		a.searchList(c)
 	}
+	a.settingsDialog(c)
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
@@ -252,7 +254,11 @@ func (a *app) sidebar(c *ui.Context) {
 		if nav(iconDrama, "短剧", a.drama, root == a.drama) {
 			a.root(a.drama)
 		}
+		ui.Box(c).Grow(1)
 		a.updateBanner(c)
+		if a.navItem(c, iconSettings, "设置", a.settingsOpen).Clicked() {
+			a.settingsOpen = true
+		}
 	})
 }
 
@@ -756,8 +762,8 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 // caption is the author, the day and the text, over the foot of the video;
 // the fade keeps it readable over a bright frame.
 func (a *app) caption(c *ui.Context, p *page, s *slot) {
-	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(64, 96, 50, 18).Gap(6).
-		Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
+	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(64, 96, 44+18+6, 18).Gap(6). // clear of the bar and its progress
+												Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			name := "@" + s.v.Author
 			b := ui.ButtonBase(c.Key("author")).FocusRing(false).Label(name)
@@ -961,11 +967,12 @@ func (a *app) setFullScreen(on bool) {
 	a.theater = on
 }
 
-// progress is the line of how far the video played, over the bar: thicker
-// under the pointer, with a knob, which a press or a drag moves the video
-// to, at its release.
+// progress is the line of how far the video played, over the bar, as
+// Douyin's: inset as the bar's buttons are, thicker under the pointer with a
+// knob, the stretch up to the pointer lighter and the time there above it.
+// A press or a drag moves the video there, at its release.
 func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
-	bar := ui.Box(c.Key("progress")).Height(14).Cursor(ui.CursorPointer).Label("进度")
+	bar := ui.Box(c.Key("progress")).Height(18).Margin(0, 12).Cursor(ui.CursorPointer).Label("进度")
 	w := bar.Bounds().W
 	frac := func(x float32) float32 {
 		if w <= 0 {
@@ -978,9 +985,12 @@ func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
 		case ev.Kind == ui.InputPointerDown && ev.Button == 0 && of > 0 && (s.dec != nil || s.live != nil && s.v.Live == nil):
 			a.dragging, a.dragAt = true, frac(ev.X)
 			return true
-		case ev.Kind == ui.InputPointerMove && a.dragging:
-			a.dragAt = frac(ev.X)
-			return true
+		case ev.Kind == ui.InputPointerMove:
+			a.hoverAt = frac(ev.X)
+			if a.dragging {
+				a.dragAt = a.hoverAt
+			}
+			return a.dragging
 		case ev.Kind == ui.InputPointerUp && a.dragging:
 			a.dragging = false
 			if !ev.Canceled {
@@ -998,19 +1008,38 @@ func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
 		f = a.dragAt
 	}
 	hot := bar.Hovered() || a.dragging
+	pointer := a.hoverAt
+	if a.dragging {
+		pointer = a.dragAt
+	}
 	bar.Draw(func(p *ui.Painter, r ui.Rect) {
-		h := float32(2)
+		h := float32(3)
 		if hot {
-			h = 4
+			h = 5
 		}
-		y := r.Y + r.H - 6 - h/2
-		p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: h}, ui.RGBA(255, 255, 255, 0.22), h/2)
+		y := r.Y + r.H/2 - h/2
+		// A faint dark edge keeps the line seen over a bright picture.
+		p.Fill(ui.Rect{X: r.X - 1, Y: y - 1, W: r.W + 2, H: h + 2}, ui.RGBA(0, 0, 0, 0.25), h/2+1)
+		p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: h}, ui.RGBA(255, 255, 255, 0.3), h/2)
+		if hot && !a.dragging && pointer > f {
+			p.Fill(ui.Rect{X: r.X, Y: y, W: r.W * pointer, H: h}, ui.RGBA(255, 255, 255, 0.5), h/2)
+		}
 		p.Fill(ui.Rect{X: r.X, Y: y, W: r.W * f, H: h}, white, h/2)
 		if hot {
-			const k = 12
+			const k = 13
 			p.Fill(ui.Rect{X: r.X + r.W*f - k/2, Y: y + h/2 - k/2, W: k, H: k}, white, k/2)
 		}
 	})
+	if hot && of > 0 && w > 0 {
+		bar.Children(func() {
+			const tipW = 56
+			x := max(0, min(w-tipW, w*pointer-tipW/2))
+			ui.Box(c.Key("tip")).Absolute().Bottom(20).Left(x).Width(tipW).Height(22).Radius(6).Center().
+				Background(ui.RGBA(0, 0, 0, 0.72)).PassThrough().Children(func() {
+				ui.Text(c, clock(time.Duration(float64(of)*float64(pointer)))).FontSize(11.5).FontWeight(600).TextColor(white)
+			})
+		})
+	}
 }
 
 // toggleChip is a switch of the bar with its name, as Douyin's 连播 and 清屏.
@@ -1823,6 +1852,7 @@ var (
 	iconCompass    = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>`)
 	iconFollow     = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6 1.3 0 2.5.3 3.5.8"/><path d="m15 17 2 2 4-4"/>`)
 	iconFriends    = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M16 4.2a4 4 0 0 1 0 7.6"/><path d="M19 14.5c1.8.9 3 2.9 3 5.5"/>`)
+	iconSettings   = strokeIcon(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`)
 	iconUser       = strokeIcon(`<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>`)
 	iconLive       = strokeIcon(`<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/>`)
 	iconDrama      = strokeIcon(`<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m10 9 5 3-5 3z"/>`)

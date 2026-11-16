@@ -12,10 +12,11 @@ import (
 // MyDouyin updates itself with MyGo's signed updates: mygo build signs each
 // release's archive and manifest with the key whose public half mygo.json
 // holds, and they go up with the GitHub release. The app reads the latest
-// release's manifest at launch and every few hours; a newer version shows
-// at the foot of the sidebar, and a click downloads it, checks its
-// signature, puts it in place of this copy and starts it. A build of go
-// build, which has no key, never checks.
+// release's manifest at launch and every few hours, unless the settings
+// turn that off, and when asked there; a newer version shows at the foot of
+// the sidebar, and a click downloads it, checks its signature, puts it in
+// place of this copy and starts it. A build of go build, which has no key,
+// never checks.
 
 // updateEvery is how often the app checks again while it runs.
 const updateEvery = 6 * time.Hour
@@ -29,6 +30,10 @@ type release struct {
 // updates is where updating is at, on the main thread like the rest of app.
 type updates struct {
 	check    func(context.Context) (*release, error) // nil while the build cannot update; a nil release when up to date
+	auto     bool                                    // checking by itself (the settings)
+	checking bool
+	latest   bool   // the last check found nothing newer
+	checkErr string // why the last check asked for in the settings failed
 	found    *release
 	busy     bool    // downloading and installing found
 	progress float64 // of the download, 0 to 1
@@ -50,34 +55,48 @@ func (a *app) watchUpdates() {
 	}
 	go func() {
 		for {
-			a.post(a.checkUpdate)
+			a.post(func() {
+				if a.upd.auto {
+					a.checkUpdate(false)
+				}
+			})
 			time.Sleep(updateEvery)
 		}
 	}()
 }
 
-// checkUpdate asks whether there is a newer version; a failed check is
-// quiet, the next one comes in updateEvery.
-func (a *app) checkUpdate() {
+// checkUpdate asks whether there is a newer version. manual is the settings
+// asking, which are told why it failed; the app's own check is quiet, the
+// next one comes in updateEvery.
+func (a *app) checkUpdate(manual bool) {
 	u := &a.upd
-	if u.check == nil || u.busy {
+	if u.check == nil || u.busy || u.checking {
 		return
 	}
 	check := u.check
+	u.checking, u.checkErr = true, ""
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		r, err := check(ctx)
-		if err != nil || r == nil {
-			return
-		}
 		a.post(func() {
-			if !u.busy {
-				u.found, u.err = r, ""
+			u.checking = false
+			switch {
+			case err != nil:
+				if manual {
+					u.checkErr = "检查失败：" + err.Error()
+				}
+			case r == nil:
+				u.latest = true
+			case !u.busy:
+				u.found, u.err, u.latest = r, "", false
 			}
 		})
 	}()
 }
+
+// percent is a share from 0 to 1 as people read it.
+func percent(f float64) string { return fmt.Sprintf("%d%%", int(f*100)) }
 
 // installUpdate downloads the version found, checks it and puts it in place,
 // then starts it.
@@ -120,8 +139,7 @@ func (a *app) updateBanner(c *ui.Context) {
 	if u.found == nil {
 		return
 	}
-	ui.Box(c).Grow(1)
-	b := ui.ButtonBase(c.Key("update")).Column().Gap(3).Padding(10, 12).Margin(0, 2).Radius(10).FocusRing(false).
+	b := ui.ButtonBase(c.Key("update")).Column().Gap(3).Padding(10, 12).Margin(0, 2, 6, 2).Radius(10).FocusRing(false).
 		Background(ui.RGBA(254, 44, 85, 0.14)).Label("有新版本 " + u.found.Version)
 	if b.Hovered() && !u.busy {
 		b.Background(ui.RGBA(254, 44, 85, 0.24))
@@ -130,7 +148,7 @@ func (a *app) updateBanner(c *ui.Context) {
 		title, sub := "有新版本 v"+u.found.Version, "点击更新并重启"
 		switch {
 		case u.busy && u.progress < 1:
-			title, sub = "正在下载更新", fmt.Sprintf("%d%%", int(u.progress*100))
+			title, sub = "正在下载更新", percent(u.progress)
 		case u.busy:
 			title, sub = "正在安装更新", "装好后自动重启"
 		case u.err != "":

@@ -214,6 +214,7 @@ type app struct {
 	setLater    func(id string, on bool) error
 	dragging    bool    // the progress pressed, being dragged
 	dragAt      float32 // where along it, 0 to 1
+	hoverAt     float32 // where along it the pointer rests, 0 to 1
 
 	posted chan func() // what post runs, in a test without a window
 
@@ -233,6 +234,10 @@ type app struct {
 	listen   bool    // 听抖音: the cover in the picture's place, the sound on
 	moreOpen bool    // the rail's 更多 menu
 	upd      updates // checking for new versions and installing them (update.go)
+
+	settingsOpen bool     // the settings dialog (settings.go)
+	settingsFile string   // where the settings are kept, "" not to keep them
+	saved        settings // as last written
 }
 
 // notes is the notifications, loaded a page at a time.
@@ -1339,7 +1344,7 @@ func Run() error {
 		return c.SendDanmaku(id, a.me.UID, at, text, false)
 	}
 	a.setSpeed(1)
-	a.setVolume(1, false)
+	a.loadSettings(settingsFile())
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
