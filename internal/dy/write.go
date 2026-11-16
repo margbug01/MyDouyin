@@ -18,7 +18,10 @@ import (
 // and x-tt-session-dtrait, which binds the session to the device it was
 // made on. Never send a write from Go with the session's cookies: Douyin
 // answers 用户未登录 and logs the session out everywhere (2026-11-16, a
-// login was lost so).
+// login was lost so). Nor touch the page's natives before a write: with
+// Headers.prototype and XMLHttpRequest.prototype hooked to read what the
+// SDK adds, the page's own fetch got 403 and the session died with it
+// (2026-11-16 20:54, a second login lost).
 type Web interface {
 	// Eval runs js, the body of an async function, in the page once its
 	// scripts are up, and returns the JSON of what it returns.
