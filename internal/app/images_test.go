@@ -44,8 +44,8 @@ func TestImages(t *testing.T) {
 	im.sweep() // few pictures: all stay
 	for i := range keepPictures + 10 {
 		im.get(fmt.Sprint("k", i))
+		settle(1)
 	}
-	settle(keepPictures + 10)
 	im.sweep()  // the frame that showed them all
 	im.get("a") // the next frame shows only a
 	im.sweep()

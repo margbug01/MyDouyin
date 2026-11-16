@@ -1,0 +1,258 @@
+package media
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"douyin/internal/dy"
+	"github.com/egoist/mygo/ui"
+)
+
+func TestTimeConversion(t *testing.T) {
+	for _, want := range []time.Duration{0, 42*time.Second + 123*time.Millisecond, 4 * time.Hour} {
+		got := (cmTime{Value: int64(want), Timescale: int32(time.Second), Flags: 1}).dur()
+		if got != want {
+			t.Fatalf("time conversion: %v != %v", got, want)
+		}
+	}
+	if (cmTime{}).dur() != 0 {
+		t.Fatal("invalid time")
+	}
+}
+
+func TestVideoStream(t *testing.T) {
+	path, err := filepath.Abs("../../testdata/silent.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("Referer") != "https://www.douyin.com/" {
+			t.Error("missing referer")
+		}
+		http.ServeFile(w, r, path)
+	}))
+	defer srv.Close()
+	l, err := OpenVideo(srv.URL+"/v.mp4", map[string]string{"Referer": "https://www.douyin.com/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	first, err := l.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Image.Bounds().Empty() || requests.Load() == 0 {
+		t.Fatal("no streamed picture")
+	}
+	l.Pause()
+	at := l.Position()
+	time.Sleep(150 * time.Millisecond)
+	if d := l.Position() - at; d > 50*time.Millisecond {
+		t.Fatalf("paused moved by %v", d)
+	}
+	l.Seek(500 * time.Millisecond)
+	l.SetSpeed(1.5)
+	l.Play()
+	if _, err := l.Next(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for l.Position() < 450*time.Millisecond && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if l.Position() < 450*time.Millisecond {
+		t.Fatal("seek lost")
+	}
+	if err := l.Rewind(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Next(); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	if _, err := l.Next(); err != io.EOF {
+		t.Fatalf("closed Next: %v", err)
+	}
+}
+
+func TestVideoLoopsAndRecoversAfterHiddenGap(t *testing.T) {
+	path, _ := filepath.Abs("../../testdata/silent.mp4")
+	l, err := OpenVideo("file://"+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	for loop := range 2 {
+		n := 0
+		for {
+			_, err := l.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("loop=%d frames=%d at=%v pendingSeek=%v: %v", loop, n, l.Position(), l.seekDone != nil, err)
+			}
+			n++
+		}
+		if n < 2 {
+			t.Fatalf("loop %d only produced %d frames", loop, n)
+		}
+		if err := l.Rewind(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.Next(); err != nil {
+		t.Fatal(err)
+	}
+	l.Pause()
+	time.Sleep(300 * time.Millisecond)
+	l.Play()
+	frame, err := l.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Duration > 100*time.Millisecond {
+		t.Fatalf("hidden gap became a frozen frame: %v", frame.Duration)
+	}
+}
+
+func TestCloseWaitingStream(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	finish := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+		case <-finish:
+		}
+	}))
+	defer srv.Close()
+	defer close(finish)
+	l, err := OpenVideo(srv.URL+"/v.mp4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := l.Next(); done <- err }()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no request")
+	}
+	l.Close()
+	select {
+	case err := <-done:
+		if err != io.EOF {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not interrupt Next")
+	}
+}
+
+type meteredResponse struct {
+	http.ResponseWriter
+	bytes *atomic.Int64
+}
+
+func (w meteredResponse) Write(p []byte) (int, error) {
+	time.Sleep(10 * time.Millisecond) // about 3 MiB/s with ServeFile's 32 KiB writes
+	n, err := w.ResponseWriter.Write(p)
+	w.bytes.Add(int64(n))
+	return n, err
+}
+
+func TestVideoStartsBeforeFullTransfer(t *testing.T) {
+	path := os.Getenv("DY_TEST_MP4")
+	if path == "" {
+		t.Skip("DY_TEST_MP4 not set")
+	}
+	stat, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stat.Size() < 1<<20 {
+		t.Skip("needs a video larger than 1 MiB")
+	}
+	var transferred atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(meteredResponse{w, &transferred}, r, path)
+	}))
+	defer srv.Close()
+	start := time.Now()
+	l, err := OpenVideo(srv.URL+"/v.mp4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if _, err := l.Next(); err != nil {
+		t.Fatal(err)
+	}
+	n := transferred.Load()
+	t.Logf("first frame=%v, transferred=%d/%d bytes (%.1f%%)", time.Since(start).Round(time.Millisecond), n, stat.Size(), float64(n)*100/float64(stat.Size()))
+	if n >= stat.Size()/2 {
+		t.Fatal("first frame waited for too much of the video")
+	}
+	l.Close()
+	srv.CloseClientConnections()
+}
+
+// Opt-in: reads a public recommendation, compares full download with AVPlayer
+// time to first picture, and leaves a reusable fixture in DY_PERF_DIR.
+func TestCDNStart(t *testing.T) {
+	dir := os.Getenv("DY_PERF_DIR")
+	if dir == "" {
+		t.Skip("DY_PERF_DIR not set")
+	}
+	c, err := dy.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vs, err := c.Picks(0)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v dy.Video
+	for _, candidate := range vs {
+		if candidate.Live == nil && candidate.PlayURL != "" {
+			v = candidate
+			break
+		}
+	}
+	if v.PlayURL == "" {
+		t.Fatal("no video")
+	}
+	start := time.Now()
+	l, err := OpenVideo(v.PlayURL, map[string]string{"Referer": "https://www.douyin.com/", "User-Agent": "Mozilla/5.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	vp, err := ui.NewVideoPlayer(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := time.Since(start)
+	w, h := vp.Size()
+	l.Close()
+	vp.Close()
+	start = time.Now()
+	dst := filepath.Join(dir, "cdn.mp4")
+	if err := c.Download(v.PlayURL, dst); err != nil {
+		t.Fatal(err)
+	}
+	full := time.Since(start)
+	stat, _ := os.Stat(dst)
+	t.Logf("%dx%d, duration=%v, bytes=%d, streamed first frame=%v, full download=%v", w, h, v.Duration, stat.Size(), first.Round(time.Millisecond), full.Round(time.Millisecond))
+}

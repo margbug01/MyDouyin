@@ -221,7 +221,7 @@ func TestGrid(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
-	if a.picks.playing || len(a.pages) != 1 || a.picks.list[1].vp != nil {
+	if a.picks.playing || len(a.pages) != 1 || a.picks.list[1].vp == nil || a.picks.list[1].vp.Playing() {
 		t.Fatalf("after Escape: playing %v, %d pages, player kept %v", a.picks.playing, len(a.pages), a.picks.list[1].vp != nil)
 	}
 	tt.Click("视频2")

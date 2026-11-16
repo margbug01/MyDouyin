@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,20 +25,23 @@ import (
 	"douyin/internal/media"
 )
 
-// slot is one feed entry and, once downloaded and opened, its players. Players
-// are made for the videos around the current one so a swipe starts at once.
+// slot holds a feed entry, its playback state, and its player while visible.
 type slot struct {
 	v dy.Video
 	players
 	loading bool
+	cancel  context.CancelFunc
+	loadGen int
 	gone    bool // dropped while loading: close what arrives
 	err     error
 	saved   string // what saving to Downloads came to: "" before the click
 
 	liking, saving bool // a like or a save of it on its way to Douyin
 
-	resume time.Duration // where to go on from once opened again, in another definition
-	dmGen  int           // counts seeks: bullet comments loaded before one are let go
+	resume     time.Duration // where to go on from once opened again
+	seekTarget time.Duration
+	seeking    bool
+	dmGen      int // counts seeks: bullet comments loaded before one are let go
 
 	danmaku   []dy.Danmaku  // the bullet comments loaded, in time order
 	dmTo      time.Duration // how far into the video they are loaded
@@ -52,12 +56,16 @@ type players struct {
 	vp   *ui.VideoPlayer
 	ap   *audio.Player // nil when the clip has no audio, and for a stream, whose sound live plays
 	dec  *paced        // vp's decoder for a file, whose clock stands in for a missing audio's
-	live *media.Live   // vp's decoder for a live room
-	path string        // the file downloaded, which release deletes
+	live *media.Live   // AVPlayer for a streamed video or live room
+	path string        // an optional local source, used by save
 }
 
 // close stops and lets go of whatever of pl there is.
 func (pl players) close() {
+	// Next may be waiting on a paused stream; stop it before VideoPlayer waits for it.
+	if pl.live != nil {
+		pl.live.Close()
+	}
 	if pl.vp != nil {
 		pl.vp.Close() // closes its decoder, a stream with it
 	}
@@ -109,21 +117,20 @@ func (p *paced) Rewind() error {
 // has decoded, a few frames ahead of the one shown.
 func (s *slot) at() time.Duration {
 	switch {
+	case s.live != nil:
+		return s.live.Position()
 	case s.ap != nil:
 		return s.ap.Position()
 	case s.dec != nil:
 		return time.Duration(s.dec.done.Load())
 	}
-	return 0
+	return s.resume
 }
 
 // speeds are the choices of the speed menu, fastest first, as Douyin's.
 var speeds = []float64{2, 1.5, 1.25, 1, 0.75}
 
-const (
-	ahead  = 2 // videos prepared after the current one
-	behind = 1
-)
+const ahead = 2 // fetch another page before reaching the end of the list
 
 // page is a list of videos: the picks (精选) or the recommend feed at the
 // bottom, and search results or a user's videos opened over it. A grid page
@@ -140,6 +147,7 @@ type page struct {
 	fetching bool
 	done     bool // next returned its last page
 	msg      string
+	paused   bool // playback state while another page is open
 
 	user  *dy.User  // an author's page: their profile atop the videos, once loaded
 	users []dy.User // a search's: the accounts found, atop the videos
@@ -153,6 +161,7 @@ type app struct {
 	pages   []*page // the window shows the last
 	query   string  // the search box
 	paused  bool
+	held    *slot // at most one paused video behind a grid or child page
 	lastNav time.Time
 	sheet   *sheet // the comments open beside the video, or nil
 
@@ -380,36 +389,39 @@ func (a *app) shareTo(v dy.Video, u dy.User) {
 // seek has s's video go on from t: its picture a few frames on, its sound
 // at once, its bullet comments loaded again from there.
 func (a *app) seek(s *slot, t time.Duration) {
-	if s.dec == nil {
+	if s.dec == nil && (s.live == nil || s.v.Live != nil) {
 		return
 	}
 	t = max(0, min(t, s.v.Duration-time.Second))
-	s.dec.seek(t)
+	if s.live != nil {
+		s.live.Seek(t)
+	} else {
+		s.dec.seek(t)
+	}
 	if s.ap != nil {
 		s.ap.Seek(t)
 	}
 	s.lastAt = t // not a loop, which 连播 would take for the end
+	s.seekTarget, s.seeking = t, true
 	s.danmaku, s.dmTo, s.dmLoading = nil, t/(32*time.Second)*(32*time.Second), false
 	s.dmGen++
 }
 
-// setQuality plays the videos in definition q ("智能" for Douyin's pick):
-// the one playing downloads again and goes on from where it was, the ones
-// prepared around it are prepared again.
+// setQuality reopens in q at the saved position, canceling obsolete loads.
 func (a *app) setQuality(q string) {
 	if q == a.quality {
 		return
 	}
 	a.quality = q
-	p := a.cur()
-	for i, s := range p.list {
-		if s.vp == nil || s.v.Live != nil {
-			continue
+	if a.held != nil {
+		a.release(a.held)
+	}
+	for _, p := range a.pages {
+		for _, s := range p.list {
+			if s.v.Live == nil {
+				a.release(s)
+			}
 		}
-		if i == p.idx && p.plays() {
-			s.resume = s.at()
-		}
-		a.release(s)
 	}
 	a.fill()
 }
@@ -554,6 +566,9 @@ func (a *app) setSpeed(s float64) {
 			if sl.ap != nil {
 				sl.ap.SetSpeed(s)
 			}
+			if sl.live != nil && sl.v.Live == nil {
+				sl.live.SetSpeed(s)
+			}
 		}
 	}
 }
@@ -561,6 +576,10 @@ func (a *app) setSpeed(s float64) {
 // loadDanmaku loads s's bullet comments for the next 32 seconds, as Douyin's
 // page does, once the video nears where they end.
 func (a *app) loadDanmaku(s *slot, at time.Duration) {
+	// Keep only comments that can still be on screen, plus the next fetched window.
+	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flight }); i > 0 {
+		s.danmaku = slices.Delete(s.danmaku, 0, i)
+	}
 	if a.dmOff || a.c == nil || s.dmLoading || s.dmTo >= s.v.Duration || at+5*time.Second < s.dmTo {
 		return
 	}
@@ -785,17 +804,15 @@ func (a *app) more(p *page) {
 	}()
 }
 
-// fill prepares the videos around the current one, frees the ones far from
-// it, and asks for more of the list near its end.
-// The current video comes first: the ones around it start once it plays (or
-// failed), so they do not share its bandwidth.
+// fill opens only the visible video. AVPlayer buffers it on demand; hidden
+// videos must not allocate decoders or compete for its bandwidth.
 func (a *app) fill() {
 	p := a.cur()
 	if !p.plays() { // covers, the grid asking for more as it scrolls; only 精选's first plays
 		for i, s := range p.list {
 			if i == 0 && p == a.picks {
 				a.prepare(s)
-			} else {
+			} else if s != a.held {
 				a.release(s)
 			}
 		}
@@ -805,19 +822,17 @@ func (a *app) fill() {
 		a.sync()
 		return
 	}
-	ready := false
+	for i, s := range p.list {
+		if i != p.idx && s != a.held {
+			a.release(s)
+		}
+	}
 	if p.idx < len(p.list) {
 		s := p.list[p.idx]
-		a.prepare(s)
-		ready = s.vp != nil || s.err != nil
-	}
-	for i, s := range p.list {
-		switch {
-		case i < p.idx-behind || i > p.idx+ahead:
-			a.release(s)
-		case ready:
-			a.prepare(s)
+		if a.held == s {
+			a.held = nil
 		}
+		a.prepare(s)
 	}
 	if len(p.list)-p.idx <= ahead+2 {
 		a.more(p)
@@ -825,11 +840,29 @@ func (a *app) fill() {
 	a.sync()
 }
 
-// open shows p over the current page, whose players it frees: only one page
-// plays, and memory stays that of one page.
+// hold keeps one paused player for an immediate return, even across nested grids.
+func (a *app) hold(s *slot) {
+	if s.vp == nil {
+		return
+	}
+	if a.held != nil && a.held != s {
+		a.release(a.held)
+	}
+	a.held = s
+	s.pause()
+}
+
+// open preserves the current video while browsing a child page.
 func (a *app) open(p *page) {
-	for _, s := range a.cur().list {
-		a.release(s)
+	old := a.cur()
+	old.paused = a.paused
+	if old.plays() && old.idx < len(old.list) {
+		a.hold(old.list[old.idx])
+	}
+	for _, s := range old.list {
+		if s != a.held {
+			a.release(s)
+		}
 	}
 	a.pages = append(a.pages, p)
 	a.sheet = nil
@@ -839,12 +872,16 @@ func (a *app) open(p *page) {
 
 // root shows r, the picks or the feed, with nothing over it.
 func (a *app) root(r *page) {
+	if len(a.pages) == 1 && a.cur() == r {
+		return
+	}
+	a.cur().paused = a.paused
 	for _, p := range a.pages {
 		for _, s := range p.list {
 			a.release(s)
 		}
 	}
-	a.pages, a.sheet, a.paused = []*page{r}, nil, false
+	a.pages, a.sheet, a.paused = []*page{r}, nil, r.paused
 	a.fill()
 }
 
@@ -903,6 +940,10 @@ func (a *app) loadAccount() {
 // A grid page playing goes back to its covers first.
 func (a *app) back() {
 	if p := a.cur(); p.grid && p.playing {
+		p.paused = a.paused
+		if p.idx < len(p.list) {
+			a.hold(p.list[p.idx])
+		}
 		p.playing, a.sheet = false, nil
 		a.fill()
 		return
@@ -913,9 +954,10 @@ func (a *app) back() {
 	for _, s := range a.cur().list {
 		a.release(s)
 	}
+	a.pages[len(a.pages)-1] = nil
 	a.pages = a.pages[:len(a.pages)-1]
 	a.sheet = nil
-	a.paused = false
+	a.paused = a.cur().paused
 	a.fill()
 }
 
@@ -925,25 +967,33 @@ func (a *app) prepare(s *slot) {
 		return
 	}
 	s.loading = true
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	s.loadGen++
+	gen, v, quality, resume := s.loadGen, s.v, a.quality, s.resume
 	go func() {
-		pl, err := a.build(s.v)
+		pl, err := a.build(ctx, v, quality, resume)
 		a.post(func() {
-			s.loading = false
-			if s.gone {
+			if gen != s.loadGen || s.gone {
 				pl.close()
+				cancel()
 				return
 			}
+			s.loading, s.cancel = false, nil
+			cancel()
 			s.players, s.err = pl, err
-			if s.resume > 0 && s.dec != nil { // opened again in another definition: on from where it was
-				a.seek(s, s.resume)
+			if err == nil {
+				s.lastAt, s.resume = resume, 0
 			}
-			s.resume = 0
-			a.fill() // plays it if current, and starts the ones around it
+			if s.live != nil && s.v.Live == nil {
+				s.live.SetSpeed(a.speed)
+			}
+			a.fill()
 		})
 	}()
 }
 
-// save copies s's video, already downloaded to play, to the Downloads folder.
+// save downloads the chosen source to Downloads; streaming does not retain a full file.
 func (a *app) save(s *slot) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -951,9 +1001,16 @@ func (a *app) save(s *slot) {
 		return
 	}
 	s.saved = "保存中…"
-	src := s.path
+	src, v, quality := s.path, s.v, a.quality
 	go func() {
-		dst, err := copyTo(src, filepath.Join(home, "Downloads"), fileName(s.v))
+		var dst string
+		var err error
+		if src != "" {
+			dst, err = copyTo(src, filepath.Join(home, "Downloads"), fileName(v))
+		} else {
+			dst = filepath.Join(home, "Downloads", fileName(v))
+			err = a.c.Download(videoSource(v, quality), dst)
+		}
 		a.post(func() {
 			if err != nil {
 				s.saved = "下载失败：" + err.Error()
@@ -1004,70 +1061,72 @@ func copyTo(src, dir, name string) (string, error) {
 	return dst, nil
 }
 
-func (a *app) build(v dy.Video) (pl players, err error) {
-	if v.Live != nil {
-		if pl.live, err = media.OpenLive(v.Live.HLS); err != nil {
-			return pl, err
-		}
-		if pl.vp, err = ui.NewVideoPlayer(pl.live); err != nil {
-			pl.live.Close()
-			return players{}, err
-		}
-		pl.vp.Pause()
-		return pl, nil
-	}
-	if a.c == nil {
-		return pl, errors.New("没有客户端") // a test's view
-	}
-	url, name := v.PlayURL, "智能"
+func videoSource(v dy.Video, quality string) string {
 	for _, q := range v.Qualities {
-		if q.Name == a.quality {
-			url, name = q.URL, q.Name
+		if q.Name == quality {
+			return q.URL
 		}
 	}
-	path := filepath.Join(a.dir, v.ID+"-"+name+".mp4")
-	if _, err = os.Stat(path); err != nil {
-		if err = a.c.Download(url, path); err != nil {
-			os.Remove(path)
-			return
-		}
-	}
-	pl.path = path
-	if pl.file, err = media.Open(path); err != nil {
-		return
-	}
-	vd, err := pl.file.Video()
-	if err == nil {
-		pl.dec = &paced{VideoDecoder: vd, speed: &a.speedBits}
-		pl.vp, err = ui.NewVideoPlayer(pl.dec)
-	}
-	if err != nil {
-		pl.file.Close()
-		return players{}, err
-	}
-	pl.vp.SetLoop(true).Pause()
-	if ad, aerr := pl.file.Audio(); aerr == nil {
-		pl.ap = audio.NewPlayer(ad)
-		pl.ap.SetLoop(true).SetPreservesPitch(true).SetVolume(a.loudness())
-		if s := math.Float64frombits(a.speedBits.Load()); s > 0 {
-			pl.ap.SetSpeed(s)
-		}
-	}
-	return
+	return v.PlayURL
 }
 
-// release frees a slot's players and its cached file.
-func (a *app) release(s *slot) {
-	s.gone = s.loading
-	if s.vp == nil {
+func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time.Duration) (pl players, err error) {
+	if err = ctx.Err(); err != nil {
 		return
 	}
-	s.players.close()
-	if s.path != "" {
-		os.Remove(s.path)
+	if v.Live != nil {
+		pl.live, err = media.OpenLive(v.Live.HLS)
+	} else {
+		pl.live, err = media.OpenVideo(videoSource(v, quality), map[string]string{
+			"Referer":    "https://www.douyin.com/",
+			"User-Agent": "Mozilla/5.0",
+		})
 	}
+	if err != nil {
+		return players{}, err
+	}
+	stream := pl.live
+	stop := context.AfterFunc(ctx, func() { stream.Close() })
+	defer stop()
+	if resume > 0 {
+		stream.Seek(resume)
+	}
+	pl.vp, err = ui.NewVideoPlayer(stream)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		pl.close()
+		return players{}, err
+	}
+	pl.vp.SetLoop(v.Live == nil).Pause()
+	stream.Pause()
+	return pl, nil
+}
+
+// release remembers progress and cancels work that can no longer be shown.
+func (a *app) release(s *slot) {
+	if a.held == s {
+		a.held = nil
+	}
+	s.gone = s.loading
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel, s.loading = nil, false
+		s.loadGen++
+	}
+	if s.vp != nil && s.v.Live == nil {
+		s.resume = s.at()
+		if s.seeking && s.live != nil && s.live.Seeking() {
+			s.resume = s.seekTarget
+		}
+	}
+	s.players.close()
 	s.players = players{}
 	s.err = nil
+	s.danmaku, s.dmLoading, s.seeking = nil, false, false
+	s.dmTo = s.resume / (32 * time.Second) * (32 * time.Second)
+	s.dmGen++
 }
 
 // sync plays the current video and holds the others; 精选's covers play
@@ -1077,7 +1136,7 @@ func (a *app) sync() {
 	for i, s := range p.list {
 		switch {
 		case s.vp == nil:
-		case !p.plays() && i == 0:
+		case !p.plays() && i == 0 && p == a.picks:
 			s.play(false)
 		case i == p.idx && !a.paused && p.plays():
 			s.play(true)
@@ -1135,7 +1194,23 @@ func (a *app) step(d int) {
 // watch follows where s plays, at, and reports whether it has looped back
 // to its start with 连播 on: the next video is to play instead.
 func (a *app) watch(s *slot, at time.Duration) bool {
+	if s.seeking {
+		// AVPlayer seeks asynchronously; the old position is not a loop.
+		if s.live != nil {
+			if s.live.Seeking() {
+				return false
+			}
+		} else if at < s.seekTarget-500*time.Millisecond || at > s.seekTarget+500*time.Millisecond {
+			return false
+		}
+		s.seeking, s.lastAt = false, at
+		return false
+	}
 	looped := at+time.Second < s.lastAt
+	if looped {
+		s.danmaku, s.dmTo, s.dmLoading = nil, 0, false
+		s.dmGen++
+	}
 	s.lastAt = at
 	return looped && a.autoNext
 }
@@ -1280,6 +1355,14 @@ func Run() error {
 			TrafficLightPosition: &mygo.Point{X: 18, Y: 18},
 			BackgroundColor:      bgHex, // dark always, as Douyin's
 			Content:              ui.View(a.view),
+		})
+		a.win.OnClosed(func() {
+			for _, p := range a.pages {
+				for _, s := range p.list {
+					a.release(s)
+				}
+			}
+			a.setPip(false)
 		})
 		a.fill()
 		a.loadAccount()

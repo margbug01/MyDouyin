@@ -18,6 +18,7 @@ func TestDecodeClip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer f.Close()
 	t.Logf("%dx%d %v", f.W, f.H, f.Duration)
 	v, err := f.Video()
 	if err != nil {

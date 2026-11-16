@@ -673,7 +673,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 			} else if s.vp != nil {
 				ui.Video(c, s.vp).Fill().Fit(ui.Contain)
 			} else if bmp := a.img.get(s.v.Cover); bmp != nil {
-				// The cover stands in while the video downloads.
+				// The cover stands in until the first streamed frame arrives.
 				ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.5)
 			}
 			if a.paused && s.vp != nil {
@@ -682,6 +682,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 				})
 			}
 		})
+		a.playbackStatus(c, s)
 		at := time.Duration(0)
 		if s.vp != nil { // the sound's clock, or the picture's for a video without
 			at = s.at()
@@ -700,6 +701,27 @@ func (a *app) stage(c *ui.Context, p *page) {
 			a.rail(c, p, s, box.Bounds().H)
 		}
 		a.controls(c, s, at)
+	})
+}
+
+func (a *app) playbackStatus(c *ui.Context, s *slot) {
+	err := s.err
+	if s.vp != nil && s.vp.Err() != nil {
+		err = s.vp.Err()
+	}
+	if err == nil && !s.loading {
+		return
+	}
+	ui.Column(c.Key("playback-status")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(12).PassThrough().Children(func() {
+		if err == nil {
+			ui.Text(c, "视频载入中…").FontSize(14).TextColor(white)
+			return
+		}
+		ui.Text(c, "视频暂时无法播放").FontSize(14).TextColor(white)
+		if ui.Button(c.Key("retry-video"), "重新加载").Clicked() {
+			a.release(s)
+			a.prepare(s)
+		}
 	})
 }
 
@@ -953,7 +975,7 @@ func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
 	}
 	bar.HandleInput(func(ev ui.InputEvent) bool {
 		switch {
-		case ev.Kind == ui.InputPointerDown && ev.Button == 0 && of > 0 && s.dec != nil:
+		case ev.Kind == ui.InputPointerDown && ev.Button == 0 && of > 0 && (s.dec != nil || s.live != nil && s.v.Live == nil):
 			a.dragging, a.dragAt = true, frac(ev.X)
 			return true
 		case ev.Kind == ui.InputPointerMove && a.dragging:
