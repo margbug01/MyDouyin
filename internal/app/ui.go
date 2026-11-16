@@ -22,6 +22,10 @@ import (
 
 const (
 	sidebarWidth = 200
+	// barGutter is the room a scroll keeps clear for its bar, which MyGo
+	// draws over the content 3 to 9 DIPs in from the edge: a list whose rows
+	// keep this much clear themselves needs none.
+	barGutter    = 12
 	topBarHeight = 56
 	bgHex        = "#161823" // Douyin's dark, which the window always is
 )
@@ -92,6 +96,10 @@ func (a *app) view(c *ui.Context) {
 						a.followsRow(c)
 					case a.isMine(p):
 						a.mineHeader(c)
+					case p.user != nil:
+						a.profileHeader(c, *p.user)
+					case len(p.users) > 0:
+						a.usersRow(c.Key("users"), p.users)
 					}
 				}
 				ui.Row(c).Grow(1).Padding(0, 16, 16, 0).Gap(16).AlignItems(ui.Stretch).Children(func() {
@@ -112,8 +120,8 @@ func (a *app) view(c *ui.Context) {
 			})
 		})
 	})
-	if c.Focused(a.searchBox) && strings.TrimSpace(a.query) == "" && len(a.hot) > 0 {
-		a.hotList(c)
+	if c.Focused(a.searchBox) {
+		a.searchList(c)
 	}
 	if a.toast != "" {
 		c.Toast(a.toast)
@@ -132,20 +140,37 @@ func searchField(c *ui.Context) (left, width float32) {
 	return sidebarWidth + (w-sidebarWidth-width)/2, width
 }
 
-// hotList drops from the empty search field: the hot search list's first
-// ten, which a press searches for. A press, not a click: the field loses the
-// focus as it is pressed, which takes the list away before a release.
-func (a *app) hotList(c *ui.Context) {
+// searchList drops from the focused search field: the hot search list's
+// first ten while it is empty, what Douyin suggests for what is typed once
+// something is; a press searches for one. A press, not a click: the field
+// loses the focus as it is pressed, which takes the list away before a release.
+func (a *app) searchList(c *ui.Context) {
+	q := strings.TrimSpace(a.query)
+	var words []string
+	switch {
+	case q == "":
+		for _, h := range a.hot {
+			words = append(words, h.Word)
+		}
+	case q == a.sugFor:
+		words = a.sugs
+	}
+	words = words[:min(10, len(words))]
+	if len(words) == 0 {
+		return
+	}
 	left, width := searchField(c)
 	ui.Column(c.Key("hot")).Absolute().Top(52).Left(left).Width(width).Padding(8, 6).Radius(12).
 		Background(ui.Hex("#252733")).Border(0.5, pal.hairline).Shadow(0, 10, 30, -6, ui.RGBA(0, 0, 0, 0.5)).Children(func() {
-		ui.Text(c, "抖音热搜").FontSize(12).FontWeight(600).TextColor(pal.faint).Margin(2, 10, 6, 10)
-		for i, h := range a.hot[:min(10, len(a.hot))] {
-			row := ui.Row(c.Key(h.Word)).Height(34).PaddingX(10).Gap(10).Radius(8).AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(h.Word)
+		if q == "" {
+			ui.Text(c, "抖音热搜").FontSize(12).FontWeight(600).TextColor(pal.faint).Margin(2, 10, 6, 10)
+		}
+		for i, w := range words {
+			row := ui.Row(c.Key(w)).Height(34).PaddingX(10).Gap(10).Radius(8).AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(w)
 			row.HandleInput(func(ev ui.InputEvent) bool {
 				if ev.Kind == ui.InputPointerDown && ev.Button == 0 {
-					a.query = h.Word
-					a.search(h.Word)
+					a.query = w
+					a.search(w)
 					return true
 				}
 				return false
@@ -154,6 +179,11 @@ func (a *app) hotList(c *ui.Context) {
 				row.Background(pal.hover)
 			}
 			row.Children(func() {
+				if q != "" {
+					ui.Icon(c, iconSearch).Size(13, 13).TextColor(pal.faint)
+					ui.Text(c, w).FontSize(13.5).TextColor(pal.text).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+					return
+				}
 				rank, color := fmt.Sprint(i), pal.faint
 				switch {
 				case i == 0:
@@ -162,9 +192,9 @@ func (a *app) hotList(c *ui.Context) {
 					color = ui.Hex("#ff9f43")
 				}
 				ui.Text(c, rank).FontSize(13).FontWeight(700).TextColor(color).Width(20)
-				ui.Text(c, h.Word).FontSize(13.5).TextColor(pal.text).SingleLine().Grow(1).Shrink(1).MinWidth(0)
-				if h.Value > 0 {
-					ui.Text(c, count(h.Value)).FontSize(11.5).TextColor(pal.faint)
+				ui.Text(c, w).FontSize(13.5).TextColor(pal.text).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+				if v := a.hot[i].Value; v > 0 {
+					ui.Text(c, count(v)).FontSize(11.5).TextColor(pal.faint)
 				}
 			})
 		}
@@ -234,11 +264,17 @@ func (a *app) followsRow(c *ui.Context) {
 		ui.Text(c, a.followMsg).FontSize(12).TextColor(pal.faint).Margin(4, 24, 8, 24)
 		return
 	}
-	if len(a.follows) == 0 {
+	a.usersRow(c.Key("follows"), a.follows)
+}
+
+// usersRow is accounts in a row, each a picture over its name, which opens
+// its videos: the ones followed atop 关注, the ones found atop a search.
+func (a *app) usersRow(c *ui.Context, us []dy.User) {
+	if len(us) == 0 {
 		return
 	}
-	ui.ScrollHorizontal(c.Key("follows")).Height(84).PaddingX(18).Gap(4).AlignItems(ui.Center).Children(func() {
-		for _, u := range a.follows {
+	ui.ScrollHorizontal(c).Height(84+barGutter).Padding(0, 18, barGutter, 18).Gap(4).AlignItems(ui.Center).Children(func() {
+		for _, u := range us {
 			b := ui.ButtonBase(c.Key("u:"+u.ID)).Column().Width(68).Padding(6, 2).Gap(6).Radius(10).AlignItems(ui.Center).FocusRing(false).Label(u.Name)
 			if b.Hovered() {
 				b.Background(pal.hover)
@@ -254,27 +290,10 @@ func (a *app) followsRow(c *ui.Context) {
 	})
 }
 
-// mineHeader tops 我的: the user's picture, name and counts, and the tabs of
-// their videos, likes, saves and watch history.
+// mineHeader tops 我的: the user's profile, and the tabs of their videos,
+// likes, saves and watch history.
 func (a *app) mineHeader(c *ui.Context) {
-	me := a.me
-	ui.Row(c).Padding(6, 24, 14, 24).Gap(18).AlignItems(ui.Center).Children(func() {
-		a.avatar(c, me.Avatar, me.Name, 72)
-		ui.Column(c).Gap(8).Shrink(1).MinWidth(0).Children(func() {
-			ui.Text(c, me.Name).FontSize(20).FontWeight(700).TextColor(white).SingleLine()
-			ui.Row(c).Gap(18).Children(func() {
-				for _, kv := range [][2]string{{"关注", count(me.Following)}, {"粉丝", count(me.Followers)}, {"获赞", count(me.Liked)}} {
-					ui.Row(c).Gap(5).AlignItems(ui.Baseline).Children(func() {
-						ui.Text(c, kv[0]).FontSize(13).TextColor(pal.muted)
-						ui.Text(c, kv[1]).FontSize(15).FontWeight(700).TextColor(pal.text)
-					})
-				}
-			})
-			if me.Signature != "" {
-				ui.Text(c, me.Signature).FontSize(12.5).TextColor(pal.faint).MaxLines(2)
-			}
-		})
-	})
+	a.profileHeader(c, a.me)
 	ui.Row(c).Height(40).PaddingX(24).Gap(26).AlignItems(ui.Center).Children(func() {
 		for _, name := range mineTabs {
 			on := name == a.mineTab
@@ -297,6 +316,39 @@ func (a *app) mineHeader(c *ui.Context) {
 				a.showMine(name)
 			}
 		}
+	})
+}
+
+// profileHeader is an account's picture, name, counts, 抖音号 and region
+// where known, and signature: atop 我的 and an author's videos.
+func (a *app) profileHeader(c *ui.Context, me dy.User) {
+	ui.Row(c).Padding(6, 24, 14, 24).Gap(18).AlignItems(ui.Center).Children(func() {
+		a.avatar(c, me.Avatar, me.Name, 72)
+		ui.Column(c).Gap(8).Shrink(1).MinWidth(0).Children(func() {
+			ui.Text(c, me.Name).FontSize(20).FontWeight(700).TextColor(white).SingleLine()
+			ui.Row(c).Gap(18).Children(func() {
+				for _, kv := range [][2]string{{"关注", count(me.Following)}, {"粉丝", count(me.Followers)}, {"获赞", count(me.Liked)}} {
+					ui.Row(c).Gap(5).AlignItems(ui.Baseline).Children(func() {
+						ui.Text(c, kv[0]).FontSize(13).TextColor(pal.muted)
+						ui.Text(c, kv[1]).FontSize(15).FontWeight(700).TextColor(pal.text)
+					})
+				}
+			})
+			var ids []string
+			if me.Handle != "" {
+				ids = append(ids, "抖音号："+me.Handle)
+			}
+			if me.Place != "" {
+				ids = append(ids, "IP属地："+me.Place)
+			}
+			if len(ids) > 0 {
+				ui.Text(c, strings.Join(ids, "   ")).FontSize(12).TextColor(pal.faint).SingleLine()
+			}
+			if me.Signature != "" {
+				// On one line: a signature's blank lines would leave the second empty but for its ellipsis.
+				ui.Text(c, strings.Join(strings.Fields(me.Signature), " ")).FontSize(12.5).TextColor(pal.faint).MaxLines(2)
+			}
+		})
 	})
 }
 
@@ -399,6 +451,8 @@ func (a *app) topBar(c *ui.Context, p *page) {
 				Placeholder("搜索你感兴趣的内容").FontSize(13.5).Label("搜索")
 			if in.Submitted() {
 				a.search(a.query)
+			} else if in.Changed() {
+				a.suggest()
 			}
 			ui.Box(c).Width(1).Height(16).Background(pal.hairline)
 			b := ui.ButtonBase(c.Key("go")).Height(34).PaddingX(14).Gap(6).AlignItems(ui.Center).FocusRing(false).Label("搜索按钮").Radius(0, 10, 10, 0)
@@ -419,7 +473,7 @@ func (a *app) topBar(c *ui.Context, p *page) {
 // tabsRow is 精选's categories, the one shown marked, scrolling sideways
 // where the window is too narrow for them.
 func (a *app) tabsRow(c *ui.Context) {
-	ui.ScrollHorizontal(c.Key("tabs")).Height(40).PaddingX(24).Gap(22).AlignItems(ui.Center).Children(func() {
+	ui.ScrollHorizontal(c.Key("tabs")).Height(40+barGutter).Padding(0, 24, barGutter, 24).Gap(22).AlignItems(ui.Center).Children(func() {
 		for _, t := range dy.Tabs {
 			b := ui.ButtonBase(c.Key(t.Name)).Column().Gap(5).AlignItems(ui.Center).FocusRing(false).Label(t.Name)
 			on := t.ID == a.tab
@@ -452,13 +506,13 @@ func (a *app) tabsRow(c *ui.Context) {
 // first video is a big card that plays, silent, as Douyin's does.
 func (a *app) grid(c *ui.Context, p *page) {
 	w, h := c.Size()
-	inner := w - sidebarWidth - 24 - 16 // the grid's padding, the row's
+	inner := w - sidebarWidth - 24 - barGutter - 16 // the grid's padding, the row's
 	if a.notes != nil || a.dms != nil {
 		inner -= 360 + 16
 	}
 	cols := max(2, int((inner+16)/(260+16)))
 	colW := (inner - 16*float32(cols-1)) / float32(cols)
-	ui.Scroll(c.Key("grid:"+p.title)).TrackScroll(&p.scroll).Grow(1).Padding(4, 0, 32, 24).Children(func() {
+	ui.Scroll(c.Key("grid:"+p.title)).TrackScroll(&p.scroll).Grow(1).Padding(4, barGutter, 32, 24).Children(func() {
 		ui.Grid(c).Columns(cols).GapX(16).GapY(26).Children(func() {
 			for i, s := range p.list {
 				if i == 0 && p == a.picks && cols >= 3 {

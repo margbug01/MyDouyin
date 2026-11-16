@@ -531,3 +531,27 @@ func TestLiveWrite(t *testing.T) {
 		t.Fatalf("the client's login after the writes: %v", err)
 	}
 }
+
+// The user search finds accounts, whose profile reads with its counts, and
+// the search box's suggestions come for what is typed.
+func TestLiveSearchProfile(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	us, err := c.SearchUsers("美食")
+	if err != nil || len(us) == 0 || us[0].ID == "" || us[0].Name == "" {
+		t.Fatalf("users: %d, %v", len(us), err)
+	}
+	p, err := c.Profile(us[0].ID)
+	if err != nil || p.Name != us[0].Name || p.Followers == 0 || p.Handle == "" {
+		t.Fatalf("profile: %+v, %v", p, err)
+	}
+	ws, err := c.Suggest("美食")
+	if err != nil || len(ws) == 0 || !strings.Contains(ws[0], "美食") {
+		t.Fatalf("suggest: %q, %v", ws, err)
+	}
+}

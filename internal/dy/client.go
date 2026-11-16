@@ -490,6 +490,85 @@ func (c *Client) Search(keyword string) Pager[Video] {
 	})
 }
 
+// SearchUsers returns the first accounts found for keyword, as 综合's row of
+// users atop the videos.
+func (c *Client) SearchUsers(keyword string) ([]User, error) {
+	var r struct {
+		status
+		List []struct {
+			U profile `json:"user_info"`
+		} `json:"user_list"`
+	}
+	q := "search_channel=aweme_user_web&search_source=normal_search&query_correct_type=1&is_filter_search=0&from_group_id=&offset=0&count=10&keyword=" + url.QueryEscape(keyword)
+	if err := c.getJSON("/aweme/v1/web/discover/search/", q, &r); err != nil {
+		return nil, err
+	}
+	out := make([]User, len(r.List))
+	for i, x := range r.List {
+		out[i] = x.U.user()
+	}
+	return out, nil
+}
+
+// Suggest returns what the search box suggests for what is typed in it.
+func (c *Client) Suggest(keyword string) ([]string, error) {
+	var r struct {
+		status
+		List []struct{ Content string } `json:"sug_list"`
+	}
+	if err := c.getJSON("/aweme/v1/web/search/sug/", "source=aweme_video_web&history_list=&keyword="+url.QueryEscape(keyword), &r); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, s := range r.List {
+		if s.Content != "" {
+			out = append(out, s.Content)
+		}
+	}
+	return out, nil
+}
+
+// Profile reads the account with the given sec_uid: its counts, 抖音号 and region.
+func (c *Client) Profile(secUID string) (User, error) {
+	var r struct {
+		status
+		User profile
+	}
+	q := "publish_video_strategy_type=2&source=channel_pc_web&personal_center_strategy=1&sec_user_id=" + url.QueryEscape(secUID)
+	if err := c.getJSON("/aweme/v1/web/user/profile/other/", q, &r); err != nil {
+		return User{}, err
+	}
+	if r.User.SecUID == "" {
+		return User{}, errors.New("dy: no such account")
+	}
+	return r.User.user(), nil
+}
+
+// profile is an account as the profile and the user search give it.
+type profile struct {
+	SecUID    string `json:"sec_uid"`
+	Nickname  string
+	Signature string
+	Avatar    addr `json:"avatar_thumb"`
+	Following int  `json:"following_count"`
+	Followers int  `json:"follower_count"`
+	Liked     int  `json:"total_favorited"`
+	UID       string
+	UniqueID  string `json:"unique_id"`
+	ShortID   string `json:"short_id"`
+	Place     string `json:"ip_location"`
+}
+
+func (p profile) user() User {
+	handle := p.UniqueID
+	if handle == "" {
+		handle = p.ShortID
+	}
+	return User{ID: p.SecUID, Name: p.Nickname, Signature: p.Signature, Avatar: p.Avatar.first(),
+		Following: p.Following, Followers: p.Followers, Liked: p.Liked, UID: p.UID,
+		Handle: handle, Place: strings.TrimPrefix(p.Place, "IP属地：")}
+}
+
 // Posts pages through a user's videos, newest first.
 func (c *Client) Posts(secUID string) Pager[Video] {
 	return c.posts(secUID, "&publish_video_strategy_type=2")
@@ -522,8 +601,9 @@ type User struct {
 	ID, Name, Signature string // ID is the sec_uid
 	Avatar              string // the picture's address
 
-	Following, Followers, Liked int    // the counts of a profile, which only Self fills in
-	UID                         string // the numeric ID, which only Self fills in
+	Following, Followers, Liked int    // the counts of a profile, which Self and Profile fill in
+	UID                         string // the numeric ID, which Self and Profile fill in
+	Handle, Place               string // 抖音号 and IP属地, which Profile fills in
 }
 
 // Self returns the logged-in user.
@@ -576,7 +656,9 @@ func (c *Client) Following(secUID string) Pager[User] {
 	})
 }
 
-// Comment is a top-level comment on a video.
+// Comment is a top-level comment on a video. The replies to one are not read:
+// comment/list/reply answers this client, and a fetch from Douyin's own page,
+// with a captcha (x-vc-bdturing-parameters, type verify) since 2026-11-16.
 type Comment struct {
 	Author, Text, Place string // Place is the region Douyin shows, as 广东
 	Likes, Replies      int

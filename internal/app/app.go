@@ -140,6 +140,9 @@ type page struct {
 	fetching bool
 	done     bool // next returned its last page
 	msg      string
+
+	user  *dy.User  // an author's page: their profile atop the videos, once loaded
+	users []dy.User // a search's: the accounts found, atop the videos
 }
 
 // app is read and changed on the main thread: by the view, and by goroutines through post.
@@ -173,7 +176,10 @@ type app struct {
 	notes  *notes // the notifications open beside the page, or nil
 	unread int
 	hot    []dy.Hot // the hot search list, under the search box
-	dms    *dms     // the direct messages open beside the page, or nil
+	sugs   []string // what Douyin suggests for sugFor, under the search box
+	sugFor string
+	sugSeq int  // the search box's changes, the last of which a suggestion waits for
+	dms    *dms // the direct messages open beside the page, or nil
 
 	speed     float64       // 1 as recorded
 	speedBits atomic.Uint64 // speed for the decoders
@@ -1086,17 +1092,54 @@ func (a *app) toggle() {
 	a.sync()
 }
 
-// search opens the videos found for q.
+// search opens the videos found for q, and the accounts above them.
 func (a *app) search(q string) {
 	if q = strings.TrimSpace(q); q != "" {
-		a.open(&page{title: "搜索：" + q, next: a.c.Search(q), grid: true})
+		p := &page{title: "搜索：" + q, next: a.c.Search(q), grid: true}
+		a.open(p)
+		go func() {
+			if us, err := a.c.SearchUsers(q); err == nil {
+				a.post(func() { p.users = us })
+			}
+		}()
 	}
 }
 
-// openAuthor opens a user's videos, unless p is that page already.
+// suggest asks Douyin what it suggests for the search box's text once the
+// typing rests a moment.
+func (a *app) suggest() {
+	a.sugSeq++
+	seq, q := a.sugSeq, strings.TrimSpace(a.query)
+	if q == "" || q == a.sugFor {
+		return
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		a.post(func() {
+			if seq != a.sugSeq {
+				return // typed on
+			}
+			go func() {
+				ws, err := a.c.Suggest(q)
+				if err == nil {
+					a.post(func() { a.sugs, a.sugFor = ws, q })
+				}
+			}()
+		})
+	}()
+}
+
+// openAuthor opens a user's videos, their profile above, unless p is that
+// page already.
 func (a *app) openAuthor(p *page, name, id string) {
 	if title := "@" + name; p.title != title && id != "" {
-		a.open(&page{title: title, next: a.c.Posts(id), grid: true})
+		q := &page{title: title, next: a.c.Posts(id), grid: true}
+		a.open(q)
+		go func() {
+			if u, err := a.c.Profile(id); err == nil {
+				a.post(func() { q.user = &u })
+			}
+		}()
 	}
 }
 

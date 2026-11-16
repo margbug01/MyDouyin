@@ -1084,3 +1084,37 @@ func TestBarExtras(t *testing.T) {
 		t.Fatal("closing 小窗 left the window without its video")
 	}
 }
+
+// A search's accounts show atop its videos, an author's profile atop theirs,
+// and the search field drops what Douyin suggests for what is typed, until
+// more is typed.
+func TestProfileUsersSuggest(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+	s := stub("搜索：美食", 1)
+	s.grid, s.users = true, []dy.User{{ID: "u1", Name: "美食家"}}
+	a.pages = append(a.pages, s)
+	tt := newTester(a)
+	tt.Frame()
+	if !tt.HasText("美食家") {
+		t.Fatalf("search: %q", tt.Texts())
+	}
+	au := stub("@美食家", 1)
+	au.grid, au.user = true, &dy.User{Name: "美食家本人", Handle: "zz123", Place: "江苏", Followers: 120000}
+	a.pages = append(a.pages, au)
+	tt.Frame()
+	if !tt.HasText("美食家本人") || !tt.HasText("抖音号：zz123   IP属地：江苏") || !tt.HasText("12.0万") {
+		t.Fatalf("author: %q", tt.Texts())
+	}
+	a.sugs, a.sugFor = []string{"美食做法家常菜"}, "美食"
+	tt.Click("搜索")
+	tt.Type("美食")
+	tt.Frame()
+	if !tt.HasText("美食做法家常菜") {
+		t.Fatalf("suggestions: %q", tt.Texts())
+	}
+	tt.Type("x")
+	tt.Frame()
+	if tt.HasText("美食做法家常菜") {
+		t.Fatal("suggestions for 美食 over 美食x")
+	}
+}
