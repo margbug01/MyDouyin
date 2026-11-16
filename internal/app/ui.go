@@ -1456,7 +1456,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 		ui.Scroll(c.Key("comment-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
 			for i, cm := range sh.items {
 				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
-					a.avatar(c, "", cm.Author, 30)
+					a.avatar(c, cm.Avatar, cm.Author, 30)
 					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 						commentText(c, cm, 14)
 						if cm.Replies > 0 {
@@ -1508,7 +1508,7 @@ func (a *app) replyThread(c *ui.Context, sh *sheet, cm dy.Comment) {
 	if open {
 		for j, r := range th.items {
 			ui.Row(c.Key("r"+fmt.Sprint(j))).Gap(8).Margin(6, 0, 0, 0).AlignItems(ui.Start).Children(func() {
-				a.avatar(c, "", r.Author, 22)
+				a.avatar(c, r.Avatar, r.Author, 22)
 				ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() { commentText(c, r, 13) })
 			})
 		}

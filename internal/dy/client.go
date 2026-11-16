@@ -669,6 +669,7 @@ func (c *Client) Following(secUID string) Pager[User] {
 // Comment is a comment on a video, or a reply to one.
 type Comment struct {
 	ID, Author, Text, Place string // Place is the region Douyin shows, as 广东
+	Avatar                  string // the author's picture
 	ReplyTo                 string // in a reply to a reply, whom it answers
 	Likes, Replies          int
 	Time                    time.Time
@@ -676,9 +677,12 @@ type Comment struct {
 
 // comment is a comment as the lists give it.
 type comment struct {
-	CID     string
-	Text    string
-	User    struct{ Nickname string }
+	CID  string
+	Text string
+	User struct {
+		Nickname string
+		Avatar   addr `json:"avatar_thumb"`
+	}
 	Likes   int    `json:"digg_count"`
 	Replies int    `json:"reply_comment_total"`
 	Time    int64  `json:"create_time"`
@@ -687,7 +691,7 @@ type comment struct {
 }
 
 func (x comment) comment() Comment {
-	return Comment{ID: x.CID, Author: x.User.Nickname, Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
+	return Comment{ID: x.CID, Author: x.User.Nickname, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
 		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0)}
 }
 

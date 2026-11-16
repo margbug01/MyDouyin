@@ -122,7 +122,7 @@ func TestLiveLists(t *testing.T) {
 
 	comments := c.Comments(vs[0].ID)
 	cs, err := comments()
-	if err != nil || len(cs) == 0 || cs[0].Text == "" || cs[0].Author == "" || cs[0].Time.Year() < 2016 {
+	if err != nil || len(cs) == 0 || cs[0].Text == "" || cs[0].Author == "" || cs[0].Avatar == "" || cs[0].Time.Year() < 2016 {
 		t.Fatalf("comments: %d, %v", len(cs), err)
 	}
 	cs2, err := comments()
@@ -567,7 +567,7 @@ func TestLiveReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	rs, err := c.Replies("7694319481270619427", "7694583560485045041")()
-	if err != nil || len(rs) == 0 || rs[0].Text == "" || rs[0].Author == "" {
+	if err != nil || len(rs) == 0 || rs[0].Text == "" || rs[0].Author == "" || rs[0].Avatar == "" {
 		t.Fatalf("replies: %d, %v", len(rs), err)
 	}
 	t.Logf("%d replies, first %q by %q", len(rs), rs[0].Text, rs[0].Author)
