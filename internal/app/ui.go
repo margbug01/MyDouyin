@@ -624,6 +624,15 @@ func (a *app) stage(c *ui.Context, p *page) {
 		if ev.Kind != ui.InputScroll || ev.Momentum || ev.DY == 0 {
 			return false
 		}
+		// A trackpad swipe is a stream of scrolls, which may last past step's
+		// 400 ms: the ones closer than 200 ms are the same swipe, one step.
+		if ev.Precise {
+			same := ev.Time.Sub(a.swipeAt) < 200*time.Millisecond
+			a.swipeAt = ev.Time
+			if same {
+				return true
+			}
+		}
 		if ev.DY > 0 {
 			a.step(1)
 		} else {
@@ -750,7 +759,7 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 		}
 		tw, _ := c.MeasureText(0, ui.Span{Text: d.Text, Size: size, Weight: 600})
 		x := w - float32(age)/float32(flight)*(w+tw)
-		ui.Text(c, d.Text).Absolute().Top(float32(14+i%lanes*lane)).Left(x).FontSize(size).FontWeight(600).
+		ui.Text(c, d.Text).Absolute().Top(float32(14+(s.dmDropped+i)%lanes*lane)).Left(x).FontSize(size).FontWeight(600).
 			TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine()
 		if shown++; shown == 40 { // a crowd past this reads as noise
 			break

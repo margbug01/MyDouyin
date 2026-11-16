@@ -44,6 +44,7 @@ type slot struct {
 	dmGen      int // counts seeks: bullet comments loaded before one are let go
 
 	danmaku   []dy.Danmaku  // the bullet comments loaded, in time order
+	dmDropped int           // those let go from its front: a comment's lane counts them, not to change lanes as they go
 	dmTo      time.Duration // how far into the video they are loaded
 	dmLoading bool
 	lastAt    time.Duration // where the view last saw it, which a loop goes back from
@@ -163,7 +164,8 @@ type app struct {
 	paused  bool
 	held    *slot // at most one paused video behind a grid or child page
 	lastNav time.Time
-	sheet   *sheet // the comments open beside the video, or nil
+	swipeAt time.Time // the last trackpad scroll of the swipe on the stage
+	sheet   *sheet    // the comments open beside the video, or nil
 
 	searchBox ui.Handle
 	toast     string    // a message to show once
@@ -584,6 +586,7 @@ func (a *app) loadDanmaku(s *slot, at time.Duration) {
 	// Keep only comments that can still be on screen, plus the next fetched window.
 	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flight }); i > 0 {
 		s.danmaku = slices.Delete(s.danmaku, 0, i)
+		s.dmDropped += i
 	}
 	if a.dmOff || a.c == nil || s.dmLoading || s.dmTo >= s.v.Duration || at+5*time.Second < s.dmTo {
 		return

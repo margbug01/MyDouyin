@@ -493,6 +493,13 @@ func TestDanmakuLayer(t *testing.T) {
 	if tt.HasText("早了") || !tt.HasText("正在飞") || !tt.HasText("还没到") {
 		t.Fatalf("at 10s: %q", tt.Texts())
 	}
+	// Those flown are let go; the one still flying keeps its lane.
+	before, _ := tt.Find("正在飞")
+	a.loadDanmaku(s, at)
+	tt.Frame()
+	if after, ok := tt.Find("正在飞"); len(s.danmaku) != 2 || !ok || after.Y != before.Y {
+		t.Fatalf("after letting go of the first: %d left, y %v -> %v", len(s.danmaku), before.Y, after.Y)
+	}
 	a.dmOff = true
 	tt.Frame()
 	if shown || tt.HasText("正在飞") {
@@ -1169,5 +1176,34 @@ func TestReplies(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("回复二") || asked != 2 {
 		t.Fatalf("opened again: asked %d, %q", asked, tt.Texts())
+	}
+}
+
+// A slow trackpad swipe sends its scrolls for longer than step's 400 ms;
+// it is one swipe and moves one video. A mouse wheel moves one a notch.
+func TestSwipeStepsOnce(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 5)}})
+	tt := newTester(a)
+	tt.Frame()
+	swipe := func() {
+		for range 40 {
+			tt.Scroll(650, 300, 0, 6)
+			tt.Advance(16 * time.Millisecond)
+			time.Sleep(16 * time.Millisecond) // step's own pause is by the wall clock
+		}
+	}
+	swipe()
+	if a.feed.idx != 1 {
+		t.Fatalf("one swipe moved to %d", a.feed.idx)
+	}
+	tt.Advance(300 * time.Millisecond)
+	swipe()
+	if a.feed.idx != 2 {
+		t.Fatalf("a second swipe moved to %d", a.feed.idx)
+	}
+	time.Sleep(400 * time.Millisecond)
+	tt.Wheel(650, 300, 0, 40)
+	if a.feed.idx != 3 {
+		t.Fatalf("a wheel notch moved to %d", a.feed.idx)
 	}
 }
