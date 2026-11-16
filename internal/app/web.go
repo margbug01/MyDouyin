@@ -41,6 +41,59 @@ const (
 	safariUA = "Version/27.2 Safari/605.1.15"
 )
 
+// signPage is what writes and checks need of Douyin's page: its own security
+// scripts, as its head loads them and with its own settings (read from
+// /user/self, 2026-11-16), unchanged. They sign what the page sends as they
+// do on Douyin's, without the site around them, whose 150 scripts held the
+// page's process at hundreds of MB. It is put at douyinHome, so requests
+// leave from the same origin, with the same referrer. Login and sharing
+// still load the real page: they need what it shows.
+const signPage = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<script src="https://lf-security.bytegoofy.com/obj/security-secsdk/runtime_bundler_34.js" project-id="34" crossorigin="anonymous"></script>
+<script src="https://lf-c-flwb.bytetos.com/obj/rc-client-security/c-webmssdk/1.0.0.20/webmssdk.es5.js" crossorigin="anonymous"></script>
+<script src="https://lf-c-flwb.bytetos.com/obj/rc-client-security/web/glue/1.0.0.64-fix.01/sdk-glue.js" data-sdk-glue-default="load" crossorigin="anonymous"></script>
+<script>
+(function() {
+    if (window._SdkGlueInit) {
+        let e = 8.5;
+        let t = 8.5;
+        if (navigator && navigator.hardwareConcurrency <= 4) {
+            if (navigator && navigator.deviceMemory <= 2) {
+                t = 10;
+                e = 10;
+            }
+        }
+        let c = {
+            self: { aid: 6383, pageId: 6241 },
+            bdms: {
+                aid: 6383,
+                pageId: 6241,
+                paths: ["^/webcast/", "^/aweme/v1/", "^/aweme/v2/", "/douplus/", "^/api/ad/v1/inspire", "/v1/message/send", "^/live/", "^/captcha/", "^/ecom/", "^/luna/pc"],
+                boe: false,
+                ddrt: e,
+                ic: t
+            },
+            verifyCenter: {
+                interceptPathList: {
+                    include: ["^/webcast/", "^/aweme/v1/", "^/aweme/v2/", "/douplus/", "/v1/message/send", "^/live/", "^/captcha/", "^/ecom/", "^/api/ad/v1/inspire"],
+                    exclude: ["^/aweme/v1/play/", "douyinvod\\.com"]
+                },
+                commonOptions: { aid: 6383, pageId: 6241 },
+                nocaptchaOptions: { enabled: true },
+                captchaOptions: { ele: "captcha_container", showMode: "mask" }
+            }
+        };
+        let a = {
+            verifyCenter: { srcList: ["https://lf-rc1.yhgfb-cn-static.com/obj/rc-verifycenter/sec_sdk_build/4.0.28/captcha/index.js", "https://lf-rc2.yhgfb-cn-static.com/obj/rc-verifycenter/sec_sdk_build/4.0.28/captcha/index.js"] },
+            bdms: { srcList: ["https://p-pc-weboff.byteimg.com/tos-cn-i-9r5gewecjs/bdms_1.0.1.19_fix.js", "https://lf-c-flwb.bytetos.com/obj/rc-client-security/web/stable/1.0.1.19-fix.01/bdms.js", "https://lf-headquarters-speed.yhgfb-cn-static.com/obj/rc-client-security/web/stable/1.0.1.19-fix.01/bdms.js"] }
+        };
+        window._SdkGlueInit(c, a);
+    }
+})();
+</script>
+<script src="https://p-pc-weboff.byteimg.com/tos-cn-i-9r5gewecjs/bdms_1.0.1.19_fix.js" no-entry="true"></script>
+</head><body><div id="captcha_container"></div></body></html>`
+
 // call runs fn on the UI goroutine and waits for it; not from there.
 func (a *app) call(fn func()) {
 	done := make(chan struct{})
@@ -114,14 +167,16 @@ func (w *web) use() func() {
 	return func() { w.a.call(func() { w.busy--; w.touch() }) }
 }
 
-// page is the page, made at douyinHome if there is none, once its
-// scripts are up: Douyin's security SDK (bdms), which signs what it sends.
+// page is the page, signPage if there is none, once its scripts are up:
+// Douyin's security SDK (bdms), which signs what it sends.
 func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 	var p *mygo.Page
 	var err error
 	w.a.call(func() {
 		if w.v == nil {
-			err = w.open(douyinHome)
+			if err = w.open(""); err == nil {
+				w.v.Page().LoadHTML(signPage, douyinHome)
+			}
 		}
 		if err == nil {
 			w.touch()
