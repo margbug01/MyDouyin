@@ -234,6 +234,7 @@ type login struct {
 	qr     *ui.Bitmap // the code, drawn
 	status string     // what the scan is at, for the panel
 	verify bool       // Douyin asks more than the scan: its page shows instead
+	stop   func()     // ends what waits for the verification (verifyFor), if any
 }
 
 // loginJS reads the login the page shows: its code, the text about it, and
@@ -466,11 +467,57 @@ func (a *app) loginPanel(c *ui.Context) {
 		})
 	})
 	if wasOpen && !a.loginOpen {
+		if a.login.stop != nil {
+			a.login.stop()
+		}
 		a.loginGen++
 		a.web.layout = false
 		a.login = login{}
 		a.web.touch()
 	}
+}
+
+// verify shows Douyin's verification (dy.ErrVerify) over the window: its
+// page asks path, a read Douyin held back, itself, and Douyin's scripts
+// bring up the captcha there, for the user to pass. Once the page has its
+// answer the verification closes and retry runs.
+func (a *app) verify(path string, retry func()) {
+	if a.loginOpen {
+		return
+	}
+	u := ""
+	if a.web.v == nil {
+		u = douyinHome
+	}
+	if err := a.web.open(u); err != nil {
+		a.toast = "验证页打不开：" + err.Error()
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	a.loginOpen, a.web.layout = true, true
+	a.login = login{verify: true, stop: cancel}
+	a.loginGen++
+	gen := a.loginGen
+	go func() {
+		defer cancel()
+		path, _ := json.Marshal(path)
+		b, err := a.web.Eval(ctx, "const r = await fetch("+string(path)+`, { credentials: "include" });
+return r.status === 200 && (await r.text()).length > 0;`)
+		passed := err == nil && string(b) == "true"
+		a.post(func() {
+			if a.loginGen != gen { // closed already
+				return
+			}
+			a.loginOpen, a.web.layout, a.login = false, false, login{}
+			a.loginGen++
+			a.web.touch()
+			if passed {
+				retry()
+			} else {
+				a.toast = "验证没有完成"
+			}
+		})
+	}()
 }
 
 var _ dy.Web = (*web)(nil)

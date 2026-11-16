@@ -714,12 +714,13 @@ type sheet struct {
 // thread is a comment's replies, shown under it while open, loaded a page
 // at a time.
 type thread struct {
-	items    []dy.Comment
-	next     dy.Pager[dy.Comment]
-	open     bool
-	fetching bool
-	done     bool
-	msg      string
+	video, cid string // the comment's
+	items      []dy.Comment
+	next       dy.Pager[dy.Comment]
+	open       bool
+	fetching   bool
+	done       bool
+	msg        string
 }
 
 // comments opens v's comments over it; the video goes on playing.
@@ -737,7 +738,7 @@ func (a *app) toggleReplies(cm dy.Comment) {
 	}
 	th := sh.threads[cm.ID]
 	if th == nil {
-		th = &thread{next: a.replies(sh.v.ID, cm.ID)}
+		th = &thread{video: sh.v.ID, cid: cm.ID, next: a.replies(sh.v.ID, cm.ID)}
 		sh.threads[cm.ID] = th
 	}
 	th.open = !th.open
@@ -758,6 +759,11 @@ func (a *app) moreReplies(th *thread) {
 			th.fetching = false
 			if err != nil {
 				th.msg = err.Error()
+				if errors.Is(err, dy.ErrVerify) {
+					th.msg += "，完成后会自动载入"
+					a.verify("/aweme/v1/web/comment/list/reply/?device_platform=webapp&aid=6383&channel=channel_pc_web&item_id="+th.video+
+						"&comment_id="+th.cid+"&cut_version=1&cursor=0&count=20&item_type=0", func() { a.moreReplies(th) })
+				}
 				return
 			}
 			th.msg, th.done = "", len(cs) == 0

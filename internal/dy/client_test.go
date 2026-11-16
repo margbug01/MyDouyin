@@ -1,10 +1,18 @@
 package dy
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"douyin/internal/sign"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"github.com/egoist/mygo/ui"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"slices"
@@ -507,5 +515,54 @@ func TestLiveEmojis(t *testing.T) {
 	m, err := c.Emojis()
 	if err != nil || len(m) < 100 || m["[赞]"] == "" || m["[捂脸]"] == "" {
 		t.Fatalf("%d emoji, [赞] %q: %v", len(m), m["[赞]"], err)
+	}
+}
+
+// verifyRT answers every request empty, as Douyin does one it holds back
+// for its verification, and counts them.
+type verifyRT struct{ n *int }
+
+func (v verifyRT) RoundTrip(*http.Request) (*http.Response, error) {
+	*v.n++
+	h := http.Header{"X-Vc-Bdturing-Parameters": {"eyJ0eXBlIjoidmVyaWZ5In0="}}
+	return &http.Response{StatusCode: 200, Status: "200 OK", Header: h, Body: io.NopCloser(strings.NewReader(""))}, nil
+}
+
+// An answer held back for Douyin's verification is ErrVerify, which replies
+// report as it is, without asking the page for its material again.
+func TestVerifyHeldBack(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir) // the guard material and cookies are the user's
+	n := 0
+	c := &Client{http: &http.Client{Transport: verifyRT{&n}}, signer: sign.New(ua)}
+	c.login.Store(&login{cookie: "sessionid=s"})
+	testGuard(t)
+	if _, err := c.call("GET", "/aweme/v1/web/comment/list/", "", ""); !errors.Is(err, ErrVerify) {
+		t.Fatalf("call: %v", err)
+	}
+	w := &fakeWeb{replies: []string{"null"}}
+	c.SetWeb(w)
+	if _, err := c.Replies("1", "2")(); !errors.Is(err, ErrVerify) || len(w.scripts) != 0 {
+		t.Fatalf("replies: %v, after asking the page %d times", err, len(w.scripts))
+	}
+}
+
+// testGuard saves ticket guard material of a key and certificate made up.
+func testGuard(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKCS8PrivateKey(key)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), NotAfter: time.Now().Add(time.Hour)}
+	cert, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(guard{Ticket: "t", TsSign: "ts.2.x", PrivateKey: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		ServerCert: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert}))})
+	f, err := guardFile()
+	if err == nil {
+		err = writePrivate(f, b)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 }

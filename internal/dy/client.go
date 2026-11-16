@@ -254,11 +254,21 @@ func (c *Client) call(method, path, extra, body string, more ...http.Header) ([]
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
-	if err == nil && resp.StatusCode != 200 {
+	switch {
+	case err != nil:
+	case resp.StatusCode != 200:
 		err = fmt.Errorf("dy: %s %s", path, resp.Status)
+	case len(b) == 0 && resp.Header.Get("X-Vc-Bdturing-Parameters") != "":
+		err = ErrVerify
 	}
 	return b, err
 }
+
+// ErrVerify is an answer held back until the device passes Douyin's
+// verification, a captcha its page shows (X-Vc-Bdturing-Parameters, of
+// type verify; comment replies got it, 2026-11-17): neither signing again
+// nor logging in again passes it.
+var ErrVerify = errors.New("抖音要求先完成验证")
 
 type addr struct {
 	URLs []string `json:"url_list"`
