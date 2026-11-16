@@ -159,16 +159,17 @@ type page struct {
 
 // app is read and changed on the main thread: by the view, and by goroutines through post.
 type app struct {
-	win     *mygo.Window
-	c       *dy.Client
-	dir     string
-	pages   []*page // the window shows the last
-	query   string  // the search box
-	paused  bool
-	held    *slot // at most one paused video behind a grid or child page
-	lastNav time.Time
-	swipeAt time.Time // the last trackpad scroll of the swipe on the stage
-	sheet   *sheet    // the comments open beside the video, or nil
+	win                 *mygo.Window
+	mainVideo, pipVideo nativeSurface
+	c                   *dy.Client
+	dir                 string
+	pages               []*page // the window shows the last
+	query               string  // the search box
+	paused              bool
+	held                *slot // at most one paused video behind a grid or child page
+	lastNav             time.Time
+	swipeAt             time.Time // the last trackpad scroll of the swipe on the stage
+	sheet               *sheet    // the comments open beside the video, or nil
 
 	searchBox ui.Handle
 	toast     string    // a message to show once
@@ -602,11 +603,13 @@ func (a *app) setPip(on bool) {
 	}
 	a.pipOn = on
 	if !on {
+		a.pipVideo.hide()
 		if a.pip != nil {
 			w := a.pip
 			a.pip = nil
 			w.Close()
 		}
+		a.redraw()
 		return
 	}
 	if a.win == nil { // a test's view
@@ -627,6 +630,7 @@ func (a *app) setPip(on bool) {
 	w := a.pip
 	w.OnClosed(func() {
 		if a.pip == w { // closed from its own window
+			a.pipVideo.hide()
 			a.pip, a.pipOn = nil, false
 			a.redraw()
 		}
@@ -1172,6 +1176,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	}
 	vp, err := newStreamPlayer(stream, v.Live == nil)
 	if err == nil {
+		vp.native = a.win != nil
 		pl.vp = vp
 		err = ctx.Err()
 	}
@@ -1366,7 +1371,7 @@ func (a *app) selfCheck(dir string) {
 		time.Sleep(time.Second)
 	}
 	time.Sleep(2 * time.Second) // the sidebar drawn with it
-	b, err := a.win.CapturePage()
+	b, err := a.capture(a.win)
 	if err == nil {
 		err = os.WriteFile(filepath.Join(dir, "1.png"), b, 0o644)
 	}

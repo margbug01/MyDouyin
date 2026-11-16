@@ -1,6 +1,6 @@
 # AVPlayerLayer 原生直出试验
 
-这是独立试验入口，不影响 MyDouyin 0.2.1 的默认播放器。目标是在同一个 AVPlayer、同一套 MyGo 界面上比较 RGBA / Bitmap 和 AVPlayerLayer 两条画面路径。
+此命令保留为独立对照入口，在同一个 AVPlayer、同一套 MyGo 界面上比较 RGBA / Bitmap 和 AVPlayerLayer。MyDouyin 从 0.2.2 起默认使用原生显示；正式接入结果见仓库 `PERFORMANCE.md`，下方表格记录此前的轻量原型数据。
 
 ```sh
 go run ./cmd/nativevideo -mode layer /absolute/path/to/video.mp4
@@ -33,11 +33,11 @@ go run ./cmd/nativevideo -mode bitmap -check /absolute/path/to/video.mp4
 
 这个固定原型场景约省 21.8 MB 物理占用（19.3%）。CPU 采样中位数约低 59.4%，不是长期能耗基准。此原型不含完整客户端的封面、列表、登录网页及真实弹幕请求，不能当作整个客户端的内存上限。
 
-## 尚未满足默认接入条件
+## 原型发现的问题及 0.2.2 的处理
 
-- `Window.CapturePage()` 读取 MyGo 自己的绘制场景，不包含 AVPlayerLayer。UI 文本、控件及弹窗可以截图，但原生视频区域仍为空。
-- 本次 ScreenCaptureKit 自身窗口截图在两种模式都报告 96×102，而 Cocoa 窗口为 1280×820。检查会拒绝这类无效截图；尚未获得可确认原生画面与控件正确合成的窗口截图。
-- 早期未固定最小窗口尺寸的原生运行出现过 Metal 渲染编码器等待超过 5 秒；固定主窗口和小窗最小尺寸后的最终对照通过。任意缩放、全屏和完整客户端遮罩仍未验证。
-- `Layer.Place` 通过 Cocoa 寻找 MyGo 0.8.1 的 `MyGoSurfaceView`，依赖该内部视图名。默认接入前应明确维护这个边界或增加框架级原生视图接口。
+- `Window.CapturePage()` 只读取 MyGo 自己的场景。正式应用新增按需取帧的合成截图，取帧结束即释放临时输出，不让截图缓冲驻留播放路径。此独立命令仍保留原始截图对照。
+- ScreenCaptureKit 在本机两种模式都曾报告 96×102，而 Cocoa 窗口为 1280×820。此命令拒绝无效截图；系统级窗口截图仍是当前环境的未决限制，合成截图不冒充系统截图。
+- 原型曾把 AVPlayerLayer 直接放进 Metal 所在的视图背板，出现过渲染编码器等待。正式接入改为独立 NSView，位于 MyGo 视图下方、后台 WebKit 上方，并对滚动视口裁剪；主播放、小窗、缩放、全屏、页面切换及暂停截图已在实际应用窗口检查。
+- 原生接入仍依赖 MyGo 0.8.1 的 `MyGoSurfaceView` 内部视图名。这是有意保留的兼容边界；找不到宿主时恢复像素输出并回退，升级框架时要重新验证。
 
-因此保留独立试验入口，暂不改默认播放器、不替换已安装版本。原始对照日志及试验素材在本机 Alma Go 的 `temp/2026-11-16/native-layer/` 和 `temp/2026-11-16/memory-020/`，不进入生产构建。
+原始对照日志与素材在本机 Alma Go 的 `temp/2026-11-16/native-layer/`、`memory-020/`；默认接入的窗口检查、合成截图及对照数据位于 `native-default/`，不进入生产构建。

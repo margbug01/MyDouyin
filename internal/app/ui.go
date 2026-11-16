@@ -59,7 +59,8 @@ var white = ui.RGB(255, 255, 255)
 
 func (a *app) view(c *ui.Context) {
 	t := *ui.DarkTheme()
-	t.Background, t.Text, t.TextMuted = pal.bg, pal.text, pal.muted
+	t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
+	a.mainVideo.begin(a.win)
 	t.Accent, t.AccentText = pal.accent, white
 	t.Selection = pal.accent.Alpha(0.35)
 	t.Font = appFont
@@ -70,7 +71,7 @@ func (a *app) view(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
 	c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
 	c.OnShortcut(0, ui.KeyEscape, a.escape)
-	root := ui.Box(c).Fill().Background(pal.bg)
+	root := ui.Box(c).Fill()
 	if !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
 		// Space pauses wherever the focus is, as in MySpotify: on the box
 		// around everything it comes before a button the pointer focused,
@@ -83,13 +84,14 @@ func (a *app) view(c *ui.Context) {
 	root.Children(func() {
 		if a.web.v != nil && a.web.layout && !a.loginOpen { // the login lays it out itself
 			// Laid out for a script, under the app: the rows paint over it.
-			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0)
+			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-2)
 		}
+		a.mainVideo.background(c, pal.bg)
 		if a.theater && p.plays() { // 网页全屏: the video alone, filling the window
-			ui.Row(c).Fill().AlignItems(ui.Stretch).Background(pal.bg).Children(func() { a.stage(c, p) })
+			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() { a.stage(c, p) })
 			return
 		}
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Background(pal.bg).Children(func() {
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
 			ui.Column(c.Key("main")).Grow(1).Children(func() {
 				a.topBar(c, p)
@@ -549,12 +551,13 @@ func (a *app) grid(c *ui.Context, p *page) {
 	}
 	cols := max(2, int((inner+16)/(260+16)))
 	colW := (inner - 16*float32(cols-1)) / float32(cols)
-	ui.Scroll(c.Key("grid:"+p.title)).TrackScroll(&p.scroll).Grow(1).Padding(4, barGutter, 32, 24).Children(func() {
+	viewport := ui.Scroll(c.Key("grid:"+p.title)).TrackScroll(&p.scroll).Grow(1).Padding(4, barGutter, 32, 24)
+	viewport.Children(func() {
 		ui.Grid(c).Columns(cols).GapX(16).GapY(26).Children(func() {
 			for i, s := range p.list {
 				if i == 0 && p == a.picks && cols >= 3 {
 					// As tall as two cards beside it: their covers and some 63 points of text each (measured).
-					a.bigCard(c.Key("0"), p, s, cols-1, 2*(colW*9/16+63)+26)
+					a.bigCard(c.Key("0"), p, s, cols-1, 2*(colW*9/16+63)+26, viewport)
 					continue
 				}
 				a.card(c.Key(fmt.Sprint(i)), p, i, s) // by place: a feed can bring a video twice
@@ -622,12 +625,15 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 
 // bigCard is 精选's first video across span columns and two rows, playing
 // silent once loaded, its cover until then, with its author and text over it.
-func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32) {
+func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32, viewport ui.Element) {
 	v := s.v
 	b := ui.ButtonBase(c).ColumnSpan(span).RowSpan(2).Height(height).Radius(12).Clip().Background(ui.RGB(0, 0, 0)).FocusRing(false).Label(v.Desc)
+	if nativePlayer(s.vp) {
+		b.Background(ui.Color{})
+	}
 	b.Children(func() {
 		if s.vp != nil {
-			video(c, s.vp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+			a.mainVideo.video(c, s.vp, true, viewport, 12).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		} else if bmp := a.img.get(v.Cover); bmp != nil {
 			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		}
@@ -652,6 +658,9 @@ func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32)
 // from the buttons over the picture.
 func (a *app) stage(c *ui.Context, p *page) {
 	box := ui.Box(c.Key("stage")).Grow(1).Radius(12).Clip().Background(ui.RGB(0, 0, 0))
+	if p.idx < len(p.list) && !a.listen && !a.pipOn && nativePlayer(p.list[p.idx].vp) {
+		box.Background(ui.Color{})
+	}
 	box.HandleInput(func(ev ui.InputEvent) bool {
 		if ev.Kind != ui.InputScroll || ev.Momentum || ev.DY == 0 {
 			return false
@@ -718,7 +727,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					}
 				})
 			} else if s.vp != nil {
-				video(c, s.vp).Fill().Fit(ui.Contain)
+				a.mainVideo.video(c, s.vp, false, ui.Element{}, 12).Fill().Fit(ui.Contain)
 			} else if bmp := a.img.get(s.v.Cover); bmp != nil {
 				// The cover stands in until the first streamed frame arrives.
 				ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.5)
@@ -956,8 +965,14 @@ func (a *app) danmakuInput(c *ui.Context, s *slot) {
 func (a *app) pipView(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyEscape, func() { a.setPip(false); a.redraw() })
 	c.OnShortcut(0, ui.KeySpace, func() { a.toggle(); a.redraw() })
-	box := ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).DragWindow()
+	t := *ui.DarkTheme()
+	t.Background = ui.Color{}
+	t.Font = appFont
+	c.SetTheme(&t)
+	a.pipVideo.begin(a.pip)
+	box := ui.Box(c).Fill().DragWindow()
 	box.Children(func() {
+		a.pipVideo.background(c, ui.RGB(0, 0, 0))
 		var s *slot
 		if p := a.cur(); p.plays() && p.idx < len(p.list) {
 			s = p.list[p.idx]
@@ -968,7 +983,7 @@ func (a *app) pipView(c *ui.Context) {
 			})
 			return
 		}
-		video(c, s.vp).Fill().Fit(ui.Contain)
+		a.pipVideo.video(c, s.vp, false, ui.Element{}, 0).Fill().Fit(ui.Contain)
 		if box.Hovered() || a.paused {
 			ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(40).PaddingX(8).Gap(4).AlignItems(ui.Center).
 				Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {

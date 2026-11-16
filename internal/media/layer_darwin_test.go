@@ -63,6 +63,23 @@ func TestLayerReleasesPixelsAndNativeObjects(t *testing.T) {
 	if live.Seeking() || live.Position() < 200*time.Millisecond {
 		t.Fatal("seek without pixel output did not resume")
 	}
+	for _, paused := range []bool{false, true} {
+		if paused {
+			live.Pause()
+		} else {
+			live.Play()
+		}
+		image, err := live.Snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if image.Bounds().Dx() != 160 || image.Bounds().Dy() != 90 {
+			t.Fatalf("snapshot dimensions: %v", image.Bounds())
+		}
+		if live.out != 0 || live.frame != nil {
+			t.Fatal("capture left a permanent pixel output")
+		}
+	}
 	lib, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +98,14 @@ func TestLayerReleasesPixelsAndNativeObjects(t *testing.T) {
 	}()
 	defer func() { destroyWeak(unsafe.Pointer(&weak[0])); destroyWeak(unsafe.Pointer(&weak[1])) }()
 	onMain(layer.Close)
+	if err := live.UsePixels(); err != nil {
+		t.Fatal(err)
+	}
+	live.Seek(100 * time.Millisecond)
+	live.Play()
+	if f, err := live.Next(); err != nil || f.Image == nil {
+		t.Fatalf("pixel fallback failed: %v", err)
+	}
 	live.Close()
 	deadline = time.Now().Add(3 * time.Second)
 	for {
