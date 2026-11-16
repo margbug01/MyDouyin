@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sync"
 	"time"
 )
@@ -98,9 +97,7 @@ var writeMu sync.Mutex
 var (
 	errNoWeb = errors.New("要先扫码登录抖音")
 	// ErrNeedLogin is a write Douyin refused for want of a login.
-	ErrNeedLogin  = errors.New("抖音说没登录，请重新扫码登录")
-	okReply       = regexp.MustCompile(`"status_code":0[,}]`)
-	loggedOutText = regexp.MustCompile(`"status_code":8[,}]`)
+	ErrNeedLogin = errors.New("抖音说没登录，请重新扫码登录")
 )
 
 const form = "application/x-www-form-urlencoded; charset=UTF-8"
@@ -125,9 +122,14 @@ func (c *Client) post(path, query, body, typ string) error {
 	args, _ := json.Marshal([]string{u, typ, body})
 	js := "const [u, type, body] = " + string(args) + `;
 const r = await fetch(u, { method: "POST", credentials: "include", headers: { "content-type": type }, body });
-return { http: r.status, text: (await r.text()).slice(0, 300) };`
+const t = await r.text();
+let code = null;
+try { code = JSON.parse(t).status_code; } catch {}
+return { http: r.status, code, text: t.slice(0, 300) };`
+	// Only the reply's own status_code counts: it may nest others, as user_collect_count's.
 	var r struct {
 		HTTP int
+		Code *int
 		Text string
 	}
 	var err error
@@ -144,10 +146,10 @@ return { http: r.status, text: (await r.text()).slice(0, 300) };`
 		}
 		switch {
 		case err != nil:
-		case r.HTTP == 200 && okReply.MatchString(r.Text):
+		case r.HTTP == 200 && r.Code != nil && *r.Code == 0:
 			c.syncCookies()
 			return nil
-		case loggedOutText.MatchString(r.Text):
+		case r.Code != nil && *r.Code == 8:
 			return ErrNeedLogin
 		}
 	}

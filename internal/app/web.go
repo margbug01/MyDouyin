@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -160,6 +163,11 @@ func (a *app) startLogin() {
 	go func() {
 		cs, err := a.web.Cookies()
 		in := err == nil && dy.LoggedIn(cs)
+		if in { // a session cookie Douyin may have let go since: ask it
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			in = a.web.pageSignedIn(ctx)
+			cancel()
+		}
 		if in {
 			err = a.c.SaveCookies(cs)
 		} else {
@@ -180,8 +188,56 @@ func (a *app) startLogin() {
 	}()
 }
 
-// openLogin shows Douyin's login, its code to scan with the Douyin app,
-// and waits for the login to come.
+// login is Douyin's login while it shows: its code, which the page under
+// the app makes and renews, drawn natively, and how the scan goes.
+type login struct {
+	src    string     // the code's data URL, as the page shows it
+	qr     *ui.Bitmap // the code, drawn
+	status string     // what the scan is at, for the panel
+	verify bool       // Douyin asks more than the scan: its page shows instead
+}
+
+// loginJS reads the login the page shows: its code, the text about it, and
+// whether Douyin asks to verify more than the scan. A code that expired is
+// renewed, as its 刷新 does.
+const loginJS = `
+const img = [...document.querySelectorAll("img")].find(e => { const r = e.getBoundingClientRect(); return r.width >= 100 && Math.abs(r.width - r.height) < 8 && e.src.startsWith("data:image/"); });
+let near = "";
+if (img) { let p = img; for (let i = 0; i < 4 && p.parentElement; i++) p = p.parentElement; near = p.innerText; }
+if (!window.__mdQR) {
+  window.__mdQR = { status: 0 };
+  const seen = (u, t) => { if (/check_qrconnect/.test(String(u))) { try { window.__mdQR.status = Number(JSON.parse(t).data.status) || 0; } catch {} } };
+  const of = window.fetch;
+  window.fetch = function (input) { const p = of.apply(this, arguments); p.then(r => r.clone().text().then(t => seen(typeof input === "string" ? input : input && input.url, t))).catch(() => {}); return p; };
+  const open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (m, u) { this.addEventListener("load", () => { try { seen(u, this.responseText); } catch {} }); return open.apply(this, arguments); };
+}
+const body = document.body ? document.body.innerText : "";
+const expired = /失效|过期/.test(near);
+if (expired) { const r = [...document.querySelectorAll("*")].find(e => e.children.length === 0 && /刷新/.test(e.textContent) && e.getBoundingClientRect().width > 0); if (r) r.click(); }
+return { src: img ? img.src : "", scanned: window.__mdQR.status === 2 || /扫码成功|确认登录|手机上确认/.test(near), expired, verify: /身份验证|安全验证|短信验证|二次验证/.test(body) && !img };`
+
+// sessionID is the session cookie of cs, or "".
+func sessionID(cs []dy.Cookie) string {
+	for _, c := range cs {
+		if c.Name == "sessionid" {
+			return c.Value
+		}
+	}
+	return ""
+}
+
+// pageSignedIn asks Douyin, from the page, whether its login holds.
+func (w *web) pageSignedIn(ctx context.Context) bool {
+	b, err := w.Eval(ctx, `const r = await (await fetch("/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&channel=channel_pc_web", { credentials: "include" })).json();
+return r.status_code === 0 && !!r.user;`)
+	// The reply nests other status codes (user_collect_count's is 0 logged out): only its own counts.
+	return err == nil && string(b) == "true"
+}
+
+// openLogin shows the login: the code of Douyin's login page, which loads
+// under the app, to scan with the Douyin app. The login is in once Douyin,
+// asked from the page, says so; a cookie alone is not enough.
 func (a *app) openLogin() {
 	if a.loginOpen {
 		return
@@ -190,40 +246,114 @@ func (a *app) openLogin() {
 		a.toast = "登录页打不开：" + err.Error()
 		return
 	}
-	a.loginOpen = true
+	a.loginOpen, a.web.layout = true, true
+	a.login = login{status: "二维码载入中…"}
 	a.loginGen++
 	gen := a.loginGen
 	go func() {
+		was, _ := a.web.Cookies() // a session Douyin let go may linger: the login is a new one
+		old := sessionID(was)
+		defer a.post(func() {
+			if a.loginGen == gen {
+				a.web.layout = false
+			}
+		})
 		for {
-			time.Sleep(time.Second)
+			time.Sleep(400 * time.Millisecond)
 			var open bool
 			a.call(func() { open = a.loginOpen && a.loginGen == gen })
 			if !open {
 				return
 			}
-			if cs, err := a.web.Cookies(); err != nil || !dy.LoggedIn(cs) {
-				continue
+			// The cookie first, which asks no page: once confirmed on the phone the
+			// page goes elsewhere, and an evaluation would wait for it to load.
+			if cs, err := a.web.Cookies(); err == nil && dy.LoggedIn(cs) && sessionID(cs) != old {
+				a.post(func() {
+					if a.loginGen == gen {
+						a.loginOpen, a.login.status = false, ""
+						a.toast = "扫码成功，正在登录…"
+					}
+				})
+				a.finishLogin(gen)
+				return
 			}
-			time.Sleep(1500 * time.Millisecond) // the rest of the login's cookies
-			cs, err := a.web.Cookies()
-			if err == nil {
-				err = a.c.SaveCookies(cs)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			var st struct {
+				Src                      string
+				Scanned, Expired, Verify bool
 			}
+			if b, err := a.web.Eval(ctx, loginJS); err == nil {
+				json.Unmarshal(b, &st)
+			}
+			cancel()
 			a.post(func() {
-				a.loginOpen = false
-				if err != nil {
-					a.toast = "登录没保存：" + err.Error()
+				if a.loginGen != gen {
 					return
 				}
-				a.signedIn = true
-				a.toast = "已登录"
-				a.loadAccount()
-				a.web.open(douyinHome) // the page Douyin went to after the login may play
+				l := &a.login
+				if st.Src != "" && st.Src != l.src {
+					if data, err := base64.StdEncoding.DecodeString(st.Src[strings.IndexByte(st.Src, ',')+1:]); err == nil {
+						if bmp, err := ui.DecodeBitmap(data); err == nil {
+							l.src, l.qr = st.Src, bmp
+						}
+					}
+				}
+				l.verify = st.Verify
+				switch {
+				case st.Expired:
+					l.status = "二维码过期了，正在换一张"
+				case st.Scanned:
+					l.status = "已扫码，请在手机上确认登录"
+				case l.qr != nil:
+					l.status = "打开抖音 App，点左上角的扫一扫"
+				}
 			})
-			a.c.RefreshGuard()
-			return
 		}
 	}()
+}
+
+// finishLogin, once a new session cookie came, asks Douyin from the page
+// whether it takes it (the page may still be loading the login's redirect),
+// then keeps it; one Douyin does not take opens the login again, where its
+// page shows what more it asks.
+func (a *app) finishLogin(gen int) {
+	in := false
+	deadline := time.Now().Add(25 * time.Second)
+	for !in && time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		in = a.web.pageSignedIn(ctx)
+		cancel()
+		if !in {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	var err error
+	if in {
+		var cs []dy.Cookie
+		if cs, err = a.web.Cookies(); err == nil {
+			err = a.c.SaveCookies(cs)
+		}
+	}
+	a.post(func() {
+		if a.loginGen != gen {
+			return
+		}
+		switch {
+		case !in:
+			a.toast = "抖音没认这次登录，请按页面提示再试一次"
+			a.loginOpen, a.web.layout = true, true
+			a.login.verify = true
+		case err != nil:
+			a.toast = "登录没保存：" + err.Error()
+		default:
+			a.signedIn = true
+			a.toast = "已登录"
+			a.loadAccount()
+		}
+	})
+	if in && err == nil {
+		a.c.RefreshGuard()
+	}
 }
 
 // logout forgets the login: WebKit's Douyin cookies, the client's, and
@@ -255,26 +385,47 @@ func (a *app) logout() {
 	}()
 }
 
-// loginPanel is Douyin's login page over the window while the login shows.
+// loginPanel is the login over the window while it shows: the code to
+// scan and how the scan goes, natively; Douyin's own page only when it asks
+// to verify more than the scan.
 func (a *app) loginPanel(c *ui.Context) {
-	if !a.loginOpen || a.web.v == nil {
-		return
-	}
-	w, h := c.Size()
-	ui.Box(c.Key("login")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGBA(0, 0, 0, 0.55)).Center().
-		HandleInput(func(ev ui.InputEvent) bool { return ev.Kind != ui.InputScroll }).Children(func() {
-		ui.Column(c).Width(min(960, w-48)).Height(min(660, h-48)).Radius(14).Clip().Background(ui.Hex("#252632")).
-			Border(0.5, ui.RGBA(255, 255, 255, 0.12)).Children(func() {
+	l := &a.login
+	verify := l.verify && a.web.v != nil
+	ui.DialogBase(c.Key("login"), &a.loginOpen, func(back, panel ui.Element) {
+		back.Background(ui.RGBA(0, 0, 0, 0.55))
+		panel.Radius(16).Clip().Background(ui.Hex("#252632")).Border(0.5, ui.RGBA(255, 255, 255, 0.12)).
+			Shadow(0, 10, 30, -6, ui.RGBA(0, 0, 0, 0.5)).Label("扫码登录抖音")
+		if verify {
+			w, h := c.Size()
+			panel.Width(min(960, w-48)).Height(min(660, h-48))
 			ui.Row(c).Height(52).PaddingX(18).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Column(c).Grow(1).Gap(2).Children(func() {
-					ui.Text(c, "登录抖音").FontSize(15).FontWeight(700).TextColor(white)
-					ui.Text(c, "打开抖音 App 扫一扫，或者用手机验证码登录").FontSize(12).TextColor(pal.muted)
-				})
+				ui.Text(c, "抖音要求验证身份，请按页面提示完成").FontSize(14).FontWeight(600).TextColor(white).Grow(1)
 				if ui.Button(c.Key("later"), "以后再说").Clicked() {
 					a.loginOpen = false
 				}
 			})
 			ui.WebView(c, a.web.v).Grow(1)
+			return
+		}
+		panel.Width(340).Height(430)
+		if a.web.v != nil { // Douyin's page, laid out for its code to show, under what covers it
+			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0)
+		}
+		ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.Hex("#252632")).
+			Padding(22, 24, 20, 24).Gap(14).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "扫码登录抖音").FontSize(17).FontWeight(700).TextColor(white)
+			ui.Box(c).Size(220, 220).Radius(12).Background(white).Center().Children(func() {
+				if l.qr != nil {
+					ui.Image(c, l.qr).Size(196, 196).Opacity(onOff(strings.HasPrefix(l.status, "已扫码"), float32(0.25), 1))
+				} else {
+					ui.Spinner(c)
+				}
+			})
+			ui.Text(c, l.status).FontSize(13.5).TextColor(pal.text)
+			ui.Text(c, "登录后可以点赞、收藏、发弹幕，看关注和我的").FontSize(11.5).TextColor(pal.faint)
+			if ui.Button(c.Key("later"), "以后再说").Clicked() {
+				a.loginOpen = false
+			}
 		})
 	})
 }

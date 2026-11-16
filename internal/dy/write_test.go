@@ -27,8 +27,13 @@ func (w *fakeWeb) Eval(_ context.Context, js string) ([]byte, error) {
 func (w *fakeWeb) Load(context.Context, string, bool) error { return nil }
 func (w *fakeWeb) Cookies() ([]Cookie, error)               { return w.cookies, nil }
 
+// reply is what the page reports of an answer of Douyin's, text.
 func reply(text string) string {
-	b, _ := json.Marshal(map[string]any{"http": 200, "text": text})
+	var top struct {
+		Code *int `json:"status_code"`
+	}
+	json.Unmarshal([]byte(text), &top)
+	b, _ := json.Marshal(map[string]any{"http": 200, "code": top.Code, "text": text})
 	return string(b)
 }
 
@@ -40,7 +45,8 @@ func TestWriteThroughWeb(t *testing.T) {
 	if err := c.SetLiked("1", true); !errors.Is(err, errNoWeb) {
 		t.Fatalf("without a page: %v", err)
 	}
-	w := &fakeWeb{replies: []string{reply(`{"status_code":2154}`), reply(`{"status_code":0,"is_digg":0}`)},
+	// A refusal nesting a status of 0 is a refusal.
+	w := &fakeWeb{replies: []string{reply(`{"status_code":2154,"user_collect_count":{"status_code":0}}`), reply(`{"status_code":0,"is_digg":0}`)},
 		cookies: []Cookie{{Name: "sessionid", Value: "s"}, {Name: "ttwid", Value: "t"}}}
 	c.SetWeb(w)
 	if err := c.SetLiked("7", true); err != nil {

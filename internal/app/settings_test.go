@@ -69,3 +69,22 @@ func TestLoginEntries(t *testing.T) {
 		t.Fatalf("logged in settings: %q", tt.Texts())
 	}
 }
+
+// The login shows natively: the code's place and how the scan goes, a way
+// out, and no page of Douyin's.
+func TestLoginPanel(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, c: &dy.Client{}})
+	a.loginOpen, a.login = true, login{status: "已扫码，请在手机上确认登录"}
+	tt := newTester(a)
+	tt.Frame()
+	if !tt.HasText("扫码登录抖音") || !tt.HasText("已扫码，请在手机上确认登录") {
+		t.Fatalf("panel: %q", tt.Texts())
+	}
+	if err := tt.Click("以后再说"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.loginOpen || tt.HasText("扫码登录抖音") {
+		t.Fatal("以后再说 left it open")
+	}
+}

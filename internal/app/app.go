@@ -247,6 +247,7 @@ type app struct {
 	signedIn  bool // WebKit holds a login
 	loginOpen bool // Douyin's login shows over the window
 	loginGen  int  // counts the logins shown, each waited for once
+	login     login
 }
 
 // notes is the notifications, loaded a page at a time.
@@ -372,6 +373,7 @@ func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) err
 				*on, *n = !want, *n-step
 				a.toast = onOff(want, "", "取消") + what + "没成功：" + err.Error()
 				if errors.Is(err, dy.ErrNeedLogin) {
+					a.signedIn = false
 					a.openLogin()
 				}
 			}
@@ -426,6 +428,7 @@ func (a *app) toggleCommentLike(sh *sheet, id string, reply bool) {
 			}
 			a.toast = onOff(want, "", "取消") + "赞评论没成功：" + err.Error()
 			if errors.Is(err, dy.ErrNeedLogin) {
+				a.signedIn = false
 				a.openLogin()
 			}
 		})

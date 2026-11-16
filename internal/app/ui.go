@@ -81,7 +81,7 @@ func (a *app) view(c *ui.Context) {
 	}
 	p := a.cur()
 	root.Children(func() {
-		if a.web.v != nil && a.web.layout && !a.loginOpen {
+		if a.web.v != nil && a.web.layout && !a.loginOpen { // the login lays it out itself
 			// Laid out for a script, under the app: the rows paint over it.
 			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0)
 		}
@@ -236,12 +236,6 @@ func (a *app) sidebar(c *ui.Context) {
 		if nav(iconFriends, "朋友", a.friends, root == a.friends) {
 			a.root(a.friends)
 		}
-		if nav(iconUser, "我的", a.mine[a.mineTab], a.isMine(root)) {
-			a.showMine(a.mineTab)
-		}
-		if a.c != nil && !a.signedIn && a.navItem(c, iconUser, "登录", a.loginOpen).Clicked() {
-			a.openLogin()
-		}
 		divider()
 		if a.live != nil {
 			b := a.listItem(c.Key("直播"), root == a.live, "直播")
@@ -264,7 +258,37 @@ func (a *app) sidebar(c *ui.Context) {
 		}
 		ui.Box(c).Grow(1)
 		a.updateBanner(c)
-		if a.navItem(c, iconSettings, "设置", a.settingsOpen).Clicked() {
+		a.accountRow(c, root)
+	})
+}
+
+// accountRow ends the sidebar: the account, which opens 我的, or 登录 while
+// logged out; beside it the settings.
+func (a *app) accountRow(c *ui.Context, root *page) {
+	ui.Row(c).AlignSelf(ui.Stretch).Gap(4).AlignItems(ui.Center).Children(func() {
+		switch {
+		case a.signedIn || a.me.Name != "":
+			mine := a.mine[a.mineTab]
+			label := a.me.Name
+			if mine != nil {
+				label = "我的"
+			}
+			b := a.listItem(c.Key("account"), a.isMine(root), label).Grow(1).Shrink(1).MinWidth(0)
+			b.Children(func() {
+				a.avatar(c, a.me.Avatar, a.me.Name, 24)
+				ui.Text(c, a.me.Name).FontSize(14).FontWeight(600).TextColor(onOff(a.isMine(root), white, pal.text)).SingleLine().Shrink(1)
+			})
+			if b.Clicked() && mine != nil {
+				a.showMine(a.mineTab)
+			}
+		case a.c != nil:
+			if a.navItem(c, iconUser, "登录", a.loginOpen).Grow(1).Clicked() {
+				a.openLogin()
+			}
+		default:
+			ui.Box(c).Grow(1)
+		}
+		if iconButton(c.Key("settings"), iconSettings, 18, onOff(a.settingsOpen, white, pal.muted), "设置").Clicked() {
 			a.settingsOpen = true
 		}
 	})
