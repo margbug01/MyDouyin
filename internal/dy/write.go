@@ -63,8 +63,9 @@ func egoBrowser() (string, error) {
 }
 
 // egoLib is what every script run in ego lite starts with: the task space,
-// and done, which saves the cookies if the login still holds, closes the
-// space and prints the result for the client.
+// and done, which saves the cookies and the ticket guard's material
+// (guard.go) if the login still holds, closes the space and prints the
+// result for the client.
 const egoLib = `
 const task = await taskSpace("mydouyin write");
 const out = { ok: false };
@@ -78,6 +79,18 @@ const done = async (page) => {
         await fs.writeFile(COOKIES + ".tmp", JSON.stringify(cookies), { mode: 0o600 });
         await fs.rename(COOKIES + ".tmp", COOKIES);
         out.cookies = cookies.length;
+        const guard = await page.evaluate(() => {
+          const j = (k) => JSON.parse(localStorage.getItem(k) || "null");
+          const c = j("security-sdk/s_sdk_crypt_sdk"), s = j("security-sdk/s_sdk_sign_data_key/web_protect"), v = j("security-sdk/s_sdk_server_cert_key");
+          if (!c || !s || !v) return null;
+          const cd = JSON.parse(c.data), sd = JSON.parse(s.data);
+          return { ticket: sd.ticket, ts_sign: sd.ts_sign, private_key: cd.ec_privateKey, server_cert: v.cert };
+        });
+        if (guard && guard.ticket && guard.private_key && guard.server_cert) {
+          await fs.writeFile(GUARD + ".tmp", JSON.stringify(guard), { mode: 0o600 });
+          await fs.rename(GUARD + ".tmp", GUARD);
+          out.guard = true;
+        }
       } else {
         out.loggedOut = true;
       }
@@ -145,11 +158,26 @@ try {
 await done(page);
 `
 
+// guardScript only opens Douyin, for done to export what it keeps.
+const guardScript = `
+let page;
+try {
+  page = task.page("p1");
+  await page.goto("https://www.douyin.com/user/self", { timeout: 40000 });
+  await new Promise(r => setTimeout(r, 2500));
+  out.ok = true;
+} catch (e) {
+  out.error = String(e);
+}
+await done(page);
+`
+
 // egoResult is what a script reports.
 type egoResult struct {
 	OK        bool
 	Reply     string
 	Cookies   int
+	Guard     bool // the ticket guard's material exported
 	LoggedOut bool
 	Error     string
 	Dry       bool // a share stopped before it left, as asked
@@ -225,10 +253,15 @@ func (c *Client) ego(script string, args ...string) (egoResult, error) {
 	}
 	a, _ := json.Marshal(args)
 	f, _ := json.Marshal(file)
+	gf, err := guardFile()
+	if err != nil {
+		return r, err
+	}
+	g, _ := json.Marshal(gf)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ego, "nodejs")
-	cmd.Stdin = strings.NewReader("const ARGS = " + string(a) + ";\nconst COOKIES = " + string(f) + ";\n" + egoLib + script)
+	cmd.Stdin = strings.NewReader("const ARGS = " + string(a) + ";\nconst COOKIES = " + string(f) + ";\nconst GUARD = " + string(g) + ";\n" + egoLib + script)
 	var outb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &outb, &outb
 	runErr := cmd.Run()

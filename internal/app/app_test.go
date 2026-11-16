@@ -247,7 +247,7 @@ func TestComments(t *testing.T) {
 	open := func() {
 		a.sheet = &sheet{total: 2, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条", Replies: 3}, {Author: "乙", Text: "第二条"}}}
 		tt.Frame()
-		if !tt.HasText("第一条") || !tt.HasText("评论 2") || !tt.HasText("展开 3 条回复 ↗") || tt.HasText("展开 0 条回复 ↗") {
+		if !tt.HasText("第一条") || !tt.HasText("评论 2") || !tt.HasText("展开 3 条回复") || tt.HasText("展开 0 条回复") {
 			t.Fatalf("panel shows %q", tt.Texts())
 		}
 	}
@@ -1116,5 +1116,58 @@ func TestProfileUsersSuggest(t *testing.T) {
 	tt.Frame()
 	if tt.HasText("美食做法家常菜") {
 		t.Fatal("suggestions for 美食 over 美食x")
+	}
+}
+
+// A comment's replies open under it a page at a time, a reply to a reply
+// saying whom it answers, and close; open again, they show without loading.
+func TestReplies(t *testing.T) {
+	feed := stub("推荐", 1)
+	ready(t, feed.list[0])
+	a := withRoots(&app{pages: []*page{feed}, posted: make(chan func(), 8)})
+	pages := [][]dy.Comment{{{Author: "丙", Text: "回复一"}}, {{Author: "丁", Text: "回复二", ReplyTo: "丙"}}}
+	asked := 0
+	a.replies = func(_, id string) dy.Pager[dy.Comment] {
+		if id != "c1" {
+			t.Fatalf("replies of %q", id)
+		}
+		return func() ([]dy.Comment, error) {
+			asked++
+			return pages[asked-1], nil
+		}
+	}
+	a.sheet = &sheet{total: 1, done: true, items: []dy.Comment{{ID: "c1", Author: "甲", Text: "第一条", Replies: 2}}}
+	tt := newTester(a)
+	pump := func() {
+		tt.Frame()
+		select {
+		case fn := <-a.posted:
+			fn()
+		case <-time.After(2 * time.Second):
+			t.Fatal("the replies did not come")
+		}
+		tt.Frame()
+	}
+	if err := tt.Click("展开 2 条回复"); err != nil {
+		t.Fatal(err)
+	}
+	pump()
+	if !tt.HasText("回复一") || !tt.HasText("展开更多") || !tt.HasText("收起") {
+		t.Fatalf("opened: %q", tt.Texts())
+	}
+	tt.Click("展开更多")
+	pump()
+	if !tt.HasText("丁 ▸ 丙") || !tt.HasText("回复二") || tt.HasText("展开更多") {
+		t.Fatalf("all of them: %q", tt.Texts())
+	}
+	tt.Click("收起")
+	tt.Frame()
+	if tt.HasText("回复一") || !tt.HasText("展开 2 条回复") {
+		t.Fatalf("closed: %q", tt.Texts())
+	}
+	tt.Click("展开 2 条回复")
+	tt.Frame()
+	if !tt.HasText("回复二") || asked != 2 {
+		t.Fatalf("opened again: asked %d, %q", asked, tt.Texts())
 	}
 }

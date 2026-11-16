@@ -1408,27 +1408,9 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
 					a.avatar(c, "", cm.Author, 30)
 					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
-						ui.Text(c, cm.Author).FontSize(12).TextColor(pal.muted).SingleLine()
-						ui.Text(c, cm.Text).FontSize(14).TextColor(pal.text)
-						meta := ago(cm.Time, time.Now())
-						if cm.Place != "" {
-							meta += " · " + cm.Place
-						}
-						meta += "   ♥ " + count(cm.Likes)
-						ui.Text(c, meta).FontSize(11).TextColor(pal.faint)
-						if cm.Replies == 0 {
-							return
-						}
-						// Replies open on the web: their endpoint wants headers only the browser signs (dy.Comment).
-						label := fmt.Sprintf("展开 %d 条回复 ↗", cm.Replies)
-						b := ui.ButtonBase(c.Key("replies")).AlignSelf(ui.Start).FocusRing(false).Label(label + "（在浏览器打开）").Tooltip("在浏览器里看回复")
-						b.Children(func() {
-							ui.Text(c, label).FontSize(11.5).FontWeight(600).TextColor(onOff(b.Hovered(), pal.text, pal.muted))
-						})
-						if b.Clicked() {
-							if err := mygo.Shell.OpenExternal(videoURL(sh.v)); err != nil {
-								a.toast = "打不开浏览器：" + err.Error()
-							}
+						commentText(c, cm, 14)
+						if cm.Replies > 0 {
+							a.replyThread(c, sh, cm)
 						}
 					})
 				})
@@ -1448,6 +1430,67 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 				}
 			})
 		})
+	})
+}
+
+// commentText is a comment's author (and whom a reply answers), its text,
+// and when, where from and its likes, in its text size.
+func commentText(c *ui.Context, cm dy.Comment, size float32) {
+	who := cm.Author
+	if cm.ReplyTo != "" {
+		who += " ▸ " + cm.ReplyTo
+	}
+	ui.Text(c, who).FontSize(size - 2).TextColor(pal.muted).SingleLine()
+	ui.Text(c, cm.Text).FontSize(size).TextColor(pal.text)
+	meta := ago(cm.Time, time.Now())
+	if cm.Place != "" {
+		meta += " · " + cm.Place
+	}
+	meta += "   ♥ " + count(cm.Likes)
+	ui.Text(c, meta).FontSize(11).TextColor(pal.faint)
+}
+
+// replyThread is under a comment with replies, as Douyin's: the replies once
+// opened, smaller, then 展开 N 条回复 to open them, 展开更多 for more, 收起.
+func (a *app) replyThread(c *ui.Context, sh *sheet, cm dy.Comment) {
+	th := sh.threads[cm.ID]
+	open := th != nil && th.open
+	if open {
+		for j, r := range th.items {
+			ui.Row(c.Key("r"+fmt.Sprint(j))).Gap(8).Margin(6, 0, 0, 0).AlignItems(ui.Start).Children(func() {
+				a.avatar(c, "", r.Author, 22)
+				ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() { commentText(c, r, 13) })
+			})
+		}
+		if th.msg != "" {
+			ui.Text(c, th.msg).FontSize(11.5).TextColor(pal.faint)
+		}
+	}
+	link := func(key, label string) bool {
+		b := ui.ButtonBase(c.Key(key)).FocusRing(false).Label(label)
+		b.Children(func() {
+			ui.Text(c, label).FontSize(11.5).FontWeight(600).TextColor(onOff(b.Hovered(), pal.text, pal.muted))
+		})
+		return b.Clicked()
+	}
+	ui.Row(c).Gap(16).Margin(2, 0, 0, 0).Children(func() {
+		switch {
+		case !open:
+			if link("open", fmt.Sprintf("展开 %d 条回复", cm.Replies)) {
+				a.toggleReplies(cm)
+			}
+			return
+		case th.fetching:
+			ui.Text(c, "载入中…").FontSize(11.5).TextColor(pal.faint)
+			return
+		case !th.done && len(th.items) < cm.Replies:
+			if link("more", "展开更多") {
+				a.moreReplies(th)
+			}
+		}
+		if link("close", "收起") {
+			a.toggleReplies(cm)
+		}
 	})
 }
 

@@ -555,3 +555,20 @@ func TestLiveSearchProfile(t *testing.T) {
 		t.Fatalf("suggest: %q, %v", ws, err)
 	}
 }
+
+// A comment's replies read, signed with the ticket guard's material, which
+// ego lite exports first if it is not there. Live: skipped unless LIVE is set.
+func TestLiveReplies(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs, err := c.Replies("7694319481270619427", "7694583560485045041")()
+	if err != nil || len(rs) == 0 || rs[0].Text == "" || rs[0].Author == "" {
+		t.Fatalf("replies: %d, %v", len(rs), err)
+	}
+	t.Logf("%d replies, first %q by %q", len(rs), rs[0].Text, rs[0].Author)
+}

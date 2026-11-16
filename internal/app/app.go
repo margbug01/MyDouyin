@@ -219,8 +219,10 @@ type app struct {
 
 	// setLiked and setSaved send a like or a save to Douyin; a test puts its own.
 	setLiked, setSaved func(id string, on bool) error
-	listen             bool // 听抖音: the cover in the picture's place, the sound on
-	moreOpen           bool // the rail's 更多 menu
+	// replies pages through a comment's replies; a test puts its own.
+	replies  func(videoID, commentID string) dy.Pager[dy.Comment]
+	listen   bool // 听抖音: the cover in the picture's place, the sound on
+	moreOpen bool // the rail's 更多 menu
 }
 
 // notes is the notifications, loaded a page at a time.
@@ -589,6 +591,8 @@ type sheet struct {
 	done     bool
 	msg      string
 
+	threads map[string]*thread // the replies of comments, by comment ID, once asked for
+
 	related bool // the 相关推荐 tab shown rather than the comments
 	v       dy.Video
 	rel     []dy.Video // the videos related to v, loaded once the tab shows
@@ -598,11 +602,59 @@ type sheet struct {
 	relMsg  string
 }
 
+// thread is a comment's replies, shown under it while open, loaded a page
+// at a time.
+type thread struct {
+	items    []dy.Comment
+	next     dy.Pager[dy.Comment]
+	open     bool
+	fetching bool
+	done     bool
+	msg      string
+}
+
 // comments opens v's comments over it; the video goes on playing.
 func (a *app) comments(v dy.Video) {
 	a.notes, a.dms = nil, nil
 	a.sheet = &sheet{total: v.Comments, next: a.c.Comments(v.ID), v: v}
 	a.moreComments()
+}
+
+// toggleReplies shows the replies to cm under it, or hides them.
+func (a *app) toggleReplies(cm dy.Comment) {
+	sh := a.sheet
+	if sh.threads == nil {
+		sh.threads = map[string]*thread{}
+	}
+	th := sh.threads[cm.ID]
+	if th == nil {
+		th = &thread{next: a.replies(sh.v.ID, cm.ID)}
+		sh.threads[cm.ID] = th
+	}
+	th.open = !th.open
+	if th.open && len(th.items) == 0 {
+		a.moreReplies(th)
+	}
+}
+
+// moreReplies loads the next page of th.
+func (a *app) moreReplies(th *thread) {
+	if th.fetching || th.done {
+		return
+	}
+	th.fetching = true
+	go func() {
+		cs, err := th.next()
+		a.post(func() {
+			th.fetching = false
+			if err != nil {
+				th.msg = err.Error()
+				return
+			}
+			th.msg, th.done = "", len(cs) == 0
+			th.items = append(th.items, cs...)
+		})
+	}()
 }
 
 // moreRelated loads the next page of the videos related to the sheet's.
@@ -1177,6 +1229,7 @@ func Run() error {
 	a.pages = []*page{a.picks}
 	a.img = newImages(c.Image, a.post)
 	a.setLiked, a.setSaved = c.SetLiked, c.SetSaved
+	a.replies = c.Replies
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }
 	a.setLater = c.SetWatchLater
 	a.sendDanmaku = func(id string, at time.Duration, text string) error {

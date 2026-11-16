@@ -210,10 +210,15 @@ func (c *Client) Get(path, extra string) ([]byte, error) {
 	return c.call("GET", path, extra, "")
 }
 
-// call is Get with any method and a form body, which a_bogus signs too.
-func (c *Client) call(method, path, extra, body string) ([]byte, error) {
-	fp := "verify_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + randString(8, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(12, alnum)
-	q := baseQuery + "&verifyFp=" + fp + "&fp=" + fp
+// call is Get with any method and a form body, which a_bogus signs too, and
+// any headers more.
+func (c *Client) call(method, path, extra, body string, more ...http.Header) ([]byte, error) {
+	q := baseQuery
+	if len(more) == 0 {
+		// A request signed with the ticket guard (guard.go) comes back empty with a made-up verifyFp.
+		fp := "verify_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + randString(8, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(12, alnum)
+		q += "&verifyFp=" + fp + "&fp=" + fp
+	}
 	if extra != "" {
 		q += "&" + extra
 	}
@@ -237,6 +242,11 @@ func (c *Client) call(method, path, extra, body string) ([]byte, error) {
 		// found); once it does, compute x-secsdk-web-signature instead.
 		req.Header.Set("uifid", l.uifid)
 		req.Header.Set("x-tt-argus", "1")
+	}
+	for _, h := range more {
+		for k, v := range h {
+			req.Header[k] = v
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -656,15 +666,29 @@ func (c *Client) Following(secUID string) Pager[User] {
 	})
 }
 
-// Comment is a top-level comment on a video. The replies to one are not read:
-// comment/list/reply answers this client empty, wanting the ticket guard's
-// headers that the browser's device key signs, and asks Douyin's own page
-// for a captcha now and then (x-vc-bdturing-parameters, type verify); so
-// they open on the web (checked 2026-11-16, the captcha passed).
+// Comment is a comment on a video, or a reply to one.
 type Comment struct {
-	Author, Text, Place string // Place is the region Douyin shows, as 广东
-	Likes, Replies      int
-	Time                time.Time
+	ID, Author, Text, Place string // Place is the region Douyin shows, as 广东
+	ReplyTo                 string // in a reply to a reply, whom it answers
+	Likes, Replies          int
+	Time                    time.Time
+}
+
+// comment is a comment as the lists give it.
+type comment struct {
+	CID     string
+	Text    string
+	User    struct{ Nickname string }
+	Likes   int    `json:"digg_count"`
+	Replies int    `json:"reply_comment_total"`
+	Time    int64  `json:"create_time"`
+	Place   string `json:"ip_label"`
+	ReplyTo string `json:"reply_to_username"`
+}
+
+func (x comment) comment() Comment {
+	return Comment{ID: x.CID, Author: x.User.Nickname, Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
+		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0)}
 }
 
 // Comments pages through a video's comments, as Douyin orders them.
@@ -673,16 +697,9 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 	return pager(func() ([]Comment, bool, error) {
 		var r struct {
 			status
-			List []struct {
-				Text    string
-				User    struct{ Nickname string }
-				Likes   int    `json:"digg_count"`
-				Replies int    `json:"reply_comment_total"`
-				Time    int64  `json:"create_time"`
-				Place   string `json:"ip_label"`
-			} `json:"comments"`
-			Cursor  int `json:"cursor"`
-			HasMore int `json:"has_more"`
+			List    []comment `json:"comments"`
+			Cursor  int       `json:"cursor"`
+			HasMore int       `json:"has_more"`
 		}
 		q := fmt.Sprintf("aweme_id=%s&cursor=%d&count=20&item_type=0&insert_ids=&whale_cut_token=&cut_version=1&rcFT=", videoID, cursor)
 		if err := c.getJSON("/aweme/v1/web/comment/list/", q, &r); err != nil {
@@ -690,7 +707,61 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 		}
 		out := make([]Comment, len(r.List))
 		for i, x := range r.List {
-			out[i] = Comment{x.User.Nickname, x.Text, x.Place, x.Likes, x.Replies, time.Unix(x.Time, 0)}
+			out[i] = x.comment()
+		}
+		more := r.HasMore != 0 && r.Cursor > cursor
+		cursor = r.Cursor
+		return out, more, nil
+	})
+}
+
+// Replies pages through the replies to a comment of a video. Their endpoint
+// wants the ticket guard's headers (guard.go): without the material, or
+// with it gone stale (an empty answer), ego lite exports it again, some
+// seconds, and the page is asked once more.
+func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
+	const path = "/aweme/v1/web/comment/list/reply/"
+	cursor := 0
+	return pager(func() ([]Comment, bool, error) {
+		q := fmt.Sprintf("item_id=%s&comment_id=%s&cut_version=1&cursor=%d&count=20&item_type=0", videoID, commentID, cursor)
+		var b []byte
+		for try := 0; try < 2 && len(b) == 0; try++ {
+			h, err := guardHeaders(path, time.Now())
+			if err == nil {
+				if b, err = c.call("GET", path, q, "", h); err != nil {
+					return nil, false, err
+				}
+			} else if !errors.Is(err, errNoGuard) {
+				return nil, false, err
+			}
+			if len(b) == 0 && try == 0 {
+				r, err := c.ego(guardScript)
+				if err != nil {
+					return nil, false, err
+				}
+				if err := r.err("没拿到抖音的签名素材"); err != nil {
+					return nil, false, err
+				}
+			}
+		}
+		if len(b) == 0 {
+			return nil, false, errors.New("抖音没给回复，可能要在 ego lite 里做一次人机验证")
+		}
+		var r struct {
+			status
+			List    []comment `json:"comments"`
+			Cursor  int       `json:"cursor"`
+			HasMore int       `json:"has_more"`
+		}
+		if err := json.Unmarshal(b, &r); err != nil {
+			return nil, false, fmt.Errorf("dy: %s: %w", path, err)
+		}
+		if r.Code != 0 {
+			return nil, false, fmt.Errorf("dy: %s: status %d", path, r.Code)
+		}
+		out := make([]Comment, len(r.List))
+		for i, x := range r.List {
+			out[i] = x.comment()
 		}
 		more := r.HasMore != 0 && r.Cursor > cursor
 		cursor = r.Cursor
