@@ -245,9 +245,9 @@ func TestComments(t *testing.T) {
 	a.pages[1].list[0] = feed.list[0]
 	tt := newTester(a)
 	open := func() {
-		a.sheet = &sheet{total: 2, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条"}, {Author: "乙", Text: "第二条"}}}
+		a.sheet = &sheet{total: 2, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条", Replies: 3}, {Author: "乙", Text: "第二条"}}}
 		tt.Frame()
-		if !tt.HasText("第一条") || !tt.HasText("评论 2") {
+		if !tt.HasText("第一条") || !tt.HasText("评论 2") || !tt.HasText("展开 3 条回复 ↗") || tt.HasText("展开 0 条回复 ↗") {
 			t.Fatalf("panel shows %q", tt.Texts())
 		}
 	}

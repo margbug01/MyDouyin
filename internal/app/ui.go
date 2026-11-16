@@ -1404,8 +1404,8 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 			return
 		}
 		ui.Scroll(c.Key("comment-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
-			for _, cm := range sh.items {
-				ui.Row(c).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
+			for i, cm := range sh.items {
+				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
 					a.avatar(c, "", cm.Author, 30)
 					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 						ui.Text(c, cm.Author).FontSize(12).TextColor(pal.muted).SingleLine()
@@ -1415,10 +1415,21 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 							meta += " · " + cm.Place
 						}
 						meta += "   ♥ " + count(cm.Likes)
-						if cm.Replies > 0 {
-							meta += fmt.Sprintf("   %d 条回复", cm.Replies)
-						}
 						ui.Text(c, meta).FontSize(11).TextColor(pal.faint)
+						if cm.Replies == 0 {
+							return
+						}
+						// Replies open on the web: their endpoint wants headers only the browser signs (dy.Comment).
+						label := fmt.Sprintf("展开 %d 条回复 ↗", cm.Replies)
+						b := ui.ButtonBase(c.Key("replies")).AlignSelf(ui.Start).FocusRing(false).Label(label + "（在浏览器打开）").Tooltip("在浏览器里看回复")
+						b.Children(func() {
+							ui.Text(c, label).FontSize(11.5).FontWeight(600).TextColor(onOff(b.Hovered(), pal.text, pal.muted))
+						})
+						if b.Clicked() {
+							if err := mygo.Shell.OpenExternal(videoURL(sh.v)); err != nil {
+								a.toast = "打不开浏览器：" + err.Error()
+							}
+						}
 					})
 				})
 			}

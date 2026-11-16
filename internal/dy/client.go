@@ -657,8 +657,10 @@ func (c *Client) Following(secUID string) Pager[User] {
 }
 
 // Comment is a top-level comment on a video. The replies to one are not read:
-// comment/list/reply answers this client, and a fetch from Douyin's own page,
-// with a captcha (x-vc-bdturing-parameters, type verify) since 2026-11-16.
+// comment/list/reply answers this client empty, wanting the ticket guard's
+// headers that the browser's device key signs, and asks Douyin's own page
+// for a captcha now and then (x-vc-bdturing-parameters, type verify); so
+// they open on the web (checked 2026-11-16, the captcha passed).
 type Comment struct {
 	Author, Text, Place string // Place is the region Douyin shows, as 广东
 	Likes, Replies      int
