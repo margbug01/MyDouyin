@@ -22,6 +22,13 @@ import (
 // device by Douyin's own scripts. It is made when first wanted, hidden,
 // and let go after webIdle without use, unless it shows. Its fields belong
 // to the UI goroutine; its dy.Web methods are for the others.
+//
+// It must be Douyin's real page, whose 141 scripts hold its process at
+// 340–520 MB. A page of only the security scripts (c50de03, 59 MB) signs,
+// but a like from it got 用户未登录 and lost the login, twice, the second
+// time with no other copy of the app running (2026-11-16 23:01). Blocking
+// its images, media and fonts saves under 10 MB; blocking its other
+// scripts keeps the security SDK, which they load, from loading.
 type web struct {
 	a       *app
 	v       *mygo.WebView
