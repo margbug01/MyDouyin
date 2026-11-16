@@ -28,7 +28,9 @@ import (
 // but a like from it got 用户未登录 and lost the login, twice, the second
 // time with no other copy of the app running (2026-11-16 23:01). Blocking
 // its images, media and fonts saves under 10 MB; blocking its other
-// scripts keeps the security SDK, which they load, from loading.
+// scripts keeps the security SDK, which they load, from loading. Lighter
+// logged out, /downloadpage/pc peaked as high logged in (434–448 MB against
+// 359–423), though every write held from it (2026-11-16 23:13).
 type web struct {
 	a       *app
 	v       *mygo.WebView
