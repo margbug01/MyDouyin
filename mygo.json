@@ -1,7 +1,7 @@
 {
   "name": "MyDouyin",
   "identifier": "dev.margbug.mydouyin",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "out": "build.noindex",
   "updates": {
     "publicKey": "B7L0fiMl3NgA3GUVbRP8BQpLcQ2dQRgQYgwPjEd2164=",
