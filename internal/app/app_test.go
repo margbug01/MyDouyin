@@ -1215,8 +1215,8 @@ func TestCommentLike(t *testing.T) {
 	ready(t, feed.list[0])
 	a := withRoots(&app{pages: []*page{feed}, posted: make(chan func(), 8)})
 	type call struct {
-		video, cid  string
-		reply, on bool
+		video, cid string
+		reply, on  bool
 	}
 	var calls []call
 	var refuse error
