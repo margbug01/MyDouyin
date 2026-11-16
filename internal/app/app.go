@@ -43,8 +43,10 @@ type slot struct {
 	seeking    bool
 	dmGen      int // counts seeks: bullet comments loaded before one are let go
 
-	danmaku   []dy.Danmaku  // the bullet comments loaded, in time order
-	dmDropped int           // those let go from its front: a comment's lane counts them, not to change lanes as they go
+	danmaku   []dy.Danmaku       // the bullet comments loaded, in time order
+	dmLane    map[dy.Danmaku]int // each one's lane once it set off, kept as it flies; -1: no room, not shown
+	dmTail    [dmLanes]laneTail
+	dmOwn     dy.Danmaku    // the user's last sent: shown even when the lanes are full
 	dmTo      time.Duration // how far into the video they are loaded
 	dmLoading bool
 	lastAt    time.Duration // where the view last saw it, which a loop goes back from
@@ -480,7 +482,8 @@ func (a *app) seek(s *slot, t time.Duration) {
 	}
 	s.lastAt = t // not a loop, which 连播 would take for the end
 	s.seekTarget, s.seeking = t, true
-	s.danmaku, s.dmTo, s.dmLoading = nil, t/(32*time.Second)*(32*time.Second), false
+	s.clearDanmaku()
+	s.dmTo, s.dmLoading = t/(32*time.Second)*(32*time.Second), false
 	s.dmGen++
 }
 
@@ -578,6 +581,7 @@ func (a *app) sendBullet(s *slot) {
 	d := dy.Danmaku{At: at + 300*time.Millisecond, Text: text}
 	i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At > d.At })
 	s.danmaku = slices.Insert(s.danmaku, i, d)
+	s.dmOwn = d
 	a.dmText, a.dmOff = "", false
 	id := s.v.ID
 	go func() {
@@ -658,8 +662,10 @@ func (a *app) setSpeed(s float64) {
 func (a *app) loadDanmaku(s *slot, at time.Duration) {
 	// Keep only comments that can still be on screen, plus the next fetched window.
 	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flight }); i > 0 {
+		for _, d := range s.danmaku[:i] {
+			delete(s.dmLane, d)
+		}
 		s.danmaku = slices.Delete(s.danmaku, 0, i)
-		s.dmDropped += i
 	}
 	if a.dmOff || a.c == nil || s.dmLoading || s.dmTo >= s.v.Duration || at+5*time.Second < s.dmTo {
 		return
@@ -1220,7 +1226,8 @@ func (a *app) release(s *slot) {
 	s.players.close()
 	s.players = players{}
 	s.err = nil
-	s.danmaku, s.dmLoading, s.seeking = nil, false, false
+	s.clearDanmaku()
+	s.dmLoading, s.seeking = false, false
 	s.dmTo = s.resume / (32 * time.Second) * (32 * time.Second)
 	s.dmGen++
 }
@@ -1304,7 +1311,8 @@ func (a *app) watch(s *slot, at time.Duration) bool {
 	}
 	looped := at+time.Second < s.lastAt
 	if looped {
-		s.danmaku, s.dmTo, s.dmLoading = nil, 0, false
+		s.clearDanmaku()
+		s.dmTo, s.dmLoading = 0, false
 		s.dmGen++
 	}
 	s.lastAt = at

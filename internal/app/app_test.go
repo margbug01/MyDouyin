@@ -475,6 +475,54 @@ func TestControlBar(t *testing.T) {
 	}
 }
 
+// A burst like a real video's (22 a second) must never overlap within a lane
+// at any moment of its flight; the excess is dropped, the user's own is not.
+func TestDanmakuLanesNeverOverlap(t *testing.T) {
+	const w = 800
+	s := &slot{}
+	type flying struct {
+		d    dy.Danmaku
+		tw   float32
+		lane int
+	}
+	var all []flying
+	for i := range 200 {
+		d := dy.Danmaku{At: time.Duration(i) * 45 * time.Millisecond, Text: fmt.Sprint(i)}
+		tw := float32(40 + i*37%300) // mixed widths: wide ones fly faster
+		if i == 150 {
+			s.dmOwn = d
+		}
+		all = append(all, flying{d, tw, s.place(d, tw, w)})
+	}
+	placed := 0
+	for _, f := range all {
+		if f.lane >= 0 {
+			placed++
+		}
+	}
+	if placed < 20 || placed == len(all) || all[150].lane < 0 {
+		t.Fatalf("placed %d of %d, own lane %d", placed, len(all), all[150].lane)
+	}
+	for at := time.Duration(0); at < 18*time.Second; at += 20 * time.Millisecond {
+		for i, a := range all {
+			for _, b := range all[i+1:] {
+				if a.lane < 0 || a.lane != b.lane || a.d == s.dmOwn || b.d == s.dmOwn {
+					continue
+				}
+				ageA, ageB := at-a.d.At, at-b.d.At
+				if ageA < 0 || ageA >= flight || ageB < 0 || ageB >= flight {
+					continue
+				}
+				xa := w - float32(ageA)/float32(flight)*(w+a.tw)
+				xb := w - float32(ageB)/float32(flight)*(w+b.tw)
+				if xb < xa+a.tw { // b set off later: its head must stay behind a's tail
+					t.Fatalf("lane %d at %v: %q [%v,%v] overlaps %q from %v", a.lane, at, a.d.Text, xa, xa+a.tw, b.d.Text, xb)
+				}
+			}
+		}
+	}
+}
+
 // A bullet comment shows from its time for flight, and not before or after;
 // hidden, none shows.
 func TestDanmakuLayer(t *testing.T) {

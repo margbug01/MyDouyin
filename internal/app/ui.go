@@ -784,23 +784,86 @@ func (a *app) playbackStatus(c *ui.Context, s *slot) {
 // flight is how long a bullet comment takes to cross the video.
 const flight = 8 * time.Second
 
+const dmLanes, dmGap = 7, 24 // lanes over the video; px kept between two in a lane
+
+// laneTail is the last comment given a lane: when it set off, how wide.
+type laneTail struct {
+	at   time.Duration
+	w    float32
+	used bool
+}
+
+func (s *slot) clearDanmaku() {
+	s.danmaku, s.dmLane, s.dmTail = nil, nil, [dmLanes]laneTail{}
+}
+
+// place gives a comment setting off at at, tw wide, the topmost lane where it
+// neither starts on the last one's tail nor, being faster, catches it up
+// before that one is gone: -1 when none, as Douyin's drops a crowd's excess.
+func (s *slot) place(d dy.Danmaku, tw, w float32) int {
+	fits := func(t laneTail) bool {
+		if !t.used {
+			return true
+		}
+		sec := float32(flight.Seconds())
+		v0, v := (w+t.w)/sec, (w+tw)/sec // px a second: wider ones fly faster
+		if float32((d.At-t.at).Seconds())*v0 < t.w+dmGap {
+			return false
+		}
+		return v <= v0 || float32((t.at+flight-d.At).Seconds())*v <= w-dmGap
+	}
+	lane := -1
+	for i, t := range s.dmTail {
+		if fits(t) {
+			lane = i
+			break
+		}
+	}
+	if lane < 0 && d == s.dmOwn { // the user's own shows anyway, where the last one set off longest ago
+		lane = 0
+		for i, t := range s.dmTail {
+			if t.at < s.dmTail[lane].at {
+				lane = i
+			}
+		}
+	}
+	if lane >= 0 {
+		s.dmTail[lane] = laneTail{d.At, tw, true}
+	}
+	if s.dmLane == nil {
+		s.dmLane = map[dy.Danmaku]int{}
+	}
+	s.dmLane[d] = lane
+	return lane
+}
+
 // danmakuLayer flies the bullet comments of s across the top of the video,
-// w wide, each from its time on, in lanes by its place in the list. It
+// w wide, each from its time on, in the lane it got when it set off. It
 // reports whether any shows.
 func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) bool {
 	if a.dmOff || w <= 0 {
 		return false
 	}
-	const lanes, lane, size = 7, 30, 17
+	const lane, size = 30, 17
 	shown := 0
-	for i, d := range s.danmaku {
+	for _, d := range s.danmaku {
 		age := at - d.At
 		if age < 0 || age >= flight {
 			continue
 		}
+		l, ok := s.dmLane[d]
+		if ok && l < 0 {
+			continue
+		}
 		tw, _ := c.MeasureText(0, ui.Span{Text: d.Text, Size: size, Weight: 600})
+		if !ok {
+			l = s.place(d, tw, w)
+		}
+		if l < 0 {
+			continue
+		}
 		x := w - float32(age)/float32(flight)*(w+tw)
-		ui.Text(c, d.Text).Absolute().Top(float32(14+(s.dmDropped+i)%lanes*lane)).Left(x).FontSize(size).FontWeight(600).
+		ui.Text(c, d.Text).Absolute().Top(float32(14+l*lane)).Left(x).FontSize(size).FontWeight(600).
 			TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine()
 		if shown++; shown == 40 { // a crowd past this reads as noise
 			break
