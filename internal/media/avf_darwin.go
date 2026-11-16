@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"image"
-	"runtime"
 	"structs"
 	"time"
 	"unsafe"
@@ -109,15 +107,7 @@ type File struct {
 	frameDur       time.Duration
 }
 
-// Cocoa autoreleased objects belong to an OS thread, not a Go goroutine.
-func autorelease() func() {
-	runtime.LockOSThread()
-	pool := objc.ID(objc.GetClass("NSAutoreleasePool")).Send(sel("alloc")).Send(sel("init"))
-	return func() { pool.Send(sel("drain")); runtime.UnlockOSThread() }
-}
-
 func Open(path string) (*File, error) {
-	defer autorelease()()
 	url := objc.ID(clsURL).Send(sel("fileURLWithPath:"), nsString(path))
 	asset := objc.ID(clsAsset).Send(sel("URLAssetWithURL:options:"), url, objc.ID(0))
 	if asset == 0 {
@@ -134,7 +124,6 @@ func Open(path string) (*File, error) {
 	}
 	f.vtrack, f.atrack = track("vide"), track("soun")
 	if f.vtrack == 0 {
-		f.Close()
 		return nil, errors.New("media: no video track")
 	}
 	f.Duration = objc.Send[cmTime](asset, sel("duration")).dur()
@@ -168,7 +157,6 @@ func (f *File) reader(track objc.ID, settings objc.ID, start time.Duration) (rd,
 	}
 	rd.Send(sel("retain"))
 	if !objc.Send[bool](rd, sel("startReading")) {
-		rd.Send(sel("release"))
 		return 0, 0, errors.New("media: startReading failed")
 	}
 	return rd, out, nil
@@ -179,7 +167,6 @@ func (f *File) Close() { f.asset.Send(sel("release")) }
 
 // VideoDecoder implements ui.VideoDecoder, with frames as RGBA.
 type VideoDecoder struct {
-	frame *image.RGBA
 	f       *File
 	rd, out objc.ID
 }
@@ -193,7 +180,6 @@ func (v *VideoDecoder) Rewind() error { return v.RewindTo(0) }
 
 // RewindTo goes back, or on, to just before the frame at t.
 func (v *VideoDecoder) RewindTo(t time.Duration) error {
-	defer autorelease()()
 	v.close()
 	// 'BGRA' pixel format
 	rd, out, err := v.f.reader(v.f.vtrack, nsDict("PixelFormatType", nsInt(0x42475241)), t)
@@ -202,7 +188,6 @@ func (v *VideoDecoder) RewindTo(t time.Duration) error {
 }
 
 func (v *VideoDecoder) Next() (ui.VideoFrame, error) {
-	defer autorelease()()
 	sb := uintptr(v.out.Send(sel("copyNextSampleBuffer")))
 	if sb == 0 {
 		if st := objc.Send[int](v.rd, sel("status")); st == 4 { // failed
@@ -215,8 +200,7 @@ func (v *VideoDecoder) Next() (ui.VideoFrame, error) {
 	if pb == 0 {
 		return ui.VideoFrame{}, fmt.Errorf("media: sample without image")
 	}
-	v.frame = bgra(pb, v.frame)
-	img := v.frame
+	img := bgra(pb)
 	dur := v.f.frameDur
 	if t := cmSampleBufferGetDuration(sb); t.valid() && t.dur() > 0 {
 		dur = t.dur()
@@ -257,7 +241,6 @@ func (a *AudioDecoder) Channels() int   { return 2 }
 func (a *AudioDecoder) Len() int64      { return int64(a.f.Duration.Seconds() * rate) }
 
 func (a *AudioDecoder) SetPosition(frame int64) error {
-	defer autorelease()()
 	a.close()
 	a.pend = nil
 	settings := nsDict(
@@ -275,7 +258,6 @@ func (a *AudioDecoder) SetPosition(frame int64) error {
 }
 
 func (a *AudioDecoder) Read(buf []float32) (int, error) {
-	defer autorelease()()
 	n := 0
 	for n < len(buf) {
 		if len(a.pend) == 0 {
