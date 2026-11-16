@@ -13,6 +13,10 @@ type nativeSurface struct {
 	player            *streamPlayer
 	element, viewport ui.Element
 	cover             bool
+	// off keeps the picture out of this frame: it sits above the window's
+	// web views, and one showing in a dialog (Douyin's verification) would
+	// show the video in its place.
+	off               bool
 	radius            float32
 	root, frame, clip ui.Rect // last painted geometry, valid outside the build pass
 }
@@ -37,6 +41,9 @@ func (s *nativeSurface) video(c *ui.Context, p videoPlayer, cover bool, viewport
 	stream, ok := p.(*streamPlayer)
 	if !ok || !stream.native || s.window == nil {
 		return video(c, p)
+	}
+	if s.off {
+		return ui.Box(c)
 	}
 	stream.enableNative()
 	if stream.layer == nil {

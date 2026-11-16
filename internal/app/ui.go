@@ -63,6 +63,7 @@ func (a *app) view(c *ui.Context) {
 	t := *ui.DarkTheme()
 	t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
 	a.mainVideo.begin(a.win)
+	a.mainVideo.off = a.loginOpen && a.login.verify && a.web.v != nil // Douyin's page shows in the login (loginPanel)
 	t.Accent, t.AccentText = pal.accent, white
 	t.Selection = pal.accent.Alpha(0.35)
 	t.Font = appFont
