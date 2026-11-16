@@ -221,8 +221,9 @@ type app struct {
 	setLiked, setSaved func(id string, on bool) error
 	// replies pages through a comment's replies; a test puts its own.
 	replies  func(videoID, commentID string) dy.Pager[dy.Comment]
-	listen   bool // 听抖音: the cover in the picture's place, the sound on
-	moreOpen bool // the rail's 更多 menu
+	listen   bool    // 听抖音: the cover in the picture's place, the sound on
+	moreOpen bool    // the rail's 更多 menu
+	upd      updates // checking for new versions and installing them (update.go)
 }
 
 // notes is the notifications, loaded a page at a time.
@@ -1196,16 +1197,40 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now the name in the
-// sidebar's corner. It only reads.
+// clicks would, saves a shot of each step and quits: now updating. It waits
+// for the check to find a newer version, saves the sidebar with its banner,
+// and installs it, which starts the new version in this one's place.
 func (a *app) selfCheck(dir string) {
-	time.Sleep(12 * time.Second) // the account and the first videos
+	found := false
+	for range 90 {
+		ok := make(chan bool)
+		a.post(func() { ok <- a.upd.found != nil })
+		if found = <-ok; found {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	time.Sleep(2 * time.Second) // the sidebar drawn with it
 	b, err := a.win.CapturePage()
 	if err == nil {
 		err = os.WriteFile(filepath.Join(dir, "1.png"), b, 0o644)
 	}
-	log.Println("shot 1.png", err)
-	os.Exit(0)
+	log.Println("update found:", found, "shot 1.png", err)
+	if !found {
+		os.Exit(1)
+	}
+	a.post(a.installUpdate)
+	for range 300 { // the install relaunches the app, ending this one
+		time.Sleep(time.Second)
+		msg := make(chan string)
+		a.post(func() { msg <- a.upd.err })
+		if m := <-msg; m != "" {
+			log.Println(m)
+			os.Exit(1)
+		}
+	}
+	log.Println("no relaunch")
+	os.Exit(1)
 }
 
 // Run opens the window and blocks until it closes.
@@ -1258,6 +1283,7 @@ func Run() error {
 		})
 		a.fill()
 		a.loadAccount()
+		a.watchUpdates()
 		go func() {
 			if n, err := c.Unread(); err == nil {
 				a.post(func() { a.unread = n })

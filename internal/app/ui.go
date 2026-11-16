@@ -252,6 +252,7 @@ func (a *app) sidebar(c *ui.Context) {
 		if nav(iconDrama, "短剧", a.drama, root == a.drama) {
 			a.root(a.drama)
 		}
+		a.updateBanner(c)
 	})
 }
 
