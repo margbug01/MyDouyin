@@ -1353,3 +1353,28 @@ func TestEmojiSpans(t *testing.T) {
 		t.Fatalf("plain: %+v %v", spans, pics)
 	}
 }
+
+// A toast's text shows on its fill: the theme's Background is clear, which
+// toasts took for their text, leaving a blank pill (2026-11-17).
+func TestToastReadable(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 3)}})
+	tt := newTester(a)
+	a.toast = "点赞没成功：抖音没接受"
+	tt.Frame()
+	tt.Advance(time.Second) // faded in
+	tt.Frame()
+	img := tt.Image()
+	b := img.Bounds()
+	bright := func(x, y int) bool { p := img.RGBAAt(x, y); return p.R > 200 && p.G > 200 && p.B > 200 }
+	strokes := 0 // dark pixels between the toast's light fill, at its foot
+	for y := b.Max.Y - 80; y < b.Max.Y; y++ {
+		for x := b.Max.X/2 - 120; x < b.Max.X/2+80; x++ {
+			if p := img.RGBAAt(x, y); int(p.R)+int(p.G)+int(p.B) < 300 && bright(x-4, y) && bright(x+4, y) {
+				strokes++
+			}
+		}
+	}
+	if strokes < 30 {
+		t.Fatalf("the toast shows %d pixels of its text", strokes)
+	}
+}

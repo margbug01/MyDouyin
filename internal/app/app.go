@@ -380,8 +380,7 @@ func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) err
 				*on, *n = !want, *n-step
 				a.toast = onOff(want, "", "取消") + what + "没成功：" + err.Error()
 				if errors.Is(err, dy.ErrNeedLogin) {
-					a.signedIn = false
-					a.openLogin()
+					a.loginLost(onOff(want, "", "取消") + what)
 				}
 			}
 		})
@@ -435,9 +434,28 @@ func (a *app) toggleCommentLike(sh *sheet, id string, reply bool) {
 			}
 			a.toast = onOff(want, "", "取消") + "赞评论没成功：" + err.Error()
 			if errors.Is(err, dy.ErrNeedLogin) {
-				a.signedIn = false
-				a.openLogin()
+				a.loginLost(onOff(want, "", "取消") + "赞评论")
 			}
+		})
+	}()
+}
+
+// loginLost follows a write Douyin refused as 用户未登录: it asks Douyin,
+// from the page, whether the login holds, and only if not shows the login
+// to scan again; holding, the write was refused on its own (what is the
+// toast's), and the login stays.
+func (a *app) loginLost(what string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		in := a.web.pageSignedIn(ctx)
+		cancel()
+		a.post(func() {
+			if in {
+				a.toast = what + "没成功：抖音没接受，登录还在，请稍后再试"
+				return
+			}
+			a.signedIn = false
+			a.openLogin()
 		})
 	}()
 }
@@ -1411,6 +1429,15 @@ func (a *app) selfCheck(dir string) {
 
 // Run opens the window and blocks until it closes.
 func Run() error {
+	// One runs: two would share the login, and Douyin's scripts in each page
+	// renew the device's signing keys, which Douyin then holds the other's
+	// writes against, answering 用户未登录 and ending the session (2026-11-17,
+	// a login lost after test builds ran beside the installed app).
+	if !mygo.App.RequestSingleInstanceLock() {
+		log.Println("douyin: already running")
+		return nil
+	}
+	mygo.App.OnSecondInstance(func([]string, string) { mygo.App.Focus() })
 	c, err := dy.New()
 	if err != nil {
 		return err

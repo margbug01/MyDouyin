@@ -65,6 +65,7 @@ func (a *app) view(c *ui.Context) {
 	a.mainVideo.begin(a.win)
 	a.mainVideo.off = a.loginOpen && a.login.verify && a.web.v != nil // Douyin's page shows in the login (loginPanel)
 	t.Accent, t.AccentText = pal.accent, white
+	t.Inverse, t.InverseText = white, pal.bg // toasts': by default the text is the Background, clear here
 	t.Selection = pal.accent.Alpha(0.35)
 	t.Font = appFont
 	c.SetTheme(&t)
