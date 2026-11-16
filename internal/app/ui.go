@@ -3,10 +3,12 @@ package app
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
@@ -855,7 +857,8 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 		if ok && l < 0 {
 			continue
 		}
-		tw, _ := c.MeasureText(0, ui.Span{Text: d.Text, Size: size, Weight: 600})
+		spans, pics := a.emojiSpans(d.Text, size, 600)
+		tw, _ := c.MeasureText(0, spans...)
 		if !ok {
 			l = s.place(d, tw, w)
 		}
@@ -863,8 +866,8 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 			continue
 		}
 		x := w - float32(age)/float32(flight)*(w+tw)
-		ui.Text(c, d.Text).Absolute().Top(float32(14+l*lane)).Left(x).FontSize(size).FontWeight(600).
-			TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine()
+		ui.RichText(c, spans...).Absolute().Top(float32(14+l*lane)).Left(x).FontSize(size).FontWeight(600).Label(d.Text).
+			TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine().DrawObjects(pics.draw)
 		if shown++; shown == 40 { // a crowd past this reads as noise
 			break
 		}
@@ -1611,7 +1614,7 @@ func (a *app) commentText(c *ui.Context, sh *sheet, cm dy.Comment, size float32,
 		who += " ▸ " + cm.ReplyTo
 	}
 	ui.Text(c, who).FontSize(size - 2).TextColor(pal.muted).SingleLine()
-	ui.Text(c, cm.Text).FontSize(size).TextColor(pal.text)
+	a.commentBody(c, cm, size)
 	meta := ago(cm.Time, time.Now())
 	if cm.Place != "" {
 		meta += " · " + cm.Place
@@ -1631,6 +1634,77 @@ func (a *app) commentText(c *ui.Context, sh *sheet, cm dy.Comment, size float32,
 			a.toggleCommentLike(sh, cm.ID, reply)
 		}
 	})
+}
+
+// emojiName finds what may name an emoji in a comment, as [捂脸].
+var emojiName = regexp.MustCompile(`\[[^\[\]]{1,8}\]`)
+
+// emojiPics are the pictures of a text's emoji, by the rune of their object.
+type emojiPics map[int]*ui.Bitmap
+
+func (e emojiPics) draw(p *ui.Painter, at int, r ui.Rect) { p.Image(e[at], r, ui.Contain) }
+
+// emojiSpans are text in size and weight, the emoji it names objects in it,
+// as Douyin draws them, whose pictures pics draws (Element.DrawObjects). A
+// name not among a.emoji stays text; a.emoji loads once first asked for.
+func (a *app) emojiSpans(text string, size float32, weight int) ([]ui.Span, emojiPics) {
+	if a.emoji == nil && a.c != nil {
+		a.emoji = map[string]string{} // asked once; asked again if this fails
+		go func() {
+			m, err := a.c.Emojis()
+			a.post(func() {
+				if err != nil {
+					a.emoji = nil
+				} else {
+					a.emoji = m
+				}
+			})
+		}()
+	}
+	var spans []ui.Span
+	var pics emojiPics
+	runes, last := 0, 0
+	for _, m := range emojiName.FindAllStringIndex(text, -1) {
+		u := a.emoji[text[m[0]:m[1]]]
+		if u == "" {
+			continue
+		}
+		before := text[last:m[0]]
+		spans = append(spans, ui.Span{Text: before, Size: size, Weight: weight},
+			ui.Span{Text: "\uFFFC", ObjectWidth: size * 1.3, ObjectHeight: size * 1.1, ObjectDescent: size * 0.2})
+		runes += utf8.RuneCountInString(before)
+		if pics == nil {
+			pics = emojiPics{}
+		}
+		pics[runes] = a.img.get(u)
+		runes++
+		last = m[1]
+	}
+	return append(spans, ui.Span{Text: text[last:], Size: size, Weight: weight}), pics
+}
+
+// commentBody is a comment's text, with the emoji it names drawn in it, as
+// Douyin's, then its pictures.
+func (a *app) commentBody(c *ui.Context, cm dy.Comment, size float32) {
+	if cm.Text != "" {
+		spans, pics := a.emojiSpans(cm.Text, size, 0)
+		ui.RichText(c, spans...).FontSize(size).TextColor(pal.text).Label(cm.Text).DrawObjects(pics.draw)
+	}
+	for i, u := range cm.Pics {
+		const edge = 120
+		bmp := a.img.get(u)
+		w, h := float32(edge), float32(edge)
+		if bmp != nil {
+			bw, bh := bmp.Size()
+			s := edge / float32(max(bw, bh))
+			w, h = float32(bw)*s, float32(bh)*s
+		}
+		ui.Box(c.Key(fmt.Sprint("pic", i))).Size(w, h).Radius(8).Clip().Background(pal.hover).Margin(2, 0, 0, 0).Children(func() {
+			if bmp != nil {
+				ui.Image(c, bmp).Size(w, h)
+			}
+		})
+	}
 }
 
 // replyThread is under a comment with replies, as Douyin's: the replies once

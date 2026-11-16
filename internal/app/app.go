@@ -179,8 +179,9 @@ type app struct {
 	follows   []dy.User // the accounts it follows, atop 关注
 	followMsg string    // why they did not load
 
-	picks, feed *page   // the roots: 精选's covers, 推荐's videos one by one
-	img         *images // covers and avatars
+	picks, feed *page             // the roots: 精选's covers, 推荐's videos one by one
+	img         *images           // covers and avatars
+	emoji       map[string]string // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
 
 	// The sidebar's other roots, each a grid; nil where there is no client.
 	follow, friends, live, drama *page
@@ -1376,40 +1377,30 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now updating. It waits
-// for the check to find a newer version, saves the sidebar with its banner,
-// and installs it, which starts the new version in this one's place.
+// clicks would, saves a shot of each step and quits: now the comments'
+// emoji and pictures. It opens the comments of each video DY_SHOT_VIDEOS
+// names, comma separated, and saves them once loaded (1.png, 2.png…).
 func (a *app) selfCheck(dir string) {
-	found := false
-	for range 90 {
-		ok := make(chan bool)
-		a.post(func() { ok <- a.upd.found != nil })
-		if found = <-ok; found {
-			break
-		}
-		time.Sleep(time.Second)
-	}
-	time.Sleep(2 * time.Second) // the sidebar drawn with it
-	b, err := a.capture(a.win)
-	if err == nil {
-		err = os.WriteFile(filepath.Join(dir, "1.png"), b, 0o644)
-	}
-	log.Println("update found:", found, "shot 1.png", err)
-	if !found {
-		os.Exit(1)
-	}
-	a.post(a.installUpdate)
-	for range 300 { // the install relaunches the app, ending this one
-		time.Sleep(time.Second)
-		msg := make(chan string)
-		a.post(func() { msg <- a.upd.err })
-		if m := <-msg; m != "" {
-			log.Println(m)
+	time.Sleep(3 * time.Second) // the feed up
+	for i, id := range strings.Split(os.Getenv("DY_SHOT_VIDEOS"), ",") {
+		v, err := a.c.Video(id)
+		if err != nil {
+			log.Println("video:", err)
 			os.Exit(1)
 		}
+		a.post(func() {
+			mygo.App.Focus() // a window under others is not drawn, nor its shot
+			a.open(&page{title: "评论", done: true, list: []*slot{{v: v}}})
+			a.comments(v)
+		})
+		time.Sleep(15 * time.Second) // the comments, the emoji and the pictures loaded
+		b, err := a.capture(a.win)
+		if err == nil {
+			err = os.WriteFile(filepath.Join(dir, fmt.Sprint(i+1, ".png")), b, 0o644)
+		}
+		log.Println("shot", i+1, id, err)
 	}
-	log.Println("no relaunch")
-	os.Exit(1)
+	os.Exit(0)
 }
 
 // Run opens the window and blocks until it closes.

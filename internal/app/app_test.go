@@ -1305,3 +1305,51 @@ func TestCommentLike(t *testing.T) {
 		t.Fatalf("no reason shown: %q", tt.Texts())
 	}
 }
+
+// A comment's emoji Douyin names are asked for and drawn in its text, a name
+// it does not know stays text, and its pictures are asked for under it.
+func TestCommentEmojiAndPics(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 3)}})
+	asked := make(chan string, 8)
+	a.img = newImages(func(u string) ([]byte, error) { asked <- u; return nil, errors.New("offline") }, func(func()) {})
+	a.emoji = map[string]string{"[赞]": "emoji:赞"}
+	a.sheet = &sheet{total: 1, done: true, items: []dy.Comment{{ID: "c1", Author: "甲", Text: "好[赞]看[不认识]", Pics: []string{"pic:1"}}}}
+	tt := newTester(a)
+	tt.Frame()
+	got := map[string]bool{}
+	for range 2 {
+		select {
+		case u := <-asked:
+			got[u] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("asked for %v", got)
+		}
+	}
+	select {
+	case u := <-asked:
+		got[u] = true
+	case <-time.After(200 * time.Millisecond):
+	}
+	if len(got) != 2 || !got["emoji:赞"] || !got["pic:1"] {
+		t.Fatalf("asked for %v", got)
+	}
+	if !tt.HasText("好[赞]看[不认识]") { // what is read out keeps the names
+		t.Fatalf("text shows %q", tt.Texts())
+	}
+}
+
+// emojiSpans makes each emoji Douyin names an object at its rune, as for
+// bullet comments, in the text's size and weight; other names stay text.
+func TestEmojiSpans(t *testing.T) {
+	a := &app{emoji: map[string]string{"[赞]": "e"}}
+	spans, pics := a.emojiSpans("好看[赞][不认识]啊", 17, 600)
+	if len(spans) != 3 || spans[0].Text != "好看" || spans[1].ObjectWidth == 0 || spans[2].Text != "[不认识]啊" || spans[2].Weight != 600 {
+		t.Fatalf("spans %+v", spans)
+	}
+	if _, ok := pics[2]; !ok || len(pics) != 1 {
+		t.Fatalf("pics %v", pics)
+	}
+	if spans, pics := a.emojiSpans("没有表情", 17, 600); len(spans) != 1 || pics != nil {
+		t.Fatalf("plain: %+v %v", spans, pics)
+	}
+}

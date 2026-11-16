@@ -1,11 +1,13 @@
 package dy
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/egoist/mygo/ui"
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -476,4 +478,34 @@ func TestLiveReplies(t *testing.T) {
 		t.Fatalf("replies: %d, %v", len(rs), err)
 	}
 	t.Logf("%d replies, first %q by %q", len(rs), rs[0].Text, rs[0].Author)
+}
+
+// A comment's images and sticker, as the lists give them, are its pictures.
+func TestCommentPics(t *testing.T) {
+	var x comment
+	err := json.Unmarshal([]byte(`{"cid":"1","text":"好[赞]","image_list":[{"medium_url":{"url_list":["i1","i2"]}},{"medium_url":{"url_list":[]}}],
+		"sticker":{"static_url":{"url_list":["s1"]},"animate_url":{"url_list":["a1"]}}}`), &x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm := x.comment(); cm.Text != "好[赞]" || !slices.Equal(cm.Pics, []string{"i1", "s1"}) {
+		t.Fatalf("comment: %+v", cm)
+	}
+	if err := json.Unmarshal([]byte(`{"cid":"2","text":"t","sticker":null,"image_list":null}`), &x); err != nil || x.comment().Pics != nil {
+		t.Fatalf("plain comment: %v %v", err, x.comment().Pics)
+	}
+}
+
+func TestLiveEmojis(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("LIVE not set")
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := c.Emojis()
+	if err != nil || len(m) < 100 || m["[赞]"] == "" || m["[捂脸]"] == "" {
+		t.Fatalf("%d emoji, [赞] %q: %v", len(m), m["[赞]"], err)
+	}
 }

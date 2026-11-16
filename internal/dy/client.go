@@ -673,7 +673,8 @@ type Comment struct {
 	ReplyTo                 string // in a reply to a reply, whom it answers
 	Likes, Replies          int
 	Time                    time.Time
-	Liked                   bool // the user logged in has liked it
+	Liked                   bool     // the user logged in has liked it
+	Pics                    []string // pictures it carries, its images then its sticker; Text has its [表情] (Emojis)
 }
 
 // comment is a comment as the lists give it.
@@ -690,11 +691,48 @@ type comment struct {
 	Place   string `json:"ip_label"`
 	ReplyTo string `json:"reply_to_username"`
 	Digged  int    `json:"user_digged"`
+	Images  []struct {
+		Medium addr `json:"medium_url"`
+	} `json:"image_list"`
+	Sticker *struct {
+		Static addr `json:"static_url"` // a GIF, animated or not
+	}
 }
 
 func (x comment) comment() Comment {
-	return Comment{ID: x.CID, Author: x.User.Nickname, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
+	cm := Comment{ID: x.CID, Author: x.User.Nickname, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
 		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0), Liked: x.Digged != 0}
+	for _, im := range x.Images {
+		if u := im.Medium.first(); u != "" {
+			cm.Pics = append(cm.Pics, u)
+		}
+	}
+	if x.Sticker != nil && x.Sticker.Static.first() != "" {
+		cm.Pics = append(cm.Pics, x.Sticker.Static.first())
+	}
+	return cm
+}
+
+// Emojis are Douyin's emoji, the pictures of the names comments write them
+// with, as [微笑].
+func (c *Client) Emojis() (map[string]string, error) {
+	var r struct {
+		status
+		List []struct {
+			Name string `json:"display_name"`
+			URL  addr   `json:"emoji_url"`
+		} `json:"emoji_list"`
+	}
+	if err := c.getJSON("/aweme/v1/web/emoji/list", "", &r); err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(r.List))
+	for _, e := range r.List {
+		if u := e.URL.first(); e.Name != "" && u != "" {
+			m[e.Name] = u
+		}
+	}
+	return m, nil
 }
 
 // Comments pages through a video's comments, as Douyin orders them.
