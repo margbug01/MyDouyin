@@ -240,6 +240,11 @@ type app struct {
 	settingsOpen bool     // the settings dialog (settings.go)
 	settingsFile string   // where the settings are kept, "" not to keep them
 	saved        settings // as last written
+
+	web       web  // the app's Douyin page, which logs in and writes (web.go)
+	signedIn  bool // WebKit holds a login
+	loginOpen bool // Douyin's login shows over the window
+	loginGen  int  // counts the logins shown, each waited for once
 }
 
 // notes is the notifications, loaded a page at a time.
@@ -364,6 +369,9 @@ func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) err
 			if err != nil {
 				*on, *n = !want, *n-step
 				a.toast = onOff(want, "", "取消") + what + "没成功：" + err.Error()
+				if errors.Is(err, dy.ErrNeedLogin) {
+					a.openLogin()
+				}
 			}
 		})
 	}()
@@ -906,6 +914,7 @@ func (a *app) loadAccount() {
 		me, err := a.c.Self()
 		var us []dy.User
 		later, _ := a.c.WatchLater()() // the first page, enough to mark most
+		unread, _ := a.c.Unread()
 		if err == nil {
 			next := a.c.Following(me.ID)
 			for {
@@ -920,7 +929,7 @@ func (a *app) loadAccount() {
 			}
 		}
 		a.post(func() {
-			a.me, a.follows = me, us
+			a.me, a.follows, a.unread = me, us, unread
 			if a.later == nil {
 				a.later, a.laterBusy = map[string]bool{}, map[string]bool{}
 			}
@@ -1344,8 +1353,10 @@ func Run() error {
 		if a.me.UID == "" {
 			return errors.New("账号还没载入")
 		}
-		return c.SendDanmaku(id, a.me.UID, at, text, false)
+		return c.SendDanmaku(id, a.me.UID, at, text)
 	}
+	a.web.a = a
+	c.SetWeb(&a.web)
 	a.setSpeed(1)
 	a.loadSettings(settingsFile())
 	os.RemoveAll(a.dir) // leftovers of a crashed run
@@ -1372,19 +1383,18 @@ func Run() error {
 			}
 			a.setPip(false)
 		})
-		a.fill()
-		a.loadAccount()
+		a.startLogin()
 		a.watchUpdates()
 		go func() {
-			if n, err := c.Unread(); err == nil {
-				a.post(func() { a.unread = n })
-			}
 			if hot, err := c.HotSearch(); err == nil {
 				a.post(func() { a.hot = hot })
 			}
 		}()
 		if dir := os.Getenv("DY_SHOT"); dir != "" {
 			go a.selfCheck(dir)
+		}
+		if id := os.Getenv("DY_LIVE_WRITE"); id != "" {
+			go a.liveWriteCheck(id)
 		}
 	})
 	log.Println("douyin: running")

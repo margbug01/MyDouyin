@@ -81,11 +81,15 @@ func (a *app) view(c *ui.Context) {
 	}
 	p := a.cur()
 	root.Children(func() {
+		if a.web.v != nil && a.web.layout && !a.loginOpen {
+			// Laid out for a script, under the app: the rows paint over it.
+			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0)
+		}
 		if a.theater && p.plays() { // 网页全屏: the video alone, filling the window
-			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() { a.stage(c, p) })
+			ui.Row(c).Fill().AlignItems(ui.Stretch).Background(pal.bg).Children(func() { a.stage(c, p) })
 			return
 		}
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Background(pal.bg).Children(func() {
 			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
 			ui.Column(c.Key("main")).Grow(1).Children(func() {
 				a.topBar(c, p)
@@ -125,6 +129,7 @@ func (a *app) view(c *ui.Context) {
 		a.searchList(c)
 	}
 	a.settingsDialog(c)
+	a.loginPanel(c)
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
@@ -233,6 +238,9 @@ func (a *app) sidebar(c *ui.Context) {
 		}
 		if nav(iconUser, "我的", a.mine[a.mineTab], a.isMine(root)) {
 			a.showMine(a.mineTab)
+		}
+		if a.c != nil && !a.signedIn && a.navItem(c, iconUser, "登录", a.loginOpen).Clicked() {
+			a.openLogin()
 		}
 		divider()
 		if a.live != nil {
@@ -1182,8 +1190,8 @@ func (a *app) volumeButton(c *ui.Context) {
 
 // rail is the column down the right of the video, as Douyin's: the author,
 // the likes, the comments, the saves, sharing, listening, and more. A like
-// or a save shows at once and goes to Douyin through ego lite, some seconds
-// on; the button is dimmed till then. On a short stage the column shrinks
+// or a save shows at once and goes to Douyin through the app's page, a
+// moment on (some seconds the first time); the button is dimmed till then. On a short stage the column shrinks
 // to fit.
 func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 	icon, gap := float32(34), float32(14)
@@ -1266,7 +1274,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 
 // sharePanel opens beside the rail's 分享, as Douyin's: a search, the
 // accounts followed, each with a button that sends them the video in a
-// direct message (through ego lite, some seconds on), and below, copying
+// direct message (through the app's page, some seconds on), and below, copying
 // its link, saving it, and opening it on the web.
 func (a *app) sharePanel(c *ui.Context, anchor ui.Element, s *slot) {
 	ui.PopoverBase(c.Key("share-panel"), anchor, &a.shareOpen, func(panel ui.Element) {

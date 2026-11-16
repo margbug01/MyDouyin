@@ -107,6 +107,24 @@ func (a *app) settingsDialog(c *ui.Context) {
 				control()
 			})
 		}
+		if a.c != nil {
+			section("账号")
+			who := "没登录"
+			if a.signedIn {
+				who = a.me.Name
+			}
+			row("抖音账号", who, func() {
+				if !a.signedIn {
+					if ui.Button(c.Key("login"), "扫码登录").Clicked() {
+						a.settingsOpen = false
+						a.openLogin()
+					}
+				} else if ui.Button(c.Key("logout"), "退出登录").Clicked() {
+					a.settingsOpen = false
+					a.logout()
+				}
+			})
+		}
 		section("播放")
 		row("连播", "一个视频播完接着播下一个", func() { ui.Switch(c.Key("autoNext"), &a.autoNext).Label("连播开关") })
 		on := !a.dmOff

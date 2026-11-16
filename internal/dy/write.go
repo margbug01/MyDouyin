@@ -1,29 +1,198 @@
 package dy
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"sync"
 	"time"
 )
 
-// Liking and saving go through the user's own browser, ego lite: Douyin's
-// write endpoints want a header bound to the browser's device
-// (x-tt-session-dtrait), which only its page makes. The page adds it, with
-// the ticket guard's and the signature, to a fetch it sends itself
-// (checked 2026-11-16). Each write opens Douyin in a task space of its own,
-// sends the request there, exports the cookies it leaves renewed, and
-// closes: a Douyin page left open renews the session by itself, which would
-// make the client's copy of the cookies stale.
+// Writes (likes, saves, 稍后再看, bullet comments, shares) go through Web,
+// a Douyin page of the app's own, logged in there by the user's scan: its
+// scripts add what a write needs, the signature, the ticket guard's headers
+// and x-tt-session-dtrait, which binds the session to the device it was
+// made on. Never send a write from Go with the session's cookies: Douyin
+// answers 用户未登录 and logs the session out everywhere (2026-11-16, a
+// login was lost so).
+type Web interface {
+	// Eval runs js, the body of an async function, in the page once its
+	// scripts are up, and returns the JSON of what it returns.
+	Eval(ctx context.Context, js string) ([]byte, error)
+	// Load goes to url, and lays the page out, hidden under the app, while
+	// layout: what a script finds by its place needs it.
+	Load(ctx context.Context, url string, layout bool) error
+	// Cookies are the page's douyin.com cookies.
+	Cookies() ([]Cookie, error)
+}
+
+// Cookie is a cookie as cookies.json keeps it.
+type Cookie struct {
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Domain   string `json:"domain"`
+	Path     string `json:"path"`
+	Expires  int64  `json:"expires"`
+	Secure   bool   `json:"secure"`
+	HTTPOnly bool   `json:"httpOnly"`
+}
+
+// LoggedIn tells whether cookies hold a login.
+func LoggedIn(cs []Cookie) bool {
+	for _, ck := range cs {
+		if ck.Name == "sessionid" && ck.Value != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// SetWeb gives the client the page its writes go through.
+func (c *Client) SetWeb(w Web) { c.web = w }
+
+// SaveCookies keeps cs as the client's login, in cookies.json too.
+func (c *Client) SaveCookies(cs []Cookie) error {
+	file, err := cookieFile()
+	if err != nil {
+		return err
+	}
+	b, _ := json.Marshal(cs)
+	if err := writePrivate(file, b); err != nil {
+		return err
+	}
+	return c.ReloadCookies()
+}
+
+// Logout forgets the login, its cookies and ticket guard material; the
+// client goes on anonymous.
+func (c *Client) Logout() error {
+	for _, f := range []func() (string, error){cookieFile, guardFile} {
+		if p, err := f(); err == nil {
+			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+	}
+	return c.anonymous()
+}
+
+// writePrivate writes a file only the user reads, whole or not at all.
+func writePrivate(path string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path+".tmp", b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
+// writeMu keeps writes one at a time: they share the page.
+var writeMu sync.Mutex
+
+var (
+	errNoWeb = errors.New("要先扫码登录抖音")
+	// ErrNeedLogin is a write Douyin refused for want of a login.
+	ErrNeedLogin  = errors.New("抖音说没登录，请重新扫码登录")
+	okReply       = regexp.MustCompile(`"status_code":0[,}]`)
+	loggedOutText = regexp.MustCompile(`"status_code":8[,}]`)
+)
+
+const form = "application/x-www-form-urlencoded; charset=UTF-8"
+
+// write sends a form to a write endpoint.
+func (c *Client) write(path, body string) error {
+	return c.post(path, "", body, form)
+}
+
+// post sends a POST to a write endpoint, with query and a body of type,
+// from the page, and saves the cookies it leaves renewed.
+func (c *Client) post(path, query, body, typ string) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	if c.web == nil {
+		return errNoWeb
+	}
+	u := "https://www-hj.douyin.com" + path + "?device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0"
+	if query != "" {
+		u += "&" + query
+	}
+	args, _ := json.Marshal([]string{u, typ, body})
+	js := "const [u, type, body] = " + string(args) + `;
+const r = await fetch(u, { method: "POST", credentials: "include", headers: { "content-type": type }, body });
+return { http: r.status, text: (await r.text()).slice(0, 300) };`
+	var r struct {
+		HTTP int
+		Text string
+	}
+	var err error
+	for try := range 3 {
+		if try > 0 {
+			time.Sleep(time.Second) // a page just loaded may sign only once its scripts settle
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		var b []byte
+		b, err = c.web.Eval(ctx, js)
+		cancel()
+		if err == nil {
+			err = json.Unmarshal(b, &r)
+		}
+		switch {
+		case err != nil:
+		case r.HTTP == 200 && okReply.MatchString(r.Text):
+			c.syncCookies()
+			return nil
+		case loggedOutText.MatchString(r.Text):
+			return ErrNeedLogin
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("抖音没接受：%.200s", r.Text)
+}
+
+// syncCookies saves the page's cookies, which it renews as it goes, while
+// they hold the login.
+func (c *Client) syncCookies() {
+	if cs, err := c.web.Cookies(); err == nil && LoggedIn(cs) {
+		c.SaveCookies(cs)
+	}
+}
+
+// RefreshGuard saves the ticket guard's material (guard.go), which the page
+// keeps in its localStorage.
+func (c *Client) RefreshGuard() error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	if c.web == nil {
+		return errNoWeb
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	b, err := c.web.Eval(ctx, `const j = (k) => JSON.parse(localStorage.getItem(k) || "null");
+const cr = j("security-sdk/s_sdk_crypt_sdk"), s = j("security-sdk/s_sdk_sign_data_key/web_protect"), v = j("security-sdk/s_sdk_server_cert_key");
+if (!cr || !s || !v) return null;
+const cd = JSON.parse(cr.data), sd = JSON.parse(s.data);
+return { ticket: sd.ticket, ts_sign: sd.ts_sign, private_key: cd.ec_privateKey, server_cert: v.cert };`)
+	if err != nil {
+		return err
+	}
+	var g guard
+	if err := json.Unmarshal(b, &g); err != nil || g.Ticket == "" || g.PrivateKey == "" || g.ServerCert == "" {
+		return errors.New("抖音页面里没有签名素材，可能没登录")
+	}
+	file, err := guardFile()
+	if err != nil {
+		return err
+	}
+	return writePrivate(file, b)
+}
 
 // SetLiked likes the video with the given ID, or takes the like back.
 func (c *Client) SetLiked(id string, on bool) error {
@@ -42,250 +211,23 @@ func b2i(b bool) int {
 	return 0
 }
 
-// writeMu keeps writes one at a time: they share the browser's task space.
-var writeMu sync.Mutex
-
-// egoBrowser finds the ego lite command, which an app opened from the
-// Finder does not have on its PATH.
-func egoBrowser() (string, error) {
-	if p, err := exec.LookPath("ego-browser"); err == nil {
-		return p, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	p := filepath.Join(home, ".local", "bin", "ego-browser")
-	if _, err := os.Stat(p); err != nil {
-		return "", errors.New("点赞和收藏要用 ego lite，没找到 ego-browser 命令")
-	}
-	return p, nil
-}
-
-// egoLib is what every script run in ego lite starts with: the task space,
-// and done, which saves the cookies and the ticket guard's material
-// (guard.go) if the login still holds, closes the space and prints the
-// result for the client.
-const egoLib = `
-const task = await taskSpace("mydouyin write");
-const out = { ok: false };
-const done = async (page) => {
-  try {
-    if (page) {
-      const self = await page.evaluate(async () => (await fetch("/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&channel=channel_pc_web", { credentials: "include" }).then(r => r.text())).match(/"status_code":\d+/)?.[0]);
-      const { cookies } = await page.cdp("Network.getCookies", { urls: ["https://www.douyin.com/", "https://douyin.com/", "https://www-hj.douyin.com/"] });
-      if (self === '"status_code":0' && cookies.some(c => c.name === "sessionid")) {
-        const fs = await import("node:fs/promises");
-        await fs.writeFile(COOKIES + ".tmp", JSON.stringify(cookies), { mode: 0o600 });
-        await fs.rename(COOKIES + ".tmp", COOKIES);
-        out.cookies = cookies.length;
-        const guard = await page.evaluate(() => {
-          const j = (k) => JSON.parse(localStorage.getItem(k) || "null");
-          const c = j("security-sdk/s_sdk_crypt_sdk"), s = j("security-sdk/s_sdk_sign_data_key/web_protect"), v = j("security-sdk/s_sdk_server_cert_key");
-          if (!c || !s || !v) return null;
-          const cd = JSON.parse(c.data), sd = JSON.parse(s.data);
-          return { ticket: sd.ticket, ts_sign: sd.ts_sign, private_key: cd.ec_privateKey, server_cert: v.cert };
-        });
-        if (guard && guard.ticket && guard.private_key && guard.server_cert) {
-          await fs.writeFile(GUARD + ".tmp", JSON.stringify(guard), { mode: 0o600 });
-          await fs.rename(GUARD + ".tmp", GUARD);
-          out.guard = true;
-        }
-      } else {
-        out.loggedOut = true;
-      }
-    }
-  } catch (e) {
-    out.error = out.error || String(e);
-  } finally {
-    await task.finish({ keep: [] });
-  }
-  console.log("MYDOUYIN " + JSON.stringify(out));
-};
-`
-
-// writeScript sends a POST to a write endpoint, with query a form or JSON
-// body of type, from a Douyin page without a video playing, retrying while
-// the page's scripts load. The page starts the request and answers at
-// once, its result read after: an evaluation waiting on a request ego lite
-// holds would hold every call after it. With dry the request is stopped as
-// it leaves, the page's headers on it, and reported.
-const writeScript = `
-const [path, query, body, type, dry] = ARGS;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-let page;
-try {
-  page = task.page("p1");
-  await page.goto("https://www.douyin.com/user/self", { timeout: 40000 });
-  if (dry) await page.cdp("Fetch.enable", { patterns: [{ urlPattern: "*" + path + "*", requestStage: "Request" }] });
-  for (let i = 0; i < 12 && !out.ok && !out.dry; i++) {
-    await sleep(i == 0 ? 2500 : 1000);
-    await page.evaluate(([path, query, body, type]) => {
-      window.__dyWrite = null;
-      fetch("https://www-hj.douyin.com" + path + "?device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0" + (query ? "&" + query : ""), {
-        method: "POST", credentials: "include", headers: { "content-type": type }, body })
-        .then(async r => { window.__dyWrite = { http: r.status, text: (await r.text()).slice(0, 300) }; })
-        .catch(e => { window.__dyWrite = { http: 0, text: String(e) }; });
-    }, [path, query, body, type]);
-    const until = Date.now() + 15000;
-    let r = null;
-    while (Date.now() < until && !r) {
-      if (dry) {
-        for (const e of await page.events()) {
-          if (e.method !== "Fetch.requestPaused") continue;
-          if (e.params.request.method !== "POST") { await page.cdp("Fetch.continueRequest", { requestId: e.params.requestId }).catch(() => {}); continue; }
-          await page.cdp("Fetch.failRequest", { requestId: e.params.requestId, errorReason: "BlockedByClient" }).catch(() => {});
-          const guarded = /bd-ticket-guard-client-data/i.test(Object.keys(e.params.request.headers).join(","));
-          out.dry = true;
-          out.ok = guarded;
-          out.reply = "演练：发送已拦下，" + (guarded ? "带着安全头" : "没有安全头");
-        }
-        if (out.dry) break;
-      } else {
-        r = await page.evaluate(() => window.__dyWrite);
-      }
-      await sleep(100);
-    }
-    if (r) {
-      out.reply = r.text;
-      out.ok = r.http == 200 && /"status_code":0[,}]/.test(r.text);
-    }
-  }
-  if (dry) await page.cdp("Fetch.disable", {}).catch(() => {});
-} catch (e) {
-  out.error = String(e);
-}
-await done(page);
-`
-
-// guardScript only opens Douyin, for done to export what it keeps.
-const guardScript = `
-let page;
-try {
-  page = task.page("p1");
-  await page.goto("https://www.douyin.com/user/self", { timeout: 40000 });
-  await new Promise(r => setTimeout(r, 2500));
-  out.ok = true;
-} catch (e) {
-  out.error = String(e);
-}
-await done(page);
-`
-
-// egoResult is what a script reports.
-type egoResult struct {
-	OK        bool
-	Reply     string
-	Cookies   int
-	Guard     bool // the ticket guard's material exported
-	LoggedOut bool
-	Error     string
-	Dry       bool // a share stopped before it left, as asked
-}
-
-const form = "application/x-www-form-urlencoded; charset=UTF-8"
-
-// write sends a form to a write endpoint through ego lite.
-func (c *Client) write(path, body string) error {
-	return c.post(path, "", body, form, false)
-}
-
-// post sends a POST to a write endpoint through ego lite; dry stops it as
-// it leaves.
-func (c *Client) post(path, query, body, typ string, dry bool) error {
-	r, err := c.ego(writeScript, path, query, body, typ, map[bool]string{true: "1"}[dry])
-	if err != nil {
-		return err
-	}
-	if r.OK && dry && !r.Dry {
-		return errors.New("演练没拦住发送")
-	}
-	return r.err("抖音没接受")
-}
-
 // SetWatchLater puts the video with the given ID in 稍后再看, or takes it out.
 func (c *Client) SetWatchLater(id string, on bool) error {
 	if on {
 		body, _ := json.Marshal(map[string]any{"item_to_playinfo": map[string]any{id: map[string]int{"play_duration": 0, "loop_status": 0}}, "action_type": 1})
-		return c.post("/aweme/v1/web/watchlater/upsert/", "", string(body), "application/json", false)
+		return c.post("/aweme/v1/web/watchlater/upsert/", "", string(body), "application/json")
 	}
 	body, _ := json.Marshal(map[string]any{"remove_item_ids": []string{id}, "remove_type": 0})
-	return c.post("/aweme/v1/web/watchlater/remove/", "", string(body), "application/json", false)
+	return c.post("/aweme/v1/web/watchlater/remove/", "", string(body), "application/json")
 }
 
 // SendDanmaku posts a bullet comment on the video with the given ID, at
 // where it plays; everyone watching it sees it. uid is the user's own
-// numeric ID (User.UID). dry stops it as it leaves.
-func (c *Client) SendDanmaku(id, uid string, at time.Duration, text string, dry bool) error {
-	if dry {
-		id = "0" // were the stop to fail, Douyin would refuse it: there is no video 0
-	}
+// numeric ID (User.UID).
+func (c *Client) SendDanmaku(id, uid string, at time.Duration, text string) error {
 	q := url.Values{"item_id": {id}, "offset_time": {fmt.Sprint(at.Milliseconds())}, "text": {text}, "user_id": {uid},
 		"enter_from": {"video_detail"}, "previous_page": {"video_detail"}}
-	return c.post("/aweme/v1/web/danmaku/post_v2/", q.Encode(), "", form, dry)
-}
-
-func (r egoResult) err(refused string) error {
-	switch {
-	case r.Error != "":
-		return errors.New("ego lite：" + r.Error)
-	case !r.OK && r.LoggedOut:
-		return errors.New("ego lite 里的抖音没登录，请先在 ego lite 里登录抖音")
-	case !r.OK:
-		return fmt.Errorf("%s：%.200s", refused, r.Reply)
-	}
-	return nil
-}
-
-// ego runs a script in ego lite, one at a time, with args, and reads the
-// cookies it renewed.
-func (c *Client) ego(script string, args ...string) (egoResult, error) {
-	writeMu.Lock()
-	defer writeMu.Unlock()
-	var r egoResult
-	ego, err := egoBrowser()
-	if err != nil {
-		return r, err
-	}
-	file, err := cookieFile()
-	if err != nil {
-		return r, err
-	}
-	a, _ := json.Marshal(args)
-	f, _ := json.Marshal(file)
-	gf, err := guardFile()
-	if err != nil {
-		return r, err
-	}
-	g, _ := json.Marshal(gf)
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, ego, "nodejs")
-	cmd.Stdin = strings.NewReader("const ARGS = " + string(a) + ";\nconst COOKIES = " + string(f) + ";\nconst GUARD = " + string(g) + ";\n" + egoLib + script)
-	var outb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &outb, &outb
-	runErr := cmd.Run()
-	found := false
-	sc := bufio.NewScanner(&outb)
-	sc.Buffer(nil, 1<<20)
-	for sc.Scan() {
-		if line, ok := strings.CutPrefix(sc.Text(), "MYDOUYIN "); ok {
-			found = json.Unmarshal([]byte(line), &r) == nil
-		}
-	}
-	if !found {
-		tail := strings.TrimSpace(outb.String())
-		if len(tail) > 300 {
-			tail = tail[len(tail)-300:]
-		}
-		return r, fmt.Errorf("ego lite 没跑完（%v）：%s", runErr, tail)
-	}
-	if r.Cookies > 0 {
-		if err := c.ReloadCookies(); err != nil {
-			return r, err
-		}
-	}
-	return r, nil
+	return c.post("/aweme/v1/web/danmaku/post_v2/", q.Encode(), "", form)
 }
 
 // ShareTo sends the video with the given ID to someone in a direct message,
@@ -293,26 +235,48 @@ func (c *Client) ego(script string, args ...string) (egoResult, error) {
 // and finds others by name. With dry it goes as far as the message leaving
 // and stops it there, which tests the way without sending anything.
 func (c *Client) ShareTo(videoID, name string, dry bool) error {
-	r, err := c.ego(shareScript, videoID, name, map[bool]string{true: "1"}[dry])
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	if c.web == nil {
+		return errNoWeb
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := c.web.Load(ctx, "https://www.douyin.com/video/"+videoID, true); err != nil {
+		return err
+	}
+	defer c.web.Load(context.Background(), "", false) // hidden again, where it is
+	args, _ := json.Marshal([]any{name, dry})
+	b, err := c.web.Eval(ctx, "const [name, dry] = "+string(args)+";\n"+shareJS)
 	if err != nil {
 		return err
 	}
-	if r.OK && dry && !r.Dry {
-		return errors.New("演练没拦住发送")
+	var r struct {
+		OK, Dry bool
+		Reply   string
 	}
-	return r.err("没分享出去")
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	switch {
+	case r.OK && dry && !r.Dry:
+		return errors.New("演练没拦住发送")
+	case !r.OK:
+		return fmt.Errorf("没分享出去：%.200s", r.Reply)
+	}
+	c.syncCookies()
+	return nil
 }
 
-// shareScript opens the video's page silent, its share panel by hovering
-// the share button, finds the friend's row (by the panel's search if it is
-// not listed), clicks its 分享 and reads what the message's sending
-// (imapi /v1/message/send, protobuf) answered: status is field 3, its
-// message field 4.
-const shareScript = `
-const [id, name, dry] = ARGS;
+// shareJS, in the video's page, opens its share panel as hovering the share
+// button does, finds the friend's row (by the panel's search if it is not
+// listed), clicks its 分享 and reads what the message's sending (imapi
+// /v1/message/send, protobuf) answered: status is field 3, its message
+// field 4. Names compare without spaces and with full-width bars as plain
+// ones: the page shows "斑斓Lab｜AIGC" for the API's "斑斓Lab | AIGC".
+const shareJS = `
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const status = (b64) => {
-  const b = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+const decode = (b) => {
   let i = 0, st = -1, msg = "";
   const varint = () => { let x = 0, s = 0, c; do { c = b[i++]; x += (c & 0x7f) * 2 ** s; s += 7; } while (c & 0x80); return x; };
   while (i < b.length) {
@@ -321,88 +285,73 @@ const status = (b64) => {
     else if (t == 2) { const n = varint(); if (f == 4) msg = new TextDecoder().decode(b.slice(i, i + n)); i += n; }
     else if (t == 1) i += 8; else if (t == 5) i += 4; else break;
   }
-  return [st, msg];
+  return { ok: st === 0, reply: st === 0 ? "OK" : "status " + st + " " + msg };
 };
-let page;
-try {
-  page = task.page("p1");
-  await page.goto("https://www.douyin.com/video/" + id, { timeout: 40000 });
-  for (let i = 0; i < 30; i++) {
-    await sleep(500);
-    if (await page.evaluate(() => !!document.querySelector('[data-e2e="video-share-icon-container"]'))) break;
+const norm = (s) => s.replace(/\s+/g, "").replace(/｜/g, "|");
+const leaves = (root, text) => [...root.querySelectorAll("*")].filter(e => e.children.length === 0 && norm(e.textContent) === norm(text) && e.getBoundingClientRect().width > 0);
+const panelOf = () => { let p = leaves(document, "分享给朋友")[0]; while (p && !p.querySelector("input")) p = p.parentElement; return p; };
+const rowButton = () => {
+  const panel = panelOf();
+  if (!panel) return "no panel";
+  for (const n of leaves(panel, name)) {
+    let row = n;
+    while (row && row !== panel && leaves(row, "分享").length === 0) row = row.parentElement;
+    if (row && row !== panel && leaves(row, "分享").length === 1) return leaves(row, "分享")[0];
   }
-  await page.evaluate(() => document.querySelectorAll("video").forEach(v => { v.muted = true; v.pause(); }));
-  await page.hover('[data-e2e="video-share-icon-container"]', { label: "open the share panel" });
-  // mark finds the panel and the 分享 button of name's row, marking it to click.
-  // Names compare without spaces and with full-width bars as plain ones: the
-  // page shows "斑斓Lab｜AIGC" for the API's "斑斓Lab | AIGC".
-  const mark = () => page.evaluate((name) => {
-    const norm = (s) => s.replace(/\s+/g, "").replace(/｜/g, "|");
-    const leaves = (root, text) => [...root.querySelectorAll("*")].filter(e => e.children.length === 0 && norm(e.textContent) === norm(text) && e.getBoundingClientRect().width > 0);
-    const head = leaves(document, "分享给朋友")[0];
-    if (!head) return "no panel";
-    let panel = head;
-    while (panel && !panel.querySelector("input")) panel = panel.parentElement;
-    if (!panel) return "no panel";
-    for (const n of leaves(panel, name)) {
-      let row = n;
-      while (row && row !== panel && leaves(row, "分享").length === 0) row = row.parentElement;
-      if (row && row !== panel && leaves(row, "分享").length === 1) {
-        leaves(row, "分享")[0].setAttribute("data-agent", "share-to");
-        return "found";
-      }
-    }
-    return "not listed";
-  }, name);
-  let found = "";
-  for (let i = 0; i < 10 && found !== "found"; i++) { await sleep(500); found = await mark(); if (found === "not listed") break; }
-  if (found === "not listed") {
-    await page.evaluate(() => {
-      const head = [...document.querySelectorAll("*")].find(e => e.children.length === 0 && e.textContent.trim() === "分享给朋友" && e.getBoundingClientRect().width > 0);
-      let panel = head; while (panel && !panel.querySelector("input")) panel = panel.parentElement;
-      panel.querySelector("input").setAttribute("data-agent", "share-search");
+  return "not listed";
+};
+// The message leaves by fetch or XMLHttpRequest, which the page's own
+// scripts wrapped as it loaded: these wrap theirs, to see it, or stop it.
+const isSend = (u) => /imapi\.douyin\.com\/v1\/message\/send/.test(String(u));
+window.__mdShare = undefined;
+window.__mdDry = dry;
+if (!window.__mdHooked) {
+  window.__mdHooked = true;
+  const of = window.fetch;
+  window.fetch = function (input, init) {
+    if (!isSend(typeof input === "string" ? input : input && input.url)) return of.apply(this, arguments);
+    if (window.__mdDry) { window.__mdShare = { ok: true, dry: true, reply: "演练：发送已拦下" }; return Promise.reject(new TypeError("blocked")); }
+    return of.apply(this, arguments).then(r => { r.clone().arrayBuffer().then(b => { window.__mdShare = window.__mdDecode(new Uint8Array(b)); }); return r; });
+  };
+  const open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, u) { this.__mdSend = isSend(u); return open.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function () {
+    if (!this.__mdSend) return send.apply(this, arguments);
+    if (window.__mdDry) { window.__mdShare = { ok: true, dry: true, reply: "演练：发送已拦下" }; return; }
+    this.addEventListener("loadend", () => {
+      const r = this.response;
+      window.__mdShare = r instanceof ArrayBuffer ? window.__mdDecode(new Uint8Array(r)) : { ok: this.status === 200, reply: "HTTP " + this.status };
     });
-    await page.fill('[data-agent="share-search"]', name, { clearFirst: true });
-    for (let i = 0; i < 10 && found !== "found"; i++) { await sleep(500); found = await mark(); }
-  }
-  if (found !== "found") {
-    out.reply = found === "no panel" ? "分享面板没打开" : "分享面板里找不到「" + name + "」";
-  } else {
-    if (dry) await page.cdp("Fetch.enable", { patterns: [{ urlPattern: "*imapi.douyin.com/v1/message/send*", requestStage: "Request" }] });
-    else await page.cdp("Network.enable", {});
-    await page.events();
-    await page.click('[data-agent="share-to"]', { label: "share to " + name });
-    const until = Date.now() + 20000;
-    while (Date.now() < until && out.reply === undefined) {
-      for (const e of await page.events()) {
-        if (dry && e.method === "Fetch.requestPaused") {
-          if (e.params.request.method !== "POST") { await page.cdp("Fetch.continueRequest", { requestId: e.params.requestId }).catch(() => {}); continue; }
-          await page.cdp("Fetch.failRequest", { requestId: e.params.requestId, errorReason: "BlockedByClient" }).catch(() => {});
-          out.ok = out.dry = true; out.reply = "演练：发送已拦下";
-        }
-        if (!dry && e.method === "Network.loadingFinished" && e.params.requestId === out.sendId) {
-          const b = await page.cdp("Network.getResponseBody", { requestId: e.params.requestId });
-          const [st, msg] = status(b.base64Encoded ? b.body : btoa(b.body));
-          out.ok = st === 0; out.reply = st === 0 ? "OK" : "status " + st + " " + msg;
-        }
-        if (!dry && e.method === "Network.requestWillBeSent" && /imapi\.douyin\.com\/v1\/message\/send/.test(e.params.request.url) && e.params.request.method === "POST") out.sendId = e.params.requestId;
-      }
-      await sleep(100);
-    }
-    if (out.reply === undefined) out.reply = "等了 20 秒没见到发送";
-    if (dry) await page.cdp("Fetch.disable", {}).catch(() => {});
-  }
-} catch (e) {
-  out.error = String(e);
+    return send.apply(this, arguments);
+  };
 }
-await done(page);
+window.__mdDecode = decode;
+let icon;
+for (let i = 0; i < 40 && !icon; i++) { await sleep(500); icon = document.querySelector('[data-e2e="video-share-icon-container"]'); }
+if (!icon) return { reply: "视频页没载入分享按钮" };
+document.querySelectorAll("video").forEach(v => { v.muted = true; v.pause(); });
+const hover = (e) => { for (const t of ["pointerover", "pointerenter", "mouseover", "mouseenter", "mousemove"]) e.dispatchEvent(new MouseEvent(t, { bubbles: t !== "mouseenter" && t !== "pointerenter", cancelable: true, view: window })); };
+hover(icon);
+let btn = "";
+for (let i = 0; i < 10 && !(btn instanceof Element); i++) { await sleep(500); btn = rowButton(); if (btn === "no panel" && i == 3) icon.click(); if (btn === "not listed") break; }
+if (btn === "not listed") {
+  const input = panelOf().querySelector("input");
+  input.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, name);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  for (let i = 0; i < 10 && !(btn instanceof Element); i++) { await sleep(500); btn = rowButton(); }
+}
+if (!(btn instanceof Element)) return { reply: btn === "no panel" ? "分享面板没打开" : "分享面板里找不到「" + name + "」" };
+btn.click();
+for (let i = 0; i < 200 && window.__mdShare === undefined; i++) await sleep(100);
+return window.__mdShare || { reply: "等了 20 秒没见到发送" };
 `
 
 // DeleteDanmaku takes back a bullet comment of the user's own, by its ID,
 // as the web page's menu on it does (user_type 1: its sender).
 func (c *Client) DeleteDanmaku(danmakuID string) error {
 	q := url.Values{"app_name": {"aweme"}, "format": {"json"}, "user_type": {"1"}, "danmaku_id": {danmakuID}}
-	return c.post("/aweme/v1/web/danmaku/delete_v2/", q.Encode(), "", form, false)
+	return c.post("/aweme/v1/web/danmaku/delete_v2/", q.Encode(), "", form)
 }
 
 // DanmakuRef is a bullet comment as its sender may take it back.

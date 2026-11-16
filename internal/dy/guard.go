@@ -23,11 +23,11 @@ import (
 // a key of the browser's: an HMAC-SHA256 of "ticket=…&path=…&timestamp=…"
 // keyed by HKDF-SHA256 (no salt, no info) of the ECDH secret between the
 // browser's private key and the key of Douyin's server certificate. The
-// page keeps all of it in its localStorage (security-sdk/*), which ego lite
-// exports beside the cookies; signed so, a request passes as the page's
+// page keeps all of it in its localStorage (security-sdk/*), which the
+// app's page gives (RefreshGuard) beside the cookies; signed so, a request passes as the page's
 // (checked against the page's own signature, 2026-11-16).
 
-// guard is that material, as ego lite exports it.
+// guard is that material, as RefreshGuard saves it.
 type guard struct {
 	Ticket     string `json:"ticket"`
 	TsSign     string `json:"ts_sign"`
@@ -37,7 +37,7 @@ type guard struct {
 
 var errNoGuard = errors.New("dy: no ticket guard material")
 
-// guardFile is where ego lite exports the material, beside the cookies.
+// guardFile is where RefreshGuard saves the material, beside the cookies.
 func guardFile() (string, error) {
 	f, err := cookieFile()
 	if err != nil {

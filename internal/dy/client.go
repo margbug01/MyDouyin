@@ -29,7 +29,8 @@ const baseQuery = "device_platform=webapp&aid=6383&channel=channel_pc_web&pc_cli
 type Client struct {
 	http    *http.Client
 	signer  *sign.Signer
-	login   atomic.Pointer[login] // the cookies, which a write through the browser renews
+	login   atomic.Pointer[login] // the cookies, which the app's page renews as it writes
+	web     Web                   // the app's Douyin page, which writes go through (write.go)
 	imSeq   atomic.Int32          // the IM requests' sequence
 	refresh atomic.Int32          // the feed's page, which two lists of it share
 }
@@ -136,7 +137,7 @@ func New() (*Client, error) {
 	return c, err
 }
 
-// cookieFile is where the login's cookies are kept, as ego lite exports them.
+// cookieFile is where the login's cookies are kept, as the app's page has them.
 func cookieFile() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -145,8 +146,7 @@ func cookieFile() (string, error) {
 	return filepath.Join(dir, "Douyin", "cookies.json"), nil
 }
 
-// ReloadCookies reads the login's cookies again, as a write through the
-// browser leaves them renewed.
+// ReloadCookies reads the login's cookies again, as SaveCookies leaves them.
 func (c *Client) ReloadCookies() error {
 	path, err := cookieFile()
 	if err != nil {
@@ -721,8 +721,8 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 
 // Replies pages through the replies to a comment of a video. Their endpoint
 // wants the ticket guard's headers (guard.go): without the material, or
-// with it gone stale (an empty answer), ego lite exports it again, some
-// seconds, and the page is asked once more.
+// with it gone stale (an empty answer), the app's page gives it again and
+// the endpoint is asked once more.
 func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
 	const path = "/aweme/v1/web/comment/list/reply/"
 	cursor := 0
@@ -739,17 +739,13 @@ func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
 				return nil, false, err
 			}
 			if len(b) == 0 && try == 0 {
-				r, err := c.ego(guardScript)
-				if err != nil {
-					return nil, false, err
-				}
-				if err := r.err("没拿到抖音的签名素材"); err != nil {
+				if err := c.RefreshGuard(); err != nil {
 					return nil, false, err
 				}
 			}
 		}
 		if len(b) == 0 {
-			return nil, false, errors.New("抖音没给回复，可能要在 ego lite 里做一次人机验证")
+			return nil, false, errors.New("抖音没给回复，可能要重新扫码登录")
 		}
 		var r struct {
 			status
