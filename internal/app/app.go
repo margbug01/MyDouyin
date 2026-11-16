@@ -231,6 +231,8 @@ type app struct {
 
 	// setLiked and setSaved send a like or a save to Douyin; a test puts its own.
 	setLiked, setSaved func(id string, on bool) error
+	// likeComment likes a comment or a reply of a video, or takes it back; a test puts its own.
+	likeComment func(videoID, cid string, reply, on bool) error
 	// replies pages through a comment's replies; a test puts its own.
 	replies  func(videoID, commentID string) dy.Pager[dy.Comment]
 	listen   bool    // 听抖音: the cover in the picture's place, the sound on
@@ -372,6 +374,59 @@ func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) err
 				if errors.Is(err, dy.ErrNeedLogin) {
 					a.openLogin()
 				}
+			}
+		})
+	}()
+}
+
+// find is the comment or the reply of sh with the given ID, or nil.
+func (sh *sheet) find(id string) *dy.Comment {
+	for i := range sh.items {
+		if sh.items[i].ID == id {
+			return &sh.items[i]
+		}
+	}
+	for _, th := range sh.threads {
+		for i := range th.items {
+			if th.items[i].ID == id {
+				return &th.items[i]
+			}
+		}
+	}
+	return nil
+}
+
+// toggleCommentLike likes the comment of sh with the given ID, or takes the like
+// back, as like does a video's: at once on screen, put back if Douyin did
+// not take it.
+func (a *app) toggleCommentLike(sh *sheet, id string, reply bool) {
+	cm := sh.find(id)
+	if cm == nil || sh.liking[id] || a.likeComment == nil {
+		return
+	}
+	want, step := !cm.Liked, 1
+	if !want {
+		step = -1
+	}
+	cm.Liked, cm.Likes = want, cm.Likes+step
+	if sh.liking == nil {
+		sh.liking = map[string]bool{}
+	}
+	sh.liking[id] = true
+	video := sh.v.ID
+	go func() {
+		err := a.likeComment(video, id, reply, want)
+		a.post(func() {
+			delete(sh.liking, id)
+			if err == nil {
+				return
+			}
+			if cm := sh.find(id); cm != nil { // the list may have grown meanwhile: find it again
+				cm.Liked, cm.Likes = !want, cm.Likes-step
+			}
+			a.toast = onOff(want, "", "取消") + "赞评论没成功：" + err.Error()
+			if errors.Is(err, dy.ErrNeedLogin) {
+				a.openLogin()
 			}
 		})
 	}()
@@ -628,6 +683,7 @@ type sheet struct {
 	msg      string
 
 	threads map[string]*thread // the replies of comments, by comment ID, once asked for
+	liking  map[string]bool    // the comments, by ID, whose like is on its way
 
 	related bool // the 相关推荐 tab shown rather than the comments
 	v       dy.Video
@@ -1345,7 +1401,7 @@ func Run() error {
 	a.drama = &page{title: "短剧", next: c.Picks(300214), grid: true} // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.picks}
 	a.img = newImages(c.Image, a.post)
-	a.setLiked, a.setSaved = c.SetLiked, c.SetSaved
+	a.setLiked, a.setSaved, a.likeComment = c.SetLiked, c.SetSaved, c.SetCommentLiked
 	a.replies = c.Replies
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }
 	a.setLater = c.SetWatchLater

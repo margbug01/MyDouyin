@@ -1207,3 +1207,53 @@ func TestSwipeStepsOnce(t *testing.T) {
 		t.Fatalf("a wheel notch moved to %d", a.feed.idx)
 	}
 }
+
+// A comment's heart likes it at once, and goes to Douyin as a comment's (a
+// reply as a reply's); one Douyin refuses is put back, and says why.
+func TestCommentLike(t *testing.T) {
+	feed := stub("推荐", 1)
+	ready(t, feed.list[0])
+	a := withRoots(&app{pages: []*page{feed}, posted: make(chan func(), 8)})
+	type call struct {
+		video, cid  string
+		reply, on bool
+	}
+	var calls []call
+	var refuse error
+	a.likeComment = func(video, cid string, reply, on bool) error {
+		calls = append(calls, call{video, cid, reply, on})
+		return refuse
+	}
+	a.sheet = &sheet{total: 1, done: true, v: dy.Video{ID: "v1"}, items: []dy.Comment{{ID: "c1", Author: "甲", Text: "第一条", Likes: 9}}}
+	tt := newTester(a)
+	tt.Frame()
+	press := func(label string) {
+		t.Helper()
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if a.sheet.liking["c1"] != true {
+			t.Fatal("not dimmed while it goes")
+		}
+		select {
+		case fn := <-a.posted:
+			fn()
+		case <-time.After(2 * time.Second):
+			t.Fatal("the like did not come back")
+		}
+		tt.Frame()
+	}
+	press("赞评论")
+	if cm := a.sheet.items[0]; !cm.Liked || cm.Likes != 10 || !tt.HasText("10") || len(calls) != 1 || calls[0] != (call{"v1", "c1", false, true}) {
+		t.Fatalf("liked: %+v, calls %+v", cm, calls)
+	}
+	refuse = errors.New("不行")
+	press("取消赞评论")
+	if cm := a.sheet.items[0]; !cm.Liked || cm.Likes != 10 || calls[1].on {
+		t.Fatalf("refused: %+v, calls %+v", cm, calls)
+	}
+	if !tt.HasText("取消赞评论没成功：不行") {
+		t.Fatalf("no reason shown: %q", tt.Texts())
+	}
+}

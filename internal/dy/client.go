@@ -673,6 +673,7 @@ type Comment struct {
 	ReplyTo                 string // in a reply to a reply, whom it answers
 	Likes, Replies          int
 	Time                    time.Time
+	Liked                   bool // the user logged in has liked it
 }
 
 // comment is a comment as the lists give it.
@@ -688,11 +689,12 @@ type comment struct {
 	Time    int64  `json:"create_time"`
 	Place   string `json:"ip_label"`
 	ReplyTo string `json:"reply_to_username"`
+	Digged  int    `json:"user_digged"`
 }
 
 func (x comment) comment() Comment {
 	return Comment{ID: x.CID, Author: x.User.Nickname, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
-		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0)}
+		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0), Liked: x.Digged != 0}
 }
 
 // Comments pages through a video's comments, as Douyin orders them.

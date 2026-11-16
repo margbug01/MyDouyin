@@ -352,6 +352,37 @@ func (a *app) liveWriteCheck(id string) {
 		ok = ok && held
 		log.Printf("live write: 稍后再看 %v in %v, list follows %v", on, took.Round(10*time.Millisecond), held)
 	}
+	// A comment's like, read back from the comments' list.
+	cms, err := c.Comments(id)()
+	if err != nil {
+		fail("comments: %v", err)
+	}
+	i := slices.IndexFunc(cms, func(cm dy.Comment) bool { return !cm.Liked })
+	if i < 0 {
+		fail("no comment not liked yet")
+	}
+	cid := cms[i].ID
+	for _, on := range []bool{true, false} {
+		start := time.Now()
+		if err := c.SetCommentLiked(id, cid, false, on); err != nil {
+			fail("comment like %v: %v", on, err)
+		}
+		took := time.Since(start)
+		held := false
+		for range 10 {
+			time.Sleep(time.Second)
+			cms, err := c.Comments(id)()
+			if err != nil {
+				fail("comments: %v", err)
+			}
+			if j := slices.IndexFunc(cms, func(cm dy.Comment) bool { return cm.ID == cid }); j >= 0 && cms[j].Liked == on {
+				held = true
+				break
+			}
+		}
+		ok = ok && held
+		log.Printf("live write: comment like %v in %v, list follows %v", on, took.Round(10*time.Millisecond), held)
+	}
 	if _, err := c.Self(); err != nil {
 		fail("the login after the writes: %v", err)
 	}

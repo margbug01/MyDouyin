@@ -1475,7 +1475,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
 					a.avatar(c, cm.Avatar, cm.Author, 30)
 					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
-						commentText(c, cm, 14)
+						a.commentText(c, sh, cm, 14, false)
 						if cm.Replies > 0 {
 							a.replyThread(c, sh, cm)
 						}
@@ -1501,8 +1501,9 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 }
 
 // commentText is a comment's author (and whom a reply answers), its text,
-// and when, where from and its likes, in its text size.
-func commentText(c *ui.Context, cm dy.Comment, size float32) {
+// and when and where from, in its text size, beside its likes, which a
+// press likes or takes back.
+func (a *app) commentText(c *ui.Context, sh *sheet, cm dy.Comment, size float32, reply bool) {
 	who := cm.Author
 	if cm.ReplyTo != "" {
 		who += " ▸ " + cm.ReplyTo
@@ -1513,8 +1514,21 @@ func commentText(c *ui.Context, cm dy.Comment, size float32) {
 	if cm.Place != "" {
 		meta += " · " + cm.Place
 	}
-	meta += "   ♥ " + count(cm.Likes)
-	ui.Text(c, meta).FontSize(11).TextColor(pal.faint)
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, meta).FontSize(11).TextColor(pal.faint).Grow(1)
+		b := ui.ButtonBase(c.Key("like:" + cm.ID)).Row().Gap(4).PaddingX(4).Height(20).Radius(6).AlignItems(ui.Center).FocusRing(false).
+			Label(onOff(cm.Liked, "取消赞评论", "赞评论"))
+		color := onOff(cm.Liked, pal.accent, onOff(b.Hovered(), pal.text, pal.faint))
+		b.Children(func() {
+			ui.Icon(c, onOff(cm.Liked, iconHeartFill, iconHeart)).Size(13, 13).TextColor(color)
+			ui.Text(c, count(cm.Likes)).FontSize(11).TextColor(color)
+		})
+		if sh.liking[cm.ID] {
+			b.Opacity(0.5)
+		} else if b.Clicked() {
+			a.toggleCommentLike(sh, cm.ID, reply)
+		}
+	})
 }
 
 // replyThread is under a comment with replies, as Douyin's: the replies once
@@ -1526,7 +1540,7 @@ func (a *app) replyThread(c *ui.Context, sh *sheet, cm dy.Comment) {
 		for j, r := range th.items {
 			ui.Row(c.Key("r"+fmt.Sprint(j))).Gap(8).Margin(6, 0, 0, 0).AlignItems(ui.Start).Children(func() {
 				a.avatar(c, r.Avatar, r.Author, 22)
-				ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() { commentText(c, r, 13) })
+				ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() { a.commentText(c, sh, r, 13, true) })
 			})
 		}
 		if th.msg != "" {

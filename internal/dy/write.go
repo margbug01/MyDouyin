@@ -204,6 +204,22 @@ func (c *Client) SetSaved(id string, on bool) error {
 	return c.write("/aweme/v1/web/aweme/collect/", fmt.Sprintf("action=%d&aweme_id=%s&aweme_type=0", b2i(on), id))
 }
 
+// SetCommentLiked likes a comment (cid) of the video with the given ID, or
+// takes the like back, as the page's heart does: digg_type 1 likes, 2 takes
+// back; level 1 is a comment, 3 a reply (read from Douyin's page, 2026-11-16).
+func (c *Client) SetCommentLiked(videoID, cid string, reply, on bool) error {
+	digg, level := "2", "1"
+	if on {
+		digg = "1"
+	}
+	if reply {
+		level = "3"
+	}
+	q := url.Values{"cid": {cid}, "aweme_id": {videoID}, "digg_type": {digg}, "channel_id": {"0"}, "app_name": {"aweme"},
+		"item_type": {"0"}, "level": {level}, "enter_from": {"video_detail"}, "previous_page": {"video_detail"}}
+	return c.post("/aweme/v1/web/comment/digg", q.Encode(), "", form)
+}
+
 func b2i(b bool) int {
 	if b {
 		return 1
