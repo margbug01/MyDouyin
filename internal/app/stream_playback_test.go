@@ -102,19 +102,24 @@ func TestStreamPlaybackRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The short fixture can loop before pause under -race; retain the actual paused position.
 	other := &page{title: "收藏", grid: true, done: true}
 	a.root(other)
-	if s.vp != nil || s.resume < target-100*time.Millisecond {
+	if s.vp != nil || s.resume < at-100*time.Millisecond || s.resume > at+100*time.Millisecond {
 		t.Fatalf("released progress %v", s.resume)
 	}
 	a.root(p)
-	wait("reopen at saved position", func() bool { return s.vp != nil && s.at() >= target-100*time.Millisecond })
+	wait("reopen at saved position", func() bool {
+		return s.vp != nil && s.at() >= at-100*time.Millisecond && s.at() <= at+100*time.Millisecond
+	})
 	if !a.paused {
 		t.Fatal("root lost pause state")
 	}
 	// A hidden/paused Next must also close promptly during replacement.
 	a.setQuality("高清")
-	wait("quality switch", func() bool { return s.vp != nil && s.at() >= target-100*time.Millisecond })
+	wait("quality switch", func() bool {
+		return s.vp != nil && s.at() >= at-100*time.Millisecond && s.at() <= at+100*time.Millisecond
+	})
 	t.Logf("20 collection round trips retained the player at %v; root and quality changes resumed at %v", at.Round(time.Millisecond), s.at().Round(time.Millisecond))
 	if os.Getenv("DY_STRESS") != "" {
 		for i := 0; i < 30; i++ {

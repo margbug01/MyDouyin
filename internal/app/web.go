@@ -23,15 +23,18 @@ import (
 // and let go after webIdle without use, unless it shows. Its fields belong
 // to the UI goroutine; its dy.Web methods are for the others.
 type web struct {
-	a      *app
-	v      *mygo.WebView
-	layout bool // laid out under the app, for a script that finds things by their place
-	idle   *time.Timer
+	a       *app
+	v       *mygo.WebView
+	layout  bool // laid out under the app, for a script that finds things by their place
+	idle    *time.Timer
+	idleGen int
+	busy    int // scripts or navigation still using the page
+	closed  bool
 }
 
 const (
 	douyinHome = "https://www.douyin.com/user/self" // no video plays there; logged out, it shows the login
-	webIdle    = 10 * time.Minute
+	webIdle    = 15 * time.Second
 	// safariUA ends WebKit's own user agent as Safari's, which Douyin's pages
 	// expect. Fixed, not read from Safari: the user agent is part of the
 	// device the login is bound to.
@@ -47,6 +50,9 @@ func (a *app) call(fn func()) {
 
 // open makes the page at url, unless there is one: there it goes to url.
 func (w *web) open(url string) error {
+	if w.closed {
+		return errors.New("窗口已关闭")
+	}
 	defer w.touch()
 	if w.v != nil {
 		if url != "" {
@@ -68,22 +74,44 @@ func (w *web) open(url string) error {
 
 // touch puts off letting the page go.
 func (w *web) touch() {
+	w.idleGen++
 	if w.idle != nil {
 		w.idle.Stop()
+		w.idle = nil
 	}
+	if w.v == nil || w.closed {
+		return
+	}
+	gen := w.idleGen
 	w.idle = time.AfterFunc(webIdle, func() {
-		w.a.post(func() {
-			if w.v == nil {
-				return
-			}
-			if w.a.loginOpen || w.layout {
-				w.touch()
-				return
-			}
-			w.v.Destroy()
-			w.v = nil
-		})
+		w.a.post(func() { w.expire(gen) })
 	})
+}
+
+func (w *web) expire(gen int) {
+	// A stopped timer may already have posted its callback before another use.
+	if gen != w.idleGen || w.v == nil {
+		return
+	}
+	if w.busy > 0 || w.a.loginOpen || w.layout {
+		w.touch()
+		return
+	}
+	w.destroy()
+}
+
+func (w *web) destroy() {
+	if w.v != nil {
+		w.v.Destroy()
+		w.v = nil
+	}
+	w.touch()
+}
+
+// use pins the page until an evaluation or navigation finishes, even past webIdle.
+func (w *web) use() func() {
+	w.a.call(func() { w.busy++; w.touch() })
+	return func() { w.a.call(func() { w.busy--; w.touch() }) }
 }
 
 // page is the page, made at douyinHome if there is none, once its
@@ -117,6 +145,7 @@ func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 }
 
 func (w *web) Eval(ctx context.Context, js string) ([]byte, error) {
+	defer w.use()()
 	p, err := w.page(ctx)
 	if err != nil {
 		return nil, err
@@ -127,6 +156,7 @@ func (w *web) Eval(ctx context.Context, js string) ([]byte, error) {
 }
 
 func (w *web) Load(ctx context.Context, url string, layout bool) error {
+	defer w.use()()
 	var err error
 	w.a.call(func() {
 		w.layout = layout
@@ -364,10 +394,7 @@ func (a *app) logout() {
 		a.root(a.picks)
 	}
 	a.me, a.follows, a.mine, a.later = dy.User{}, nil, nil, nil
-	if a.web.v != nil {
-		a.web.v.Destroy()
-		a.web.v = nil
-	}
+	a.web.destroy()
 	go func() {
 		err := a.c.Logout()
 		if list, lerr := mygo.Cookies.List(mygo.CookieFilter{Domain: "douyin.com"}); lerr == nil {
@@ -389,6 +416,7 @@ func (a *app) logout() {
 // scan and how the scan goes, natively; Douyin's own page only when it asks
 // to verify more than the scan.
 func (a *app) loginPanel(c *ui.Context) {
+	wasOpen := a.loginOpen
 	l := &a.login
 	verify := l.verify && a.web.v != nil
 	ui.DialogBase(c.Key("login"), &a.loginOpen, func(back, panel ui.Element) {
@@ -428,6 +456,12 @@ func (a *app) loginPanel(c *ui.Context) {
 			}
 		})
 	})
+	if wasOpen && !a.loginOpen {
+		a.loginGen++
+		a.web.layout = false
+		a.login = login{}
+		a.web.touch()
+	}
 }
 
 var _ dy.Web = (*web)(nil)

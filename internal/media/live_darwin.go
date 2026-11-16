@@ -183,6 +183,14 @@ func (l *Live) SetVolume(v float64) {
 	}
 }
 
+// Frame returns the picture due now, or no image when none is due yet.
+// Like Next, it reuses its image; the caller must finish drawing before polling again.
+func (l *Live) Frame() (ui.VideoFrame, error) {
+	deadline := time.Now().Add(20 * time.Second)
+	f, err, _ := l.poll(&deadline)
+	return f, err
+}
+
 // Next waits for the stream's next picture to come due and returns it,
 // lasting as long as the one before it did, so the player shows each as it
 // comes. It gives up after 20 s without one, not counting while paused.

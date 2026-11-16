@@ -627,7 +627,7 @@ func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32)
 	b := ui.ButtonBase(c).ColumnSpan(span).RowSpan(2).Height(height).Radius(12).Clip().Background(ui.RGB(0, 0, 0)).FocusRing(false).Label(v.Desc)
 	b.Children(func() {
 		if s.vp != nil {
-			ui.Video(c, s.vp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+			video(c, s.vp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		} else if bmp := a.img.get(v.Cover); bmp != nil {
 			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		}
@@ -718,7 +718,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					}
 				})
 			} else if s.vp != nil {
-				ui.Video(c, s.vp).Fill().Fit(ui.Contain)
+				video(c, s.vp).Fill().Fit(ui.Contain)
 			} else if bmp := a.img.get(s.v.Cover); bmp != nil {
 				// The cover stands in until the first streamed frame arrives.
 				ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.5)
@@ -968,7 +968,7 @@ func (a *app) pipView(c *ui.Context) {
 			})
 			return
 		}
-		ui.Video(c, s.vp).Fill().Fit(ui.Contain)
+		video(c, s.vp).Fill().Fit(ui.Contain)
 		if box.Hovered() || a.paused {
 			ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(40).PaddingX(8).Gap(4).AlignItems(ui.Center).
 				Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.6), 180).Children(func() {

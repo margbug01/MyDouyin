@@ -54,7 +54,7 @@ type slot struct {
 // its sound if it has any, dec decodes a file, live a stream.
 type players struct {
 	file *media.File
-	vp   *ui.VideoPlayer
+	vp   videoPlayer
 	ap   *audio.Player // nil when the clip has no audio, and for a stream, whose sound live plays
 	dec  *paced        // vp's decoder for a file, whose clock stands in for a missing audio's
 	live *media.Live   // AVPlayer for a streamed video or live room
@@ -119,6 +119,9 @@ func (p *paced) Rewind() error {
 func (s *slot) at() time.Duration {
 	switch {
 	case s.live != nil:
+		if p, ok := s.vp.(*streamPlayer); ok {
+			p.update()
+		}
 		return s.live.Position()
 	case s.ap != nil:
 		return s.ap.Position()
@@ -1167,15 +1170,16 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	if resume > 0 {
 		stream.Seek(resume)
 	}
-	pl.vp, err = ui.NewVideoPlayer(stream)
+	vp, err := newStreamPlayer(stream, v.Live == nil)
 	if err == nil {
+		pl.vp = vp
 		err = ctx.Err()
 	}
 	if err != nil {
 		pl.close()
 		return players{}, err
 	}
-	pl.vp.SetLoop(v.Live == nil).Pause()
+	pl.vp.Pause()
 	stream.Pause()
 	return pl, nil
 }
@@ -1435,6 +1439,8 @@ func Run() error {
 			Content:              ui.View(a.view),
 		})
 		a.win.OnClosed(func() {
+			a.web.closed = true
+			a.web.destroy()
 			for _, p := range a.pages {
 				for _, s := range p.list {
 					a.release(s)
