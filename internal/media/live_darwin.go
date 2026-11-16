@@ -4,6 +4,7 @@ import (
 	"errors"
 	"image"
 	"io"
+	"structs"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,15 +53,22 @@ func liveInit() {
 // OpenLive starts the stream at url, playing silent: a player asks for its
 // first picture as it is made, which a paused stream never sends.
 func OpenLive(url string) (*Live, error) {
-	return openStream(url, nil, false)
+	return openStream(url, nil, false, true)
 }
 
 // OpenVideo streams an MP4 using AVPlayer's range loading and audio clock.
 func OpenVideo(url string, headers map[string]string) (*Live, error) {
-	return openStream(url, headers, true)
+	return openStream(url, headers, true, true)
 }
 
-func openStream(url string, headers map[string]string, vod bool) (*Live, error) {
+// OpenNative opens a stream for NewLayer without any pixel output: one attached
+// even briefly makes the decoder keep a BGRA pool (~120 MB at 1080p) for the
+// item's life. Wait with WaitReady instead of Next.
+func OpenNative(url string, headers map[string]string, vod bool) (*Live, error) {
+	return openStream(url, headers, vod, false)
+}
+
+func openStream(url string, headers map[string]string, vod, pixels bool) (*Live, error) {
 	if url == "" {
 		return nil, errors.New("media: empty stream address")
 	}
@@ -78,14 +86,17 @@ func openStream(url string, headers map[string]string, vod bool) (*Live, error) 
 	asset := objc.ID(clsAsset).Send(sel("URLAssetWithURL:options:"), u,
 		nsDict("AVURLAssetHTTPHeaderFieldsKey", h))
 	l.item = objc.ID(clsPlayerItem).Send(sel("playerItemWithAsset:"), asset)
-	l.out = objc.ID(clsItemOutput).Send(sel("alloc")).Send(sel("initWithPixelBufferAttributes:"),
-		nsDict("PixelFormatType", nsInt(0x42475241))) // 'BGRA'
-	if l.item == 0 || l.out == 0 {
+	if pixels {
+		l.out = newPixelOutput()
+	}
+	if l.item == 0 || pixels && l.out == 0 {
 		l.out.Send(sel("release"))
 		return nil, errors.New("media: cannot open the stream")
 	}
 	l.item.Send(sel("retain"))
-	l.item.Send(sel("addOutput:"), l.out)
+	if pixels {
+		l.item.Send(sel("addOutput:"), l.out)
+	}
 	l.player = objc.ID(clsPlayer).Send(sel("playerWithPlayerItem:"), l.item)
 	l.player.Send(sel("retain"))
 	if vod {
@@ -260,6 +271,37 @@ func (l *Live) poll(deadline *time.Time) (ui.VideoFrame, error, bool) {
 		return ui.VideoFrame{Image: img, Duration: dur}, nil, true
 	}
 	return ui.VideoFrame{}, nil, false
+}
+
+// WaitReady waits until the item can play and returns its picture size, for
+// streams opened without pixels.
+func (l *Live) WaitReady() (int, int, error) {
+	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		if w, h, err := l.ready(); err != nil || w > 0 && h > 0 {
+			return w, h, err
+		}
+	}
+	return 0, 0, errLiveNoPicture
+}
+
+func (l *Live) ready() (int, int, error) {
+	defer autorelease()()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return 0, 0, io.EOF
+	}
+	switch objc.Send[int](l.item, sel("status")) {
+	case 2:
+		return 0, 0, errors.New("media: the stream failed to play")
+	case 1:
+		sz := objc.Send[struct {
+			_    structs.HostLayout
+			W, H float64
+		}](l.item, sel("presentationSize"))
+		return int(sz.W), int(sz.H), nil
+	}
+	return 0, 0, nil
 }
 
 // Rewind loops a video; live rooms have no start to go back to.

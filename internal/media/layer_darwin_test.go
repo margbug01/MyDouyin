@@ -15,14 +15,15 @@ func TestLayerReleasesPixelsAndNativeObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := OpenVideo("file://"+path, nil)
+	live, err := OpenNative("file://"+path, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer live.Close()
-	if _, err = live.Next(); err != nil {
-		t.Fatal(err)
+	if w, h, err := live.WaitReady(); err != nil || w != 160 || h != 90 {
+		t.Fatalf("ready: %dx%d %v", w, h, err)
 	}
+	live.Pause() // as app.build leaves it: the layer must still get a picture
 	onMain := func(fn func()) {
 		t.Helper()
 		done := make(chan struct{})
@@ -46,6 +47,11 @@ func TestLayerReleasesPixelsAndNativeObjects(t *testing.T) {
 	defer onMain(layer.Close)
 	if live.out != 0 || live.frame != nil {
 		t.Fatal("native layer retained the RGBA output or pixels")
+	}
+	for end := time.Now().Add(3 * time.Second); !layer.Ready(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("paused native layer never got its first picture")
+		}
 	}
 	live.Seek(250 * time.Millisecond)
 	live.Play()

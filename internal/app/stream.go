@@ -40,6 +40,16 @@ func newStreamPlayer(live *media.Live, loop bool) (*streamPlayer, error) {
 	return &streamPlayer{live: live, bitmap: ui.NewBitmap(f.Image), loop: loop, width: f.Image.Bounds().Dx(), height: f.Image.Bounds().Dy()}, nil
 }
 
+// newNativePlayer is for media.OpenNative: AVPlayerLayer draws the first
+// picture itself, so only wait until the item can play.
+func newNativePlayer(live *media.Live, loop bool) (*streamPlayer, error) {
+	w, h, err := live.WaitReady()
+	if err != nil {
+		return nil, err
+	}
+	return &streamPlayer{live: live, native: true, loop: loop, width: w, height: h}, nil
+}
+
 func (p *streamPlayer) Play()            { p.paused = false; p.lastUpdate = time.Time{} }
 func (p *streamPlayer) Pause()           { p.paused = true }
 func (p *streamPlayer) Playing() bool    { return !p.paused && !p.closed && p.err == nil }
@@ -109,7 +119,7 @@ func (p *streamPlayer) update() {
 			p.bitmap.Update(f.Image)
 		}
 		p.deadline = now.Add(20 * time.Second)
-	} else if p.layer != nil && p.layer.Ready() {
+	} else if p.native && (p.layer == nil || p.layer.Ready()) { // no pixels to wait for before mounting
 		p.deadline = now.Add(20 * time.Second)
 	} else if now.After(p.deadline) {
 		p.err = errors.New("media: the stream sent no picture for 20 s")

@@ -184,3 +184,18 @@ go test ./internal/app -run '^$' -bench BenchmarkPictureDecode -benchtime=5x
 未进行数小时连续滚动、所有直播 CDN、所有编码格式及其他 macOS 版本的验证。单次网络首帧仍受 CDN、带宽及视频文件布局影响。观看进度保留在本次应用会话中，不包含退出应用后的持久化历史功能。
 
 第三轮从干净提交 `45f2569` 打包 0.2.1，核验签名及 `vcs.modified=false`，已安装到本机 `/Applications/MyDouyin.app`；没有发布 GitHub release。旧版 0.2.0 保留在本轮临时目录的 `installed-0.2.0.app`，随临时目录在 14 天后清理。构建产物位于 `build.noindex/memory-0.2.1/darwin-arm64/`。
+
+## 第五轮：原生路径不再让解码器建 BGRA 缓冲池（2026-11-16 夜）
+
+用户截图中 0.2.2 的 VTDecoderXPCService 占 180 MB。`vmmap` 显示其中 16 张 1920×1080 BGRA IOSurface（每张 8100 KB，约 127 MB），与 WindowServer 共享，即 AVPlayerLayer 实际在显示 BGRA 帧。
+
+- 原因：`openStream` 一开流就挂 BGRA 的 AVPlayerItemVideoOutput 来取首帧；解码会话按 BGRA 建池，之后 `NewLayer` 摘掉输出，池子仍随 item 存活。对照程序里即便开流后立即挂图层（不取首帧）也同样 171 MB，说明只要输出挂过就会触发。
+- 修改：新增 `media.OpenNative`，原生路径从头不挂像素输出；`WaitReady` 以 item 的 readyToPlay 与 presentationSize 代替首帧，`newNativePlayer` 不再生成首帧 Bitmap。挂不上原生视图时仍走 `UsePixels` 回退；内部截图仍按需临时挂输出。
+
+| 测量（1080p） | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| 对照程序 VTDecoderXPCService phys_footprint | 171 MB | 46–50 MB |
+| 真实应用精选页 25 秒，VTDecoderXPCService | 180 MB | 65 MB |
+| 同次真实应用主进程 footprint | 177 MB | 158 MB |
+
+修改后解码进程只剩解码器自己的 `&8v0` 压缩参考帧。真实应用两版 30 秒内解码进程 CPU 时间 0.45 s / 0.38 s，说明都在正常解码。这台机器上的会话没有截屏权限，未取得系统级窗口截图；暂停状态下原生图层能拿到首帧由 `TestLayerReleasesPixelsAndNativeObjects` 断言（`isReadyForDisplay`），对照程序 `-check` 的暂停/恢复/跳转通过。

@@ -314,7 +314,11 @@ func main() {
 			}
 		})
 		go func() {
-			live, err := media.OpenVideo(address, nil)
+			open := media.OpenVideo
+			if *mode == "layer" { // as the app: no pixel output ever, or the decoder keeps a BGRA pool
+				open = func(u string, h map[string]string) (*media.Live, error) { return media.OpenNative(u, h, true) }
+			}
+			live, err := open(address, nil)
 			if err != nil {
 				log.Fatal(err)
 			}

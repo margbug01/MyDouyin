@@ -1157,13 +1157,21 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	if err = ctx.Err(); err != nil {
 		return
 	}
+	url, headers := videoSource(v, quality), map[string]string{
+		"Referer":    "https://www.douyin.com/",
+		"User-Agent": "Mozilla/5.0",
+	}
 	if v.Live != nil {
-		pl.live, err = media.OpenLive(v.Live.HLS)
-	} else {
-		pl.live, err = media.OpenVideo(videoSource(v, quality), map[string]string{
-			"Referer":    "https://www.douyin.com/",
-			"User-Agent": "Mozilla/5.0",
-		})
+		url, headers = v.Live.HLS, nil
+	}
+	native := a.win != nil
+	switch {
+	case native:
+		pl.live, err = media.OpenNative(url, headers, v.Live == nil)
+	case v.Live != nil:
+		pl.live, err = media.OpenLive(url)
+	default:
+		pl.live, err = media.OpenVideo(url, headers)
 	}
 	if err != nil {
 		return players{}, err
@@ -1174,9 +1182,12 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	if resume > 0 {
 		stream.Seek(resume)
 	}
-	vp, err := newStreamPlayer(stream, v.Live == nil)
+	newPlayer := newStreamPlayer
+	if native {
+		newPlayer = newNativePlayer
+	}
+	vp, err := newPlayer(stream, v.Live == nil)
 	if err == nil {
-		vp.native = a.win != nil
 		pl.vp = vp
 		err = ctx.Err()
 	}
