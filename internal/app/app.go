@@ -502,7 +502,7 @@ func (a *app) seek(s *slot, t time.Duration) {
 	s.lastAt = t // not a loop, which 连播 would take for the end
 	s.seekTarget, s.seeking = t, true
 	s.clearDanmaku()
-	s.dmTo, s.dmLoading = t/(32*time.Second)*(32*time.Second), false
+	s.dmTo, s.dmLoading = max(0, t-flight)/(32*time.Second)*(32*time.Second), false
 	s.dmGen++
 }
 
@@ -685,6 +685,9 @@ func (a *app) loadDanmaku(s *slot, at time.Duration) {
 			delete(s.dmLane, d)
 		}
 		s.danmaku = slices.Delete(s.danmaku, 0, i)
+	}
+	if !s.dmLoading { // Skip windows missed while hidden, keeping the eight seconds still in flight.
+		s.dmTo = max(s.dmTo, max(0, at-flight)/(32*time.Second)*(32*time.Second))
 	}
 	if a.dmOff || a.c == nil || s.dmLoading || s.dmTo >= s.v.Duration || at+5*time.Second < s.dmTo {
 		return
@@ -1253,7 +1256,7 @@ func (a *app) release(s *slot) {
 	s.err = nil
 	s.clearDanmaku()
 	s.dmLoading, s.seeking = false, false
-	s.dmTo = s.resume / (32 * time.Second) * (32 * time.Second)
+	s.dmTo = max(0, s.resume-flight) / (32 * time.Second) * (32 * time.Second)
 	s.dmGen++
 }
 

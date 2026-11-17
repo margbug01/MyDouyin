@@ -523,6 +523,43 @@ func TestDanmakuLanesNeverOverlap(t *testing.T) {
 	}
 }
 
+// Dense traffic must keep entering at the right, even with over 40 older
+// comments still crossing the video. Lane spacing already bounds the crowd.
+func TestDanmakuCrowdFillsWidth(t *testing.T) {
+	for _, width := range []float32{800, 1280} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			s := &slot{}
+			for i := range 300 {
+				s.danmaku = append(s.danmaku, dy.Danmaku{
+					At:   time.Duration(i) * 45 * time.Millisecond,
+					Text: fmt.Sprintf("弹幕%d", i),
+				})
+			}
+			a := &app{}
+			var at time.Duration
+			tt := ui.NewTester(func(c *ui.Context) {
+				ui.Box(c).Fill().Clip().Children(func() { a.danmakuLayer(c, s, width, at) })
+			}, int(width), 240)
+			for at = 250 * time.Millisecond; at <= 12*time.Second; at += 250 * time.Millisecond {
+				tt.Frame()
+				if at < flight {
+					continue
+				}
+				entering := false
+				for _, d := range s.danmaku {
+					if r, ok := tt.Find(d.Text); ok && r.X >= width*0.9 && r.X < width {
+						entering = true
+						break
+					}
+				}
+				if !entering {
+					t.Fatalf("at %v: no comments entering the rightmost 10%% of width %v", at, width)
+				}
+			}
+		})
+	}
+}
+
 // A bullet comment shows from its time for flight, and not before or after;
 // hidden, none shows.
 func TestDanmakuLayer(t *testing.T) {

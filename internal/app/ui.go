@@ -853,7 +853,7 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 		return false
 	}
 	const lane, size = 30, 17
-	shown := 0
+	shown := false
 	for _, d := range s.danmaku {
 		age := at - d.At
 		if age < 0 || age >= flight {
@@ -874,11 +874,9 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 		x := w - float32(age)/float32(flight)*(w+tw)
 		ui.RichText(c, spans...).Absolute().Top(float32(14+l*lane)).Left(x).FontSize(size).FontWeight(600).Label(d.Text).
 			TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine().DrawObjects(pics.draw)
-		if shown++; shown == 40 { // a crowd past this reads as noise
-			break
-		}
+		shown = true
 	}
-	return shown > 0
+	return shown
 }
 
 // caption is the author, the day and the text, over the foot of the video;

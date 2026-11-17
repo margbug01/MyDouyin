@@ -27,6 +27,39 @@ func TestDanmakuWindowAndLoop(t *testing.T) {
 	}
 }
 
+func TestDanmakuReloadKeepsFlyingComments(t *testing.T) {
+	a := &app{}
+	for _, at := range []time.Duration{0, 7 * time.Second, 32 * time.Second, 33 * time.Second, 64 * time.Second, 65 * time.Second} {
+		for _, reload := range []string{"seek", "resume"} {
+			s := &slot{v: dy.Video{Duration: time.Minute * 5}, resume: at}
+			if reload == "seek" {
+				s.dec = &paced{}
+				a.seek(s, at)
+			} else {
+				a.release(s)
+			}
+			start := max(0, at-flight)
+			if s.dmTo > start || s.dmTo+32*time.Second <= start {
+				t.Errorf("%s at %v: starts loading at %v, missing flying comments from %v", reload, at, s.dmTo, start)
+			}
+		}
+	}
+}
+
+func TestDanmakuSkipsMissedWindows(t *testing.T) {
+	a := &app{dmOff: true}
+	s := &slot{dmTo: 32 * time.Second, dmLoading: true, v: dy.Video{Duration: time.Hour}}
+	a.loadDanmaku(s, 10*time.Minute)
+	if s.dmTo != 32*time.Second {
+		t.Fatal("moved the window while its request was still in flight")
+	}
+	s.dmLoading = false
+	a.loadDanmaku(s, 10*time.Minute)
+	if s.dmTo != 576*time.Second {
+		t.Fatalf("after leaving danmaku off: next window starts at %v, want 9m36s", s.dmTo)
+	}
+}
+
 func TestSeekingDoesNotAutoAdvance(t *testing.T) {
 	a := &app{autoNext: true}
 	s := &slot{lastAt: 42 * time.Second, seekTarget: 42 * time.Second, seeking: true}
