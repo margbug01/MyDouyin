@@ -439,6 +439,10 @@ func (a *app) avatar(c *ui.Context, url, name string, size float32) {
 // topBar holds the way back with the page's name, and the search field in
 // the middle; it drags the window.
 func (a *app) topBar(c *ui.Context, p *page) {
+	right := float32(16)
+	if runtime.GOOS == "windows" {
+		right += 138 // three native caption buttons, 46 DIPs each
+	}
 	ui.Row(c).Height(topBarHeight).PaddingX(16).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
 		if len(a.pages) > 1 || p.grid && p.playing {
 			if iconButton(c.Key("back"), iconBack, 18, pal.muted, "返回").Clicked() {
@@ -452,14 +456,14 @@ func (a *app) topBar(c *ui.Context, p *page) {
 		if a.dms != nil {
 			dm = white
 		}
-		if iconButton(c.Key("dm"), iconChat, 20, dm, "私信").Absolute().Top(6).Right(16 + 36 + 4).Clicked() {
+		if iconButton(c.Key("dm"), iconChat, 20, dm, "私信").Absolute().Top(6).Right(right + 36 + 4).Clicked() {
 			if a.dms != nil {
 				a.dms = nil
 			} else {
 				a.openDMs()
 			}
 		}
-		bell := ui.Box(c).Absolute().Top(6).Right(16)
+		bell := ui.Box(c).Absolute().Top(6).Right(right)
 		bell.Children(func() {
 			color := pal.muted
 			if a.notes != nil {
@@ -774,10 +778,10 @@ func (a *app) playbackStatus(c *ui.Context, s *slot) {
 	}
 	ui.Column(c.Key("playback-status")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(12).PassThrough().Children(func() {
 		if err == nil {
-			ui.Text(c, "视频载入中…").FontSize(14).TextColor(white)
+			ui.Text(c, "视频载入中…").FontSize(14).TextColor(white).PassThrough()
 			return
 		}
-		ui.Text(c, "视频暂时无法播放").FontSize(14).TextColor(white)
+		ui.Text(c, "视频暂时无法播放").FontSize(14).TextColor(white).PassThrough()
 		if ui.Button(c.Key("retry-video"), "重新加载").Clicked() {
 			a.release(s)
 			a.prepare(s)

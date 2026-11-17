@@ -18,6 +18,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+const NativeAvailable = true
+
 type cmTime struct {
 	_         structs.HostLayout
 	Value     int64

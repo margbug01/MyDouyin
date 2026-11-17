@@ -1195,7 +1195,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	if v.Live != nil {
 		url, headers = v.Live.HLS, nil
 	}
-	native := a.win != nil
+	native := a.win != nil && media.NativeAvailable
 	switch {
 	case native:
 		pl.live, err = media.OpenNative(url, headers, v.Live == nil)
