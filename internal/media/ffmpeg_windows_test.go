@@ -29,6 +29,30 @@ func testClip(t *testing.T) string {
 	return path
 }
 
+func TestWindowsPlaybackThroughHTTPProxy(t *testing.T) {
+	path := testClip(t)
+	var requests atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.ServeFile(w, r, path)
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+	l, err := OpenVideo("http://mydouyin.test/clip.mp4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if frame, err := l.Next(); err != nil || frame.Image == nil {
+		t.Fatalf("proxied picture: %v", err)
+	}
+	if requests.Load() < 2 {
+		t.Fatal("probe and decoder did not use the proxy")
+	}
+}
+
 func TestWindowsHLS(t *testing.T) {
 	path := testClip(t)
 	playlist := filepath.Join(filepath.Dir(path), "live.m3u8")

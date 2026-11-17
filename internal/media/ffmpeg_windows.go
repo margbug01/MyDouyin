@@ -148,9 +148,9 @@ func openFile(source string, headers map[string]string) (*File, error) {
 }
 
 func (f *File) inputArgs(at time.Duration) []string {
-	protocols := "file,http,https,tcp,tls,crypto"
+	protocols := "file,http,https,tcp,tls,crypto,httpproxy"
 	if strings.HasPrefix(f.source, "http://") || strings.HasPrefix(f.source, "https://") {
-		protocols = "http,https,tcp,tls,crypto" // remote playlists cannot read local files
+		protocols = "http,https,tcp,tls,crypto,httpproxy" // remote playlists cannot read local files
 	}
 	args := []string{"-rw_timeout", "20000000", "-protocol_whitelist", protocols}
 	if f.headers != "" {
