@@ -81,6 +81,7 @@ type Live struct {
 	RoomID, WebRID string // WebRID is the room's address on live.douyin.com
 	OwnerID        string // numeric account ID of the host
 	HLS            string
+	H264HLS        string // AVPlayer-compatible HLS variant, when advertised
 	Viewers        string // as Douyin says it, 41 or 1.2万
 }
 
@@ -105,6 +106,11 @@ func room(raw []byte, onAir bool) (v Video, ok bool) {
 		Stream struct {
 			HLS    string            `json:"hls_pull_url"`
 			HLSMap map[string]string `json:"hls_pull_url_map"`
+			SDK    struct {
+				Pull struct {
+					Data string `json:"stream_data"`
+				} `json:"pull_data"`
+			} `json:"live_core_sdk_data"`
 		} `json:"stream_url"`
 	}
 	if json.Unmarshal(raw, &r) != nil || !onAir && r.Status != 2 { // 2: on air
@@ -116,12 +122,44 @@ func room(raw []byte, onAir bool) (v Video, ok bool) {
 			hls = u
 		}
 	}
+	h264 := liveH264(r.Stream.SDK.Pull.Data)
+	if hls == "" {
+		hls = h264
+	}
 	if hls == "" {
 		return v, false
 	}
 	return Video{ID: "live:" + r.ID, Desc: r.Title, Author: r.Owner.Nickname, AuthorID: r.Owner.SecUID,
 		Cover: r.Cover.first(), Avatar: r.Owner.Avatar.first(),
-		Live: &Live{RoomID: r.ID, WebRID: r.Owner.WebRID, OwnerID: r.Owner.ID, HLS: strings.Replace(hls, "http://", "https://", 1), Viewers: r.Stats.Viewers}}, true
+		Live: &Live{RoomID: r.ID, WebRID: r.Owner.WebRID, OwnerID: r.Owner.ID,
+			HLS: strings.Replace(hls, "http://", "https://", 1), H264HLS: h264, Viewers: r.Stats.Viewers}}, true
+}
+
+func liveH264(streamData string) string {
+	var sdk struct {
+		Data map[string]struct {
+			Main struct {
+				HLS    string
+				Params string `json:"sdk_params"`
+			}
+		}
+	}
+	if json.Unmarshal([]byte(streamData), &sdk) != nil {
+		return ""
+	}
+	// Douyin often sends HEVC in MPEG-TS, which AVPlayer treats as audio-only.
+	// The SDK lists the video codec per quality. The "ao" variant is audio-only.
+	for _, q := range []string{"hd", "sd", "ld", "md", "uhd", "origin"} {
+		variant := sdk.Data[q].Main
+		if variant.HLS == "" {
+			continue
+		}
+		var params struct{ VCodec string }
+		if json.Unmarshal([]byte(variant.Params), &params) == nil && strings.EqualFold(params.VCodec, "h264") {
+			return strings.Replace(variant.HLS, "http://", "https://", 1)
+		}
+	}
+	return ""
 }
 
 // Mix is a series of videos an author groups (合集), and the episode a video is of it.

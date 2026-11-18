@@ -2,12 +2,9 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
-	"regexp"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -17,48 +14,12 @@ import (
 	"douyin/internal/dy"
 )
 
-// The official live page owns the push connection and its acknowledgements.
-const liveBridge = `
-if (location.origin === 'https://live.douyin.com') {
-  const frames = [];
-  let opened = false, last = 0;
-  window.myDouyinLive = () => ({opened, last, frames: frames.splice(0)});
-  window.WebSocket = new Proxy(window.WebSocket, {
-    construct(target, args, newTarget) {
-      const socket = Reflect.construct(target, args, newTarget);
-      const url = new URL(socket.url);
-      if (url.protocol !== 'wss:' || !url.hostname.endsWith('.douyin.com') || url.pathname !== '/webcast/im/push/v2/') return socket;
-      socket.addEventListener('open', () => { opened = true; last = Date.now(); });
-      socket.addEventListener('close', () => { opened = false; });
-      socket.addEventListener('message', event => {
-        last = Date.now();
-        const data = event.data;
-        if (typeof data === 'string' || (data.size ?? data.byteLength) > 256 * 1024) return;
-        Promise.resolve(data instanceof Blob ? data.arrayBuffer() : data).then(data => {
-          const bytes = new Uint8Array(data);
-          let bin = '';
-          for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
-          frames.push(btoa(bin));
-          if (frames.length > 12) frames.shift();
-        }).catch(() => {});
-      });
-      return socket;
-    }
-  });
-}`
-
-var liveRoomCode = regexp.MustCompile(`^[0-9]+$`)
-var livePageRules = sync.OnceValues(func() (*mygo.ContentRules, error) {
-	// The native player is the only one that should download the live video.
-	return mygo.CompileContentRules("mydouyin-live-chat", `[
-		{"trigger":{"url-filter":".*","resource-type":["media"]},"action":{"type":"block"}},
-		{"trigger":{"url-filter":"^https?://pull-"},"action":{"type":"block"}}
-	]`)
-})
-
 type liveRoomView struct {
 	room      *dy.Live
 	view      *mygo.WebView
+	webIdle   *time.Timer
+	webGen    int
+	webBusy   int
 	cancel    context.CancelFunc
 	started   time.Time
 	signedIn  bool
@@ -86,45 +47,44 @@ func (a *app) syncLiveRoom(p *page) {
 		return
 	}
 	a.closeLiveRoom()
-	if room == nil || !liveRoomCode.MatchString(room.WebRID) || a.win == nil {
+	if room == nil || !liveRoomCode.MatchString(room.WebRID) || a.win == nil || !liveRoomCode.MatchString(room.RoomID) {
 		return
 	}
 	p.list[p.idx].clearDanmaku()
 	ctx, cancel := context.WithCancel(context.Background())
 	chat := &liveRoomView{room: room, cancel: cancel, started: time.Now(), signedIn: a.signedIn, status: "正在连接直播消息…"}
 	a.liveChat = chat
-	go func() {
-		rules, err := livePageRules()
-		a.post(func() {
-			if a.liveChat != chat {
-				return
-			}
+	if chat.signedIn {
+		chat.send = func(text string) (dy.LiveMessage, error) {
+			eval, done, err := a.liveWritePage(ctx, chat, false)
 			if err != nil {
-				chat.status = "直播消息暂不可用"
-				return
+				return dy.LiveMessage{}, err
 			}
-			options := mygo.PageOptions{Untrusted: true, PreloadScript: liveBridge, UserAgentSuffix: safariUA, ContentRules: []*mygo.ContentRules{rules}}
-			if !chat.signedIn {
-				options.Session = mygo.NewEphemeralSession()
-			}
-			v, err := a.win.NewWebView(mygo.WebViewOptions{URL: liveRoomURL(room.WebRID), Page: options})
+			defer done()
+			return dy.SendLiveComment(ctx, eval, *room, text)
+		}
+		chat.gifts.load = func() ([]dy.LiveGift, error) {
+			eval, done, err := a.liveWritePage(ctx, chat, true)
 			if err != nil {
-				chat.status = "直播消息暂不可用"
-				return
+				return nil, err
 			}
-			chat.view = v
-			page := v.Page()
-			page.SetAudioMuted(true)
-			if chat.signedIn {
-				chat.send = func(text string) (dy.LiveMessage, error) {
-					return dy.SendLiveComment(ctx, page.EvalContext, *room, text)
-				}
-				chat.gifts.load = func() ([]dy.LiveGift, error) { return dy.ReadLiveGifts(ctx, page.EvalContext, *room) }
-				chat.gifts.send = func(gift dy.LiveGift) error { return dy.SendLiveGift(ctx, page.EvalContext, *room, gift) }
+			defer done()
+			return dy.ReadLiveGifts(ctx, eval, *room)
+		}
+		chat.gifts.send = func(gift dy.LiveGift) error {
+			eval, done, err := a.liveWritePage(ctx, chat, true)
+			if err != nil {
+				return err
 			}
-			go a.readLiveRoom(ctx, chat, page)
-		})
-	}()
+			defer done()
+			return dy.SendLiveGift(ctx, eval, *room, gift)
+		}
+	}
+	if !chat.signedIn {
+		go a.readGuestLiveRoom(ctx, chat)
+	} else if a.c != nil {
+		go a.readLiveRoom(ctx, chat, a.c.LivePoll(*room))
+	}
 }
 
 func (a *app) closeLiveRoom() {
@@ -133,48 +93,28 @@ func (a *app) closeLiveRoom() {
 		if chat.cancel != nil {
 			chat.cancel()
 		}
-		if chat.view != nil {
-			chat.view.Destroy()
-		}
+		chat.closeWeb()
 	}
 }
 
-func (a *app) readLiveRoom(ctx context.Context, chat *liveRoomView, page *mygo.Page) {
-	var previous string
-	tick := time.NewTicker(500 * time.Millisecond)
-	defer tick.Stop()
+func (a *app) readLiveRoom(ctx context.Context, chat *liveRoomView, poll func(context.Context) ([]dy.LiveMessage, time.Duration, error)) {
+	previous := "正在连接直播消息…"
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-		call, cancel := context.WithTimeout(ctx, 2*time.Second)
-		value, err := page.EvalContext(call, `return JSON.stringify(window.myDouyinLive?.() ?? null)`)
+		call, cancel := context.WithTimeout(ctx, 8*time.Second)
+		messages, wait, err := poll(call)
 		cancel()
 		if ctx.Err() != nil {
 			return
 		}
-		var batch struct {
-			Opened bool
-			Last   int64
-			Frames [][]byte
-		}
-		if text, ok := value.(string); err == nil && ok {
-			_ = json.Unmarshal([]byte(text), &batch)
-		}
 		now := time.Now()
-		status := "正在连接直播消息…"
-		if batch.Opened && now.Sub(time.UnixMilli(batch.Last)) < 40*time.Second {
-			status = ""
-		} else if now.Sub(chat.started) > 10*time.Second {
-			status = "正在等待直播消息恢复…"
-		}
-		var messages []dy.LiveMessage
-		for _, frame := range batch.Frames {
-			decoded, err := dy.LiveMessages(frame)
-			if err == nil {
-				messages = append(messages, decoded...)
+		status := ""
+		if err != nil {
+			status = "正在连接直播消息…"
+			if now.Sub(chat.started) > 10*time.Second {
+				status = "正在等待直播消息恢复…"
+			}
+			if wait <= 0 {
+				wait = 3 * time.Second
 			}
 		}
 		if len(messages) != 0 || status != previous {
@@ -189,6 +129,11 @@ func (a *app) readLiveRoom(ctx context.Context, chat *liveRoomView, page *mygo.P
 					a.addLiveMessages(chat, p.list[p.idx], messages, now)
 				}
 			})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
 		}
 	}
 }

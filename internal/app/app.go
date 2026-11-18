@@ -970,9 +970,10 @@ func (a *app) fill() {
 	a.sync()
 }
 
-// hold keeps one paused player for an immediate return, even across nested grids.
+// hold keeps one paused on-demand player for an immediate return. A live room
+// reopens at the current live edge, so there is no playback position to retain.
 func (a *app) hold(s *slot) {
-	if s.vp == nil {
+	if s.vp == nil || s.v.Live != nil {
 		return
 	}
 	if a.held != nil && a.held != s {
@@ -1211,6 +1212,9 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	}
 	if v.Live != nil {
 		url, headers = v.Live.HLS, nil
+		if media.NativeAvailable && v.Live.H264HLS != "" {
+			url = v.Live.H264HLS
+		}
 	}
 	native := a.win != nil && media.NativeAvailable
 	switch {
@@ -1244,7 +1248,9 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 		return players{}, err
 	}
 	pl.vp.Pause()
-	stream.Pause()
+	if v.Live == nil || !native {
+		stream.Pause()
+	}
 	return pl, nil
 }
 

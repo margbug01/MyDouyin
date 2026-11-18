@@ -99,12 +99,15 @@ func openStream(url string, headers map[string]string, vod, pixels bool) (*Live,
 	}
 	l.player = objc.ID(clsPlayer).Send(sel("playerWithPlayerItem:"), l.item)
 	l.player.Send(sel("retain"))
+	l.player.Send(sel("setMuted:"), true)
 	if vod {
 		l.player.Send(sel("setAutomaticallyWaitsToMinimizeStalling:"), false)
 		l.item.Send(sel("setPreferredForwardBufferDuration:"), float64(3))
+		l.player.Send(sel("play"))
+	} else {
+		// Start with the first decodable segment. AVPlayer still handles rebuffering.
+		l.player.Send(sel("playImmediatelyAtRate:"), l.speed)
 	}
-	l.player.Send(sel("setMuted:"), true)
-	l.player.Send(sel("play"))
 	return l, nil
 }
 
@@ -115,7 +118,7 @@ func (l *Live) Play() {
 	defer autorelease()()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !l.closed {
+	if !l.closed && (l.vod || l.paused) {
 		l.paused = false
 		if l.seekDone == nil {
 			l.player.Send(sel("setRate:"), l.speed)

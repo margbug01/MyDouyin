@@ -55,6 +55,10 @@ func LiveMessages(frame []byte) ([]LiveMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	return liveMessages(batch), nil
+}
+
+func liveMessages(batch []field) []LiveMessage {
 	var out []LiveMessage
 	for _, entry := range batch {
 		if entry.n != 1 {
@@ -86,7 +90,7 @@ func LiveMessages(frame []byte) ([]LiveMessage, error) {
 			out = append(out, m)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func liveUser(data []byte) (string, []LiveBadge) {
