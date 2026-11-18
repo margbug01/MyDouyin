@@ -136,6 +136,7 @@ func TestLiveAuthor(t *testing.T) {
 	}
 
 	own := stub("@作者", 1)
+	own.authorID = "x"
 	own.list[0].v.AuthorID = "x"
 	a.pages = append(a.pages, own)
 	tt.Frame()

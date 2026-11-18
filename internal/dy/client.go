@@ -49,6 +49,7 @@ type Video struct {
 	Mix              Mix    // the series the video is an episode of, if any
 	Live             *Live  // a live room in the list, which has no PlayURL
 	Created          time.Time
+	Pinned           bool // the author pinned it atop their posts
 
 	Liked, Saved bool // whether the user logged in has liked it and saved it (收藏)
 
@@ -78,6 +79,7 @@ func (c *Client) cookies() login {
 // plays, over https, which an app's transport security allows.
 type Live struct {
 	RoomID, WebRID string // WebRID is the room's address on live.douyin.com
+	OwnerID        string // numeric account ID of the host
 	HLS            string
 	Viewers        string // as Douyin says it, 41 or 1.2万
 }
@@ -91,6 +93,7 @@ func room(raw []byte, onAir bool) (v Video, ok bool) {
 		Title  string
 		Cover  addr
 		Owner  struct {
+			ID       string `json:"id_str"`
 			Nickname string
 			SecUID   string `json:"sec_uid"`
 			WebRID   string `json:"web_rid"`
@@ -118,7 +121,7 @@ func room(raw []byte, onAir bool) (v Video, ok bool) {
 	}
 	return Video{ID: "live:" + r.ID, Desc: r.Title, Author: r.Owner.Nickname, AuthorID: r.Owner.SecUID,
 		Cover: r.Cover.first(), Avatar: r.Owner.Avatar.first(),
-		Live: &Live{RoomID: r.ID, WebRID: r.Owner.WebRID, HLS: strings.Replace(hls, "http://", "https://", 1), Viewers: r.Stats.Viewers}}, true
+		Live: &Live{RoomID: r.ID, WebRID: r.Owner.WebRID, OwnerID: r.Owner.ID, HLS: strings.Replace(hls, "http://", "https://", 1), Viewers: r.Stats.Viewers}}, true
 }
 
 // Mix is a series of videos an author groups (合集), and the episode a video is of it.
@@ -336,6 +339,7 @@ type aweme struct {
 	Created int64 `json:"create_time"`
 	Digged  int   `json:"user_digged"`
 	Saved   int   `json:"collect_stat"`
+	Top     int   `json:"is_top"`
 	Author  struct {
 		Nickname string
 		SecUID   string `json:"sec_uid"`
@@ -398,7 +402,7 @@ func videos(list []aweme) []Video {
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
 			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),
-			Liked: a.Digged == 1, Saved: a.Saved == 1, Qualities: qs})
+			Liked: a.Digged == 1, Saved: a.Saved == 1, Pinned: a.Top == 1, Qualities: qs})
 	}
 	return out
 }
@@ -589,7 +593,7 @@ func (p profile) user() User {
 		Handle: handle, Place: strings.TrimPrefix(p.Place, "IP属地：")}
 }
 
-// Posts pages through a user's videos, newest first.
+// Posts pages through a user's videos, with their pinned posts first.
 func (c *Client) Posts(secUID string) Pager[Video] {
 	return c.posts(secUID, "&publish_video_strategy_type=2")
 }
@@ -685,13 +689,15 @@ type Comment struct {
 	Time                    time.Time
 	Liked                   bool     // the user logged in has liked it
 	Pics                    []string // pictures it carries, its images then its sticker; Text has its [表情] (Emojis)
+	Links                   []CommentLink
 }
 
 // comment is a comment as the lists give it.
 type comment struct {
-	CID  string
-	Text string
-	User struct {
+	CID   string
+	Text  string
+	Extra []commentExtra `json:"text_extra"`
+	User  struct {
 		Nickname string
 		Avatar   addr `json:"avatar_thumb"`
 	}
@@ -711,7 +717,7 @@ type comment struct {
 
 func (x comment) comment() Comment {
 	cm := Comment{ID: x.CID, Author: x.User.Nickname, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
-		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0), Liked: x.Digged != 0}
+		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0), Liked: x.Digged != 0, Links: x.links()}
 	for _, im := range x.Images {
 		if u := im.Medium.first(); u != "" {
 			cm.Pics = append(cm.Pics, u)

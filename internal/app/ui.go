@@ -62,8 +62,11 @@ var white = ui.RGB(255, 255, 255)
 func (a *app) view(c *ui.Context) {
 	t := *ui.DarkTheme()
 	t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
+	p := a.cur()
+	a.syncLiveRoom(p)
+	giftOpen := a.liveChat != nil && a.liveChat.gifts.open
 	a.mainVideo.begin(a.win)
-	a.mainVideo.off = a.loginOpen && a.login.verify && a.web.v != nil // Douyin's page shows in the login (loginPanel)
+	a.mainVideo.off = giftOpen || a.group.open || a.loginOpen && a.login.verify && a.web.v != nil
 	t.Accent, t.AccentText = pal.accent, white
 	t.Inverse, t.InverseText = white, pal.bg // toasts': by default the text is the Background, clear here
 	t.Selection = pal.accent.Alpha(0.35)
@@ -72,11 +75,14 @@ func (a *app) view(c *ui.Context) {
 	defer a.img.sweep()
 	defer a.saveSettings()
 
-	c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
-	c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
+	liveInputFocused := a.liveChat != nil && c.Focused(a.liveChat.input)
+	if !giftOpen && !liveInputFocused {
+		c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
+		c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
+	}
 	c.OnShortcut(0, ui.KeyEscape, a.escape)
 	root := ui.Box(c).Fill()
-	if !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
+	if !giftOpen && !liveInputFocused && !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
 		// Space pauses wherever the focus is, as in MySpotify: on the box
 		// around everything it comes before a button the pointer focused,
 		// which would take it as a click; on the window, as nothing has
@@ -84,8 +90,10 @@ func (a *app) view(c *ui.Context) {
 		root.OnShortcut(0, ui.KeySpace, a.toggle)
 		c.OnShortcut(0, ui.KeySpace, a.toggle)
 	}
-	p := a.cur()
 	root.Children(func() {
+		if chat := a.liveChat; chat != nil && chat.view != nil {
+			ui.WebView(c, chat.view).Absolute().Top(0).Left(0).Size(4, 4).ZIndex(-3)
+		}
 		if a.web.v != nil && a.web.layout && !a.loginOpen { // the login lays it out itself
 			// Laid out for a script, under the app: the rows paint over it.
 			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-2)
@@ -126,6 +134,8 @@ func (a *app) view(c *ui.Context) {
 						a.dmPanel(c, a.dms)
 					case a.sheet != nil && p.plays():
 						a.commentPanel(c, a.sheet)
+					case a.liveChat != nil && !a.liveChat.hidden && !a.clear:
+						a.liveMessagePanel(c, a.liveChat)
 					}
 				})
 			})
@@ -135,6 +145,10 @@ func (a *app) view(c *ui.Context) {
 		a.searchList(c)
 	}
 	a.settingsDialog(c)
+	a.commentGroupDialog(c)
+	if a.liveChat != nil && a.liveChat.gifts.open && p.idx < len(p.list) {
+		a.liveGiftDialog(c, a.liveChat, p.list[p.idx].v.Author)
+	}
 	a.loginPanel(c)
 	if a.toast != "" {
 		c.Toast(a.toast)
@@ -608,6 +622,10 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 			}
 			if v.Live != nil {
 				liveBadge(c)
+			} else if p.authorID != "" && v.Pinned {
+				ui.Row(c).Absolute().Top(8).Left(8).Height(20).PaddingX(8).Radius(5).AlignItems(ui.Center).Background(ui.Hex("#f9cc66")).Children(func() {
+					ui.Text(c, "置顶").FontSize(11).FontWeight(700).TextColor(pal.bg)
+				})
 			}
 			ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Padding(18, 10, 7, 10).AlignItems(ui.Center).
 				Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
@@ -750,12 +768,18 @@ func (a *app) stage(c *ui.Context, p *page) {
 		at := time.Duration(0)
 		if s.vp != nil { // the sound's clock, or the picture's for a video without
 			at = s.at()
-			if a.watch(s, at) { // after this frame, which is building the stage
-				a.post(func() { a.lastNav = time.Time{}; a.step(1) })
+			if s.v.Live == nil {
+				if a.watch(s, at) { // after this frame, which is building the stage
+					a.post(func() { a.lastNav = time.Time{}; a.step(1) })
+				}
+				a.loadDanmaku(s, at)
 			}
-			a.loadDanmaku(s, at)
 		}
-		if !a.clear && a.danmakuLayer(c, s, box.Bounds().W, at) && !a.paused {
+		danmakuAt := at
+		if s.v.Live != nil && a.liveChat != nil {
+			danmakuAt = time.Since(a.liveChat.started)
+		}
+		if !a.clear && (s.v.Live == nil || !a.paused) && a.danmakuLayer(c, s, box.Bounds().W, danmakuAt) && !a.paused {
 			c.AnimationFrame() // they fly
 		} else if s.vp != nil && !a.paused {
 			c.After(500 * time.Millisecond) // the time moves on
@@ -955,6 +979,19 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 			if live {
 				ui.Box(c).Size(7, 7).Radius(4).Background(pal.accent)
 				ui.Text(c, "直播中 · "+s.v.Live.Viewers+" 人在看").FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8))
+				if chat := a.liveChat; chat != nil {
+					if chip(c.Key("live-danmaku"), "弹幕", !a.dmOff).Clicked() {
+						a.dmOff = !a.dmOff
+						s.clearDanmaku()
+					}
+					if !a.theater && chip(c.Key("live-chat"), "互动", !chat.hidden && !a.clear).Clicked() {
+						chat.hidden = !chat.hidden && !a.clear
+						if !chat.hidden {
+							a.clear = false
+							a.notes, a.dms, a.sheet = nil, nil, nil
+						}
+					}
+				}
 			} else {
 				shown := at
 				if a.dragging {
@@ -1521,10 +1558,12 @@ func menuItem(c *ui.Context, ic *ui.SVG, label string) ui.Element {
 	})
 }
 
+func liveRoomURL(webRID string) string { return "https://live.douyin.com/" + webRID }
+
 // videoURL is a video's page on the web.
 func videoURL(v dy.Video) string {
 	if v.Live != nil {
-		return "https://live.douyin.com/" + v.Live.WebRID
+		return liveRoomURL(v.Live.WebRID)
 	}
 	return "https://www.douyin.com/video/" + v.ID
 }
@@ -1618,7 +1657,7 @@ func (a *app) commentText(c *ui.Context, sh *sheet, cm dy.Comment, size float32,
 		who += " ▸ " + cm.ReplyTo
 	}
 	ui.Text(c, who).FontSize(size - 2).TextColor(pal.muted).SingleLine()
-	a.commentBody(c, cm, size)
+	a.commentBody(c, sh, cm, size)
 	meta := ago(cm.Time, time.Now())
 	if cm.Place != "" {
 		meta += " · " + cm.Place
@@ -1689,8 +1728,10 @@ func (a *app) emojiSpans(text string, size float32, weight int) ([]ui.Span, emoj
 
 // commentBody is a comment's text, with the emoji it names drawn in it, as
 // Douyin's, then its pictures.
-func (a *app) commentBody(c *ui.Context, cm dy.Comment, size float32) {
-	if cm.Text != "" {
+func (a *app) commentBody(c *ui.Context, sh *sheet, cm dy.Comment, size float32) {
+	if len(cm.Links) != 0 {
+		a.commentRichText(c, sh, cm, size)
+	} else if cm.Text != "" {
 		spans, pics := a.emojiSpans(cm.Text, size, 0)
 		ui.RichText(c, spans...).FontSize(size).TextColor(pal.text).Label(cm.Text).DrawObjects(pics.draw)
 	}

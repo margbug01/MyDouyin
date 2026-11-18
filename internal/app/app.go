@@ -153,7 +153,8 @@ type page struct {
 	fetching bool
 	done     bool // next returned its last page
 	msg      string
-	paused   bool // playback state while another page is open
+	paused   bool   // playback state while another page is open
+	authorID string // an author's works, where is_top is meaningful
 
 	user  *dy.User  // an author's page: their profile atop the videos, once loaded
 	users []dy.User // a search's: the accounts found, atop the videos
@@ -172,6 +173,8 @@ type app struct {
 	lastNav             time.Time
 	swipeAt             time.Time // the last trackpad scroll of the swipe on the stage
 	sheet               *sheet    // the comments open beside the video, or nil
+	group               groupPreview
+	liveChat            *liveRoomView
 
 	searchBox ui.Handle
 	toast     string    // a message to show once
@@ -676,16 +679,19 @@ func (a *app) setSpeed(s float64) {
 	}
 }
 
-// loadDanmaku loads s's bullet comments for the next 32 seconds, as Douyin's
-// page does, once the video nears where they end.
-func (a *app) loadDanmaku(s *slot, at time.Duration) {
-	// Keep only comments that can still be on screen, plus the next fetched window.
+func (s *slot) pruneDanmaku(at time.Duration) {
 	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flight }); i > 0 {
 		for _, d := range s.danmaku[:i] {
 			delete(s.dmLane, d)
 		}
 		s.danmaku = slices.Delete(s.danmaku, 0, i)
 	}
+}
+
+// loadDanmaku loads s's bullet comments for the next 32 seconds, as Douyin's
+// page does, once the video nears where they end.
+func (a *app) loadDanmaku(s *slot, at time.Duration) {
+	s.pruneDanmaku(at)
 	if !s.dmLoading { // Skip windows missed while hidden, keeping the eight seconds still in flight.
 		s.dmTo = max(s.dmTo, max(0, at-flight)/(32*time.Second)*(32*time.Second))
 	}
@@ -859,6 +865,14 @@ func (a *app) moreComments() {
 // escape leaves a chat for the inbox, closes what is open beside the page,
 // or else the page on top.
 func (a *app) escape() {
+	if chat := a.liveChat; chat != nil && chat.gifts.open {
+		chat.gifts.open = false
+		return
+	}
+	if a.group.open {
+		a.group.open = false
+		return
+	}
 	if a.theater { // out of 网页全屏 or full screen first
 		a.setFullScreen(false)
 		return
@@ -1038,7 +1052,7 @@ func (a *app) loadAccount() {
 			}
 			if me.ID != "" && a.mine == nil {
 				a.mine = map[string]*page{
-					"作品":   {title: "作品", next: a.c.MyPosts(me.ID), grid: true},
+					"作品":   {title: "作品", authorID: me.ID, next: a.c.MyPosts(me.ID), grid: true},
 					"喜欢":   {title: "喜欢", next: a.c.Liked(me.ID), grid: true},
 					"收藏":   {title: "收藏", next: a.c.Collected(), grid: true},
 					"观看历史": {title: "观看历史", next: a.c.History(), grid: true},
@@ -1392,8 +1406,8 @@ func (a *app) suggest() {
 // openAuthor opens a user's videos, their profile above, unless p is that
 // page already.
 func (a *app) openAuthor(p *page, name, id string) {
-	if title := "@" + name; p.title != title && id != "" {
-		q := &page{title: title, next: a.c.Posts(id), grid: true}
+	if id != "" && a.c != nil && p.authorID != id {
+		q := &page{title: "@" + name, authorID: id, next: a.c.Posts(id), grid: true}
 		a.open(q)
 		go func() {
 			if u, err := a.c.Profile(id); err == nil {
@@ -1490,6 +1504,7 @@ func Run() error {
 			Content:              ui.View(a.view),
 		})
 		a.win.OnClosed(func() {
+			a.closeLiveRoom()
 			a.web.closed = true
 			a.web.destroy()
 			for _, p := range a.pages {
