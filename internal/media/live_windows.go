@@ -105,6 +105,13 @@ type Live struct {
 	muted, paused, closed, seeking, ready, ended bool
 }
 
+// Windows playback starts through FFmpeg, which has no reusable AVURLAsset.
+type WarmVideo struct{}
+
+func PreloadVideo(string, map[string]string) *WarmVideo { return nil }
+func (*WarmVideo) Close()                               {}
+func (*WarmVideo) Open() (*Live, error)                 { return nil, errors.New("media: video preload unavailable") }
+
 func OpenLive(source string) (*Live, error) { return openStream(source, nil, false) }
 func OpenNative(source string, headers map[string]string, vod bool) (*Live, error) {
 	return openStream(source, headers, vod)

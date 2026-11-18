@@ -83,6 +83,83 @@ func TestVideoStream(t *testing.T) {
 	}
 }
 
+func TestPreloadedAssetOpensWithoutPixelOutput(t *testing.T) {
+	path, err := filepath.Abs("../../testdata/silent.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requested := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case requested <- struct{}{}:
+		default:
+		}
+		if r.Header.Get("Referer") != "https://www.douyin.com/" {
+			t.Error("preload lost its playback headers")
+		}
+		http.ServeFile(w, r, path)
+	}))
+	defer srv.Close()
+	warm := PreloadVideo(srv.URL+"/clip.mp4", map[string]string{"Referer": "https://www.douyin.com/"})
+	if warm == nil {
+		t.Fatal("could not preload the video")
+	}
+	defer warm.Close()
+	select {
+	case <-requested:
+	case <-time.After(5 * time.Second):
+		t.Fatal("preload did not start before opening the player")
+	}
+	live, err := warm.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+	warm.Close() // promotion transfers ownership to the player
+	if w, h, err := live.WaitReady(); err != nil || w != 160 || h != 90 || live.out != 0 {
+		t.Fatalf("preloaded player: %dx%d, pixel output %v, error %v", w, h, live.out != 0, err)
+	}
+}
+
+func TestDiscardedPreloadCancelsRequest(t *testing.T) {
+	entered, canceled, finish := make(chan struct{}, 1), make(chan struct{}, 1), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+			select {
+			case canceled <- struct{}{}:
+			default:
+			}
+		case <-finish:
+		}
+	}))
+	defer srv.Close()
+	defer close(finish)
+	warm := PreloadVideo(srv.URL+"/clip.mp4", nil)
+	if warm == nil {
+		t.Fatal("could not preload the video")
+	}
+	defer warm.Close()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("preload did not make a request")
+	}
+	warm.Close()
+	select {
+	case <-canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("discarded preload left an active request")
+	}
+	if live, err := warm.Open(); err == nil || live != nil {
+		t.Fatal("discarded preload could still open a player")
+	}
+}
+
 func TestVideoLoopsAndRecoversAfterHiddenGap(t *testing.T) {
 	path, _ := filepath.Abs("../../testdata/silent.mp4")
 	l, err := OpenVideo("file://"+path, nil)

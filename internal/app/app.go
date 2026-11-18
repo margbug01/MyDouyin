@@ -170,6 +170,7 @@ type app struct {
 	query               string  // the search box
 	paused              bool
 	held                *slot // at most one paused video behind a grid or child page
+	preload             nextVideo
 	lastNav             time.Time
 	swipeAt             time.Time // the last trackpad scroll of the swipe on the stage
 	sheet               *sheet    // the comments open beside the video, or nil
@@ -934,10 +935,11 @@ func (a *app) more(p *page) {
 	}()
 }
 
-// fill opens only the visible video. AVPlayer buffers it on demand; hidden
-// videos must not allocate decoders or compete for its bandwidth.
+// fill only opens the visible video. The next item can preload its track data
+// without creating another decoder.
 func (a *app) fill() {
 	p := a.cur()
+	defer a.preloadNextVideo(p)
 	if !p.plays() { // covers, the grid asking for more as it scrolls; only 精选's first plays
 		for i, s := range p.list {
 			if i == 0 && p == a.picks {
@@ -1103,8 +1105,13 @@ func (a *app) prepare(s *slot) {
 	s.cancel = cancel
 	s.loadGen++
 	gen, v, quality, resume := s.loadGen, s.v, a.quality, s.resume
+	var preload *media.WarmVideo
+	if a.preload.slot == s && a.preload.url == videoSource(v, quality) {
+		preload = a.preload.asset
+		a.preload = nextVideo{}
+	}
 	go func() {
-		pl, err := a.build(ctx, v, quality, resume)
+		pl, err := a.build(ctx, v, quality, resume, preload)
 		a.post(func() {
 			if gen != s.loadGen || s.gone {
 				pl.close()
@@ -1202,14 +1209,14 @@ func videoSource(v dy.Video, quality string) string {
 	return v.PlayURL
 }
 
-func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time.Duration) (pl players, err error) {
+func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time.Duration, preload *media.WarmVideo) (pl players, err error) {
+	if preload != nil {
+		defer preload.Close()
+	}
 	if err = ctx.Err(); err != nil {
 		return
 	}
-	url, headers := videoSource(v, quality), map[string]string{
-		"Referer":    "https://www.douyin.com/",
-		"User-Agent": "Mozilla/5.0",
-	}
+	url, headers := videoSource(v, quality), videoHeaders
 	if v.Live != nil {
 		url, headers = v.Live.HLS, nil
 		if media.NativeAvailable && v.Live.H264HLS != "" {
@@ -1219,7 +1226,12 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	native := a.win != nil && media.NativeAvailable
 	switch {
 	case native:
-		pl.live, err = media.OpenNative(url, headers, v.Live == nil)
+		if preload != nil {
+			pl.live, _ = preload.Open()
+		}
+		if pl.live == nil {
+			pl.live, err = media.OpenNative(url, headers, v.Live == nil)
+		}
 	case v.Live != nil:
 		pl.live, err = media.OpenLive(url)
 	default:
@@ -1370,6 +1382,7 @@ func (a *app) watch(s *slot, at time.Duration) bool {
 func (a *app) toggle() {
 	a.paused = !a.paused
 	a.sync()
+	a.preloadNextVideo(a.cur())
 }
 
 // search opens the videos found for q, and the accounts above them.
@@ -1510,6 +1523,7 @@ func Run() error {
 			Content:              ui.View(a.view),
 		})
 		a.win.OnClosed(func() {
+			a.preload.close()
 			a.closeLiveRoom()
 			a.web.closed = true
 			a.web.destroy()

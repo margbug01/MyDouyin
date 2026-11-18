@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"image"
+	"image/color"
+	"image/draw"
 	"image/png"
 	"sync/atomic"
 	"testing"
@@ -68,6 +70,35 @@ func TestSeekingDoesNotAutoAdvance(t *testing.T) {
 	}
 	if !a.watch(s, 0) {
 		t.Fatal("real loop no longer advances")
+	}
+}
+
+func TestPlaybackShowsCoverUntilFirstPicture(t *testing.T) {
+	p := stub("推荐", 1)
+	s := p.list[0]
+	s.v.Cover = "cover"
+	cover := image.NewRGBA(image.Rect(0, 0, 160, 90))
+	draw.Draw(cover, cover.Bounds(), image.NewUniform(color.RGBA{R: 230, B: 180, A: 255}), image.Point{}, draw.Src)
+	a := withRoots(&app{pages: []*page{p}, img: newImages(nil, nil)})
+	a.img.m[s.v.Cover] = &picture{bmp: ui.NewBitmap(cover)}
+	tt := newTester(a)
+	tt.Frame()
+	coverVisible := func() bool {
+		pixel := tt.Image().RGBAAt(650, 380)
+		return pixel.R > 200 && pixel.B > 150 && pixel.G < 20
+	}
+	if !coverVisible() || tt.HasText("视频载入中") {
+		t.Fatal("loading stage should show the cover without a loading label")
+	}
+	tt.ClickAt(650, 380)
+	if !a.paused {
+		t.Fatal("cover intercepted the playback click")
+	}
+	ready(t, s)
+	defer s.vp.Close()
+	tt.Frame()
+	if coverVisible() {
+		t.Fatal("cover remained over the first picture")
 	}
 }
 
@@ -150,7 +181,7 @@ func TestReleaseCancelsLoadingAndAllowsRetry(t *testing.T) {
 	if ctx.Err() == nil || s.loading || s.err != nil || s.loadGen != 5 || s.dmLoading {
 		t.Fatal("release left stale loading/error state")
 	}
-	if _, err := a.build(ctx, s.v, "", 0); !errors.Is(err, context.Canceled) {
+	if _, err := a.build(ctx, s.v, "", 0, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled build: %v", err)
 	}
 }

@@ -69,22 +69,33 @@ func OpenNative(url string, headers map[string]string, vod bool) (*Live, error) 
 }
 
 func openStream(url string, headers map[string]string, vod, pixels bool) (*Live, error) {
-	if url == "" {
-		return nil, errors.New("media: empty stream address")
-	}
 	defer autorelease()()
-	liveOnce.Do(liveInit)
+	asset, err := videoAsset(url, headers)
+	if err != nil {
+		return nil, err
+	}
+	return openAsset(asset, vod, pixels)
+}
+
+func videoAsset(url string, headers map[string]string) (objc.ID, error) {
+	if url == "" {
+		return 0, errors.New("media: empty stream address")
+	}
 	u := objc.ID(clsURL).Send(sel("URLWithString:"), nsString(url))
 	if u == 0 {
-		return nil, errors.New("media: bad stream address")
+		return 0, errors.New("media: bad stream address")
 	}
-	l := &Live{vod: vod, speed: 1}
 	h := nsDict()
 	for k, v := range headers {
 		h.Send(sel("setObject:forKey:"), nsString(v), nsString(k))
 	}
-	asset := objc.ID(clsAsset).Send(sel("URLAssetWithURL:options:"), u,
-		nsDict("AVURLAssetHTTPHeaderFieldsKey", h))
+	return objc.ID(clsAsset).Send(sel("URLAssetWithURL:options:"), u,
+		nsDict("AVURLAssetHTTPHeaderFieldsKey", h)), nil
+}
+
+func openAsset(asset objc.ID, vod, pixels bool) (*Live, error) {
+	liveOnce.Do(liveInit)
+	l := &Live{vod: vod, speed: 1}
 	l.item = objc.ID(clsPlayerItem).Send(sel("playerItemWithAsset:"), asset)
 	if pixels {
 		l.out = newPixelOutput()

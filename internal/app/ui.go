@@ -660,8 +660,9 @@ func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32,
 	b.Children(func() {
 		if s.vp != nil {
 			a.mainVideo.video(c, s.vp, true, viewport, 12).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
-		} else if bmp := a.img.get(v.Cover); bmp != nil {
-			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+		}
+		if !videoPictureReady(s.vp) {
+			a.playbackCover(c, v.Cover, ui.Cover)
 		}
 		if v.Live != nil {
 			liveBadge(c)
@@ -752,11 +753,13 @@ func (a *app) stage(c *ui.Context, p *page) {
 						a.setPip(false)
 					}
 				})
-			} else if s.vp != nil {
-				a.mainVideo.video(c, s.vp, false, ui.Element{}, 12).Fill().Fit(ui.Contain)
-			} else if bmp := a.img.get(s.v.Cover); bmp != nil {
-				// The cover stands in until the first streamed frame arrives.
-				ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.5)
+			} else {
+				if s.vp != nil {
+					a.mainVideo.video(c, s.vp, false, ui.Element{}, 12).Fill().Fit(ui.Contain)
+				}
+				if !videoPictureReady(s.vp) {
+					a.playbackCover(c, s.v.Cover, ui.Contain)
+				}
 			}
 			if a.paused && s.vp != nil {
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Children(func() {
@@ -792,19 +795,24 @@ func (a *app) stage(c *ui.Context, p *page) {
 	})
 }
 
+func (a *app) playbackCover(c *ui.Context, url string, fit ui.Fit) {
+	// Keep the cover above the native layer until that layer can display a frame.
+	ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGB(0, 0, 0)).PassThrough().Children(func() {
+		if bmp := a.img.get(url); bmp != nil {
+			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(fit).PassThrough()
+		}
+	})
+}
+
 func (a *app) playbackStatus(c *ui.Context, s *slot) {
 	err := s.err
 	if s.vp != nil && s.vp.Err() != nil {
 		err = s.vp.Err()
 	}
-	if err == nil && !s.loading {
+	if err == nil {
 		return
 	}
 	ui.Column(c.Key("playback-status")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(12).PassThrough().Children(func() {
-		if err == nil {
-			ui.Text(c, "视频载入中…").FontSize(14).TextColor(white).PassThrough()
-			return
-		}
 		ui.Text(c, "视频暂时无法播放").FontSize(14).TextColor(white).PassThrough()
 		if ui.Button(c.Key("retry-video"), "重新加载").Clicked() {
 			a.release(s)

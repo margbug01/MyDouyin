@@ -37,6 +37,16 @@ func nativePlayer(p videoPlayer) bool {
 	return ok && s.native && !s.closed
 }
 
+func videoPictureReady(p videoPlayer) bool {
+	if s, ok := p.(*streamPlayer); ok {
+		if s.native {
+			return s.layer != nil && s.layer.Ready()
+		}
+		return s.bitmap != nil
+	}
+	return p != nil
+}
+
 func (s *nativeSurface) video(c *ui.Context, p videoPlayer, cover bool, viewport ui.Element, radius float32) ui.Element {
 	stream, ok := p.(*streamPlayer)
 	if !ok || !stream.native || s.window == nil {
