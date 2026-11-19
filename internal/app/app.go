@@ -50,6 +50,8 @@ type slot struct {
 	dmTo      time.Duration // how far into the video they are loaded
 	dmLoading bool
 	lastAt    time.Duration // where the view last saw it, which a loop goes back from
+	reported  bool          // queued to tell Douyin it was watched (watched.go)
+	comments  *sheet        // its comments, fetched ahead once it played a moment
 }
 
 // players are what plays a video once it is opened: vp shows it, ap plays
@@ -151,10 +153,13 @@ type page struct {
 	scroll   ui.ScrollState
 	idx      int
 	fetching bool
+	gen      int  // counts refreshes: a page fetched before one is dropped
 	done     bool // next returned its last page
 	msg      string
 	paused   bool   // playback state while another page is open
 	authorID string // an author's works, where is_top is meaningful
+
+	restart func() dy.Pager[dy.Video] // a root's list from the top, as refresh takes it; nil goes on with next
 
 	user  *dy.User  // an author's page: their profile atop the videos, once loaded
 	users []dy.User // a search's: the accounts found, atop the videos
@@ -249,6 +254,11 @@ type app struct {
 	listen   bool    // 听抖音: the cover in the picture's place, the sound on
 	moreOpen bool    // the rail's 更多 menu
 	upd      updates // checking for new versions and installing them (update.go)
+
+	// sendWatched tells Douyin a video was watched; a test puts its own (watched.go).
+	sendWatched  func(id, authorUID string) error
+	watched      []dy.Video // watched, not yet told
+	watchSending bool
 
 	settingsOpen bool     // the settings dialog (settings.go)
 	settingsFile string   // where the settings are kept, "" not to keep them
@@ -347,7 +357,7 @@ func (a *app) showMine(name string) {
 func (a *app) showTab(id int) {
 	p := a.tabPages[id]
 	if p == nil {
-		p = &page{title: "精选", next: a.c.Picks(id), grid: true}
+		p = picksPage(a.c, "精选", id)
 		a.tabPages[id] = p
 	}
 	a.tab, a.picks = id, p
@@ -751,11 +761,29 @@ type thread struct {
 	msg        string
 }
 
-// comments opens v's comments over it; the video goes on playing.
-func (a *app) comments(v dy.Video) {
+// comments opens s's comments beside it; the video goes on playing. Their
+// first page is there already if s played a moment (prefetchComments).
+func (a *app) comments(s *slot) {
 	a.notes, a.dms = nil, nil
-	a.sheet = &sheet{total: v.Comments, next: a.c.Comments(v.ID), v: v}
-	a.moreComments()
+	if s.comments == nil {
+		s.comments = &sheet{total: s.v.Comments, next: a.c.Comments(s.v.ID), v: s.v}
+	}
+	a.sheet = s.comments
+	if len(a.sheet.items) == 0 { // not fetched ahead, or that failed: again
+		a.moreComments(a.sheet)
+	}
+}
+
+// prefetchComments fetches the first page of s's comments: Douyin takes some
+// 0.3–0.45 s to give them (measured 2026-11-19), which the panel waited
+// out empty. Not before s has played a moment, so as not to ask for every
+// video flicked past.
+func (a *app) prefetchComments(s *slot) {
+	if s.comments != nil || a.c == nil || s.v.Live != nil {
+		return
+	}
+	s.comments = &sheet{total: s.v.Comments, next: a.c.Comments(s.v.ID), v: s.v}
+	a.moreComments(s.comments)
 }
 
 // toggleReplies shows the replies to cm under it, or hides them.
@@ -843,8 +871,7 @@ func (a *app) openMix(p *page, v dy.Video) {
 	}
 }
 
-func (a *app) moreComments() {
-	sh := a.sheet
+func (a *app) moreComments(sh *sheet) {
 	if sh == nil || sh.fetching || sh.done {
 		return
 	}
@@ -916,9 +943,13 @@ func (a *app) more(p *page) {
 		return
 	}
 	p.fetching = true
+	next, gen := p.next, p.gen
 	go func() {
-		vs, err := p.next()
+		vs, err := next()
 		a.post(func() {
+			if gen != p.gen {
+				return
+			}
 			p.fetching = false
 			if err != nil {
 				p.msg = err.Error()
@@ -1003,9 +1034,20 @@ func (a *app) open(p *page) {
 	a.fill()
 }
 
-// root shows r, the picks or the feed, with nothing over it.
+// picksPage is 精选's tab id, which refresh takes from the top again.
+func picksPage(c *dy.Client, title string, id int) *page {
+	return &page{title: title, next: c.Picks(id), grid: true, restart: func() dy.Pager[dy.Video] { return c.Picks(id) }}
+}
+
+// root shows r, the picks or the feed, with nothing over it; r shown
+// already, it is refreshed, as Douyin's sidebar does pressed again.
 func (a *app) root(r *page) {
 	if len(a.pages) == 1 && a.cur() == r {
+		if r.grid && r.playing {
+			a.back() // to the covers first
+		} else {
+			a.refresh(r)
+		}
 		return
 	}
 	a.cur().paused = a.paused
@@ -1015,6 +1057,24 @@ func (a *app) root(r *page) {
 		}
 	}
 	a.pages, a.sheet, a.paused = []*page{r}, nil, r.paused
+	a.fill()
+}
+
+// refresh empties p and loads it anew, from the top where it has a restart:
+// what comes is new, as Douyin's lists are recommendations (2026-11-19,
+// 精选 and 关注 shared nothing with the page before).
+func (a *app) refresh(p *page) {
+	p.gen++
+	p.fetching = false
+	for _, s := range p.list {
+		a.release(s)
+	}
+	if p.restart != nil {
+		p.next = p.restart()
+	}
+	p.list, p.idx, p.playing, p.done, p.msg, p.paused = nil, 0, false, false, "", false
+	p.scroll = ui.ScrollState{}
+	a.sheet, a.paused = nil, false
 	a.fill()
 }
 
@@ -1054,12 +1114,17 @@ func (a *app) loadAccount() {
 				a.later[v.ID] = true
 			}
 			if me.ID != "" && a.mine == nil {
+				list := func(title string, from func() dy.Pager[dy.Video]) *page {
+					return &page{title: title, next: from(), grid: true, restart: from}
+				}
+				posts := list("作品", func() dy.Pager[dy.Video] { return a.c.MyPosts(me.ID) })
+				posts.authorID = me.ID
 				a.mine = map[string]*page{
-					"作品":   {title: "作品", authorID: me.ID, next: a.c.MyPosts(me.ID), grid: true},
-					"喜欢":   {title: "喜欢", next: a.c.Liked(me.ID), grid: true},
-					"收藏":   {title: "收藏", next: a.c.Collected(), grid: true},
-					"观看历史": {title: "观看历史", next: a.c.History(), grid: true},
-					"稍后再看": {title: "稍后再看", next: a.c.WatchLater(), grid: true},
+					"作品":   posts,
+					"喜欢":   list("喜欢", func() dy.Pager[dy.Video] { return a.c.Liked(me.ID) }),
+					"收藏":   list("收藏", a.c.Collected),
+					"观看历史": list("观看历史", a.c.History),
+					"稍后再看": list("稍后再看", a.c.WatchLater),
 				}
 				a.mineTab = "作品"
 			}
@@ -1369,6 +1434,13 @@ func (a *app) watch(s *slot, at time.Duration) bool {
 		s.seeking, s.lastAt = false, at
 		return false
 	}
+	if at >= time.Second {
+		a.prefetchComments(s)
+	}
+	if !s.reported && at >= watchedAfter {
+		s.reported = true
+		a.markWatched(s.v)
+	}
 	looped := at+time.Second < s.lastAt
 	if looped {
 		s.clearDanmaku()
@@ -1450,8 +1522,9 @@ func (a *app) selfCheck(dir string) {
 		}
 		a.post(func() {
 			mygo.App.Focus() // a window under others is not drawn, nor its shot
-			a.open(&page{title: "评论", done: true, list: []*slot{{v: v}}})
-			a.comments(v)
+			s := &slot{v: v}
+			a.open(&page{title: "评论", done: true, list: []*slot{s}})
+			a.comments(s)
 		})
 		time.Sleep(15 * time.Second) // the comments, the emoji and the pictures loaded
 		b, err := a.capture(a.win)
@@ -1484,18 +1557,19 @@ func Run() error {
 	}
 	a := &app{c: c, dir: filepath.Join(cache, "Douyin", "videos"),
 		feed: &page{title: "推荐", next: c.Feed}, tabPages: map[int]*page{}}
-	a.picks = &page{title: "精选", next: c.Picks(0), grid: true}
+	a.picks = picksPage(c, "精选", 0)
 	a.tabPages[0] = a.picks
-	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true}
-	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true}
-	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true}
-	a.drama = &page{title: "短剧", next: c.Picks(300214), grid: true} // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
+	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true, restart: c.FollowFeed}
+	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true, restart: c.FriendFeed}
+	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true, restart: c.LiveRooms}
+	a.drama = picksPage(c, "短剧", 300214) // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.picks}
 	a.img = newImages(c.Image, a.post)
 	a.setLiked, a.setSaved, a.likeComment = c.SetLiked, c.SetSaved, c.SetCommentLiked
 	a.replies = c.Replies
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }
 	a.setLater = c.SetWatchLater
+	a.sendWatched = c.Watched
 	a.sendDanmaku = func(id string, at time.Duration, text string) error {
 		if a.me.UID == "" {
 			return errors.New("账号还没载入")
@@ -1546,6 +1620,9 @@ func Run() error {
 		}
 		if id := os.Getenv("DY_LIVE_WRITE"); id != "" {
 			go a.liveWriteCheck(id)
+		}
+		if id := os.Getenv("DY_WATCHED_CHECK"); id != "" {
+			go a.watchedCheck(id)
 		}
 	})
 	log.Println("douyin: running")

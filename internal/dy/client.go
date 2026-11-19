@@ -39,6 +39,7 @@ type Client struct {
 type Video struct {
 	ID, Desc, Author string
 	AuthorID         string // sec_uid, which Posts takes
+	AuthorUID        string // the numeric ID, which Watched takes
 	Size             int64
 	PlayURL          string // carries audio; the bit_rate gears named adapt_* are video-only
 	W, H             int
@@ -380,6 +381,7 @@ type aweme struct {
 	Top     int   `json:"is_top"`
 	Author  struct {
 		Nickname string
+		UID      string `json:"uid"`
 		SecUID   string `json:"sec_uid"`
 		Avatar   addr   `json:"avatar_thumb"`
 	}
@@ -436,7 +438,7 @@ func videos(list []aweme) []Video {
 		if a.Mix != nil {
 			mix = Mix{a.Mix.ID, a.Mix.Name, a.Mix.Statis.Episode, a.Mix.Statis.Updated}
 		}
-		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, PlayURL: play,
+		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, AuthorUID: a.Author.UID, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
 			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),

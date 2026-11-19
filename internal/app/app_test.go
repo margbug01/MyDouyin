@@ -52,6 +52,7 @@ func ready(t *testing.T, s *slot) {
 // and nothing closes the feed.
 func TestControls(t *testing.T) {
 	a := withRoots(&app{pages: []*page{stub("推荐", 3)}})
+	a.feed.next = func() ([]dy.Video, error) { return nil, nil } // 推荐 pressed below refreshes it
 	tt := newTester(a)
 	if err := tt.Click("搜索"); err != nil {
 		t.Fatal(err)
@@ -1414,5 +1415,118 @@ func TestToastReadable(t *testing.T) {
 	}
 	if strokes < 30 {
 		t.Fatalf("the toast shows %d pixels of its text", strokes)
+	}
+}
+
+// A root pressed again while shown loads anew, from the top where it has a
+// restart; a grid playing goes back to its covers first; the tab shown
+// pressed again refreshes it too.
+func TestRefresh(t *testing.T) {
+	batch := 0
+	from := func() dy.Pager[dy.Video] {
+		batch++
+		n := batch
+		return func() ([]dy.Video, error) {
+			return []dy.Video{{ID: fmt.Sprint("b", n), Desc: fmt.Sprint("第", n, "批"), Author: "作者"}}, nil
+		}
+	}
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, tabPages: map[int]*page{}, posted: make(chan func(), 64)})
+	a.picks = &page{title: "精选", grid: true, next: from(), restart: from}
+	a.tabPages[0] = a.picks
+	settle := func() {
+		for a.picks.fetching {
+			select {
+			case fn := <-a.posted:
+				fn()
+			case <-time.After(2 * time.Second):
+				t.Fatal("the page never loaded")
+			}
+		}
+	}
+	first := func() string {
+		if len(a.picks.list) == 0 {
+			return ""
+		}
+		return a.picks.list[0].v.Desc
+	}
+	a.root(a.picks)
+	settle()
+	if first() != "第1批" {
+		t.Fatalf("first load: %q", first())
+	}
+	a.root(a.picks)
+	settle()
+	if first() != "第2批" || len(a.pages) != 1 {
+		t.Fatalf("pressed again: %q", first())
+	}
+	a.play(a.picks, 0)
+	a.root(a.picks)
+	if a.picks.playing || first() != "第2批" {
+		t.Fatalf("playing, pressed again: playing %v, %q", a.picks.playing, first())
+	}
+	tt := newTester(a)
+	if err := tt.Click("全部"); err != nil {
+		t.Fatal(err)
+	}
+	settle()
+	if first() != "第3批" {
+		t.Fatalf("the tab shown pressed again: %q", first())
+	}
+}
+
+// A video played past watchedAfter is queued once to tell Douyin, and a
+// batch goes once watchBatch wait; nothing is queued logged out.
+func TestWatchedBatches(t *testing.T) {
+	var told []string
+	a := &app{signedIn: true, posted: make(chan func(), 64)}
+	a.sendWatched = func(id, uid string) error { told = append(told, id+"/"+uid); return nil }
+	for i := range watchBatch {
+		s := &slot{v: dy.Video{ID: fmt.Sprint(i), AuthorUID: "u"}}
+		a.watch(s, time.Second)
+		a.watch(s, watchedAfter+time.Second)
+		a.watch(s, watchedAfter+2*time.Second)
+	}
+	if !a.watchSending {
+		t.Fatalf("a full batch not sent: %d waiting", len(a.watched))
+	}
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("the batch never finished")
+	}
+	if len(told) != watchBatch || told[0] != "0/u" || a.watchSending || len(a.watched) != 0 {
+		t.Fatalf("told %q, sending %v, waiting %d", told, a.watchSending, len(a.watched))
+	}
+	a.signedIn = false
+	a.watch(&slot{v: dy.Video{ID: "x"}}, time.Minute)
+	if len(a.watched) != 0 {
+		t.Fatal("queued while logged out")
+	}
+}
+
+// Comments fetched ahead show at once, nothing asked again; when fetching
+// ahead failed, opening asks again.
+func TestCommentsAhead(t *testing.T) {
+	asked := 0
+	s := &slot{v: dy.Video{ID: "v"}}
+	s.comments = &sheet{v: s.v, items: []dy.Comment{{Author: "甲", Text: "早到"}},
+		next: func() ([]dy.Comment, error) { asked++; return []dy.Comment{{Author: "乙", Text: "又拉"}}, nil }}
+	a := withRoots(&app{pages: []*page{{title: "推荐", done: true, list: []*slot{s}}}, posted: make(chan func(), 4)})
+	a.comments(s)
+	if a.sheet != s.comments || asked != 0 || a.sheet.fetching {
+		t.Fatalf("fetched ahead: asked %d, fetching %v", asked, a.sheet.fetching)
+	}
+	a.sheet = nil
+	s.comments.items, s.comments.msg = nil, "失败"
+	a.comments(s)
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("never asked again")
+	}
+	if asked != 1 || len(a.sheet.items) != 1 || a.sheet.msg != "" {
+		t.Fatalf("after a failed fetch ahead: asked %d, %d items, msg %q", asked, len(a.sheet.items), a.sheet.msg)
 	}
 }

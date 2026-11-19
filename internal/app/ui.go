@@ -369,7 +369,7 @@ func (a *app) mineHeader(c *ui.Context) {
 					bar.Background(pal.accent)
 				}
 			})
-			if b.Clicked() && !on {
+			if b.Clicked() { // the tab shown: refreshed
 				a.showMine(name)
 			}
 		}
@@ -556,7 +556,7 @@ func (a *app) tabsRow(c *ui.Context) {
 					bar.Background(pal.accent)
 				}
 			})
-			if b.Clicked() && !on {
+			if b.Clicked() { // the tab shown: refreshed
 				a.showTab(t.ID)
 			}
 		}
@@ -1389,7 +1389,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 				if a.sheet != nil {
 					a.sheet = nil
 				} else {
-					a.comments(s.v)
+					a.comments(s)
 				}
 			}
 			if b := action("collects", iconStar, onOff(s.v.Saved, "取消收藏", "收藏"), count(s.v.Collects), onOff(s.v.Saved, starColor, white)); s.saving {
@@ -1646,7 +1646,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 					ui.Text(c, sh.msg).FontSize(12).TextColor(pal.faint)
 				case !sh.done:
 					if ui.Button(c.Key("more"), "更多评论").Clicked() {
-						a.moreComments()
+						a.moreComments(sh)
 					}
 				case len(sh.items) == 0:
 					ui.Text(c, "还没有评论").FontSize(12).TextColor(pal.faint)

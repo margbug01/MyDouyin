@@ -113,6 +113,11 @@ func (c *Client) write(path, body string) error {
 // post sends a POST to a write endpoint, with query and a body of type,
 // from the page, and saves the cookies it leaves renewed.
 func (c *Client) post(path, query, body, typ string) error {
+	return c.send(path, query, body, typ, 3)
+}
+
+// send is post, tried up to tries times.
+func (c *Client) send(path, query, body, typ string, tries int) error {
 	writeMu.Lock()
 	defer writeMu.Unlock()
 	if c.web == nil {
@@ -136,7 +141,7 @@ return { http: r.status, code, text: t.slice(0, 300) };`
 		Text string
 	}
 	var err error
-	for try := range 3 {
+	for try := range tries {
 		if try > 0 {
 			time.Sleep(time.Second) // a page just loaded may sign only once its scripts settle
 		}
@@ -159,7 +164,7 @@ return { http: r.status, code, text: t.slice(0, 300) };`
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("抖音没接受：%.200s", r.Text)
+	return fmt.Errorf("抖音没接受（HTTP %d）：%.200s", r.HTTP, r.Text)
 }
 
 // syncCookies saves the page's cookies, which it renews as it goes, while
@@ -223,6 +228,22 @@ func (c *Client) SetCommentLiked(videoID, cid string, reply, on bool) error {
 	q := url.Values{"cid": {cid}, "aweme_id": {videoID}, "digg_type": {digg}, "channel_id": {"0"}, "app_name": {"aweme"},
 		"item_type": {"0"}, "level": {level}, "enter_from": {"video_detail"}, "previous_page": {"video_detail"}}
 	return c.post("/aweme/v1/web/comment/digg", q.Encode(), "", form)
+}
+
+// Watched tells Douyin the user watched the video with the given ID, as its
+// page does as one plays: into 观看历史, and a play counted. Without it the
+// recommend feed brings back what was watched here (2026-11-19).
+// authorUID is the author's numeric ID (Video.AuthorUID).
+func (c *Client) Watched(id, authorUID string) error {
+	q := url.Values{"author_id": {authorUID}, "aweme_id": {id}}
+	if err := c.write("/aweme/v1/web/history/write/", q.Encode()); err != nil {
+		return err
+	}
+	// Best effort, once: Douyin answers most videos' play with nothing, its
+	// own page's too (2026-11-19, 3 of 4 from www.douyin.com, fetch and XHR).
+	q = url.Values{"aweme_type": {"0"}, "item_id": {id}, "play_delta": {"1"}, "source": {"0"}}
+	c.send("/aweme/v2/web/aweme/stats/", "", q.Encode(), form, 1)
+	return nil
 }
 
 func b2i(b bool) int {
