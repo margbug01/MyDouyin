@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1565,5 +1566,32 @@ func TestRailHitArea(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("第一条") {
 		t.Fatal("no comments in 网页全屏")
+	}
+}
+
+// Replies held back for Douyin's verification while it shows already wait
+// for it with the first; once passed, held back still, they say so rather
+// than show the verification again, which flashed it (2026-11-19).
+func TestRepliesVerifyOnce(t *testing.T) {
+	a := &app{posted: make(chan func(), 8), loginOpen: true, login: login{verify: true, stop: func() {}}}
+	held := func() ([]dy.Comment, error) { return nil, dy.ErrVerify }
+	run := func(th *thread) {
+		a.moreReplies(th)
+		select {
+		case fn := <-a.posted:
+			fn()
+		case <-time.After(2 * time.Second):
+			t.Fatal("no answer")
+		}
+	}
+	waiting := &thread{next: held}
+	run(waiting)
+	if len(a.login.retry) != 1 {
+		t.Fatalf("a second held back did not wait for the verification open: %d", len(a.login.retry))
+	}
+	passed := &thread{next: held, verified: true}
+	run(passed)
+	if len(a.login.retry) != 1 || !strings.Contains(passed.msg, "验证过了") {
+		t.Fatalf("verified, held back still: %d waiting, %q", len(a.login.retry), passed.msg)
 	}
 }

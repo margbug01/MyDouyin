@@ -528,8 +528,10 @@ func (v verifyRT) RoundTrip(*http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: 200, Status: "200 OK", Header: h, Body: io.NopCloser(strings.NewReader(""))}, nil
 }
 
-// An answer held back for Douyin's verification is ErrVerify, which replies
-// report as it is, without asking the page for its material again.
+// An answer held back for Douyin's verification is ErrVerify. Replies held
+// back are asked of the page, not its material again: ErrVerify while the
+// page is held back too, its replies once it passed, and the page is asked
+// from then on, the client not.
 func TestVerifyHeldBack(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir) // the guard material and cookies are the user's
@@ -540,10 +542,15 @@ func TestVerifyHeldBack(t *testing.T) {
 	if _, err := c.call("GET", "/aweme/v1/web/comment/list/", "", ""); !errors.Is(err, ErrVerify) {
 		t.Fatalf("call: %v", err)
 	}
-	w := &fakeWeb{replies: []string{"null"}}
+	w := &fakeWeb{replies: []string{reply(""), reply(`{"status_code":0,"comments":[{"cid":"r1","text":"回复一"}],"cursor":1,"has_more":0}`)}}
 	c.SetWeb(w)
-	if _, err := c.Replies("1", "2")(); !errors.Is(err, ErrVerify) || len(w.scripts) != 0 {
-		t.Fatalf("replies: %v, after asking the page %d times", err, len(w.scripts))
+	sent := n
+	if _, err := c.Replies("1", "2")(); !errors.Is(err, ErrVerify) || len(w.scripts) != 1 || !strings.Contains(w.scripts[0], "/comment/list/reply/") {
+		t.Fatalf("held back in the page too: %v, after %d scripts", err, len(w.scripts))
+	}
+	rs, err := c.Replies("1", "2")()
+	if err != nil || len(rs) != 1 || rs[0].Text != "回复一" || n != sent+1 {
+		t.Fatalf("passed in the page: %v %v, the client asked %d times more", rs, err, n-sent)
 	}
 }
 

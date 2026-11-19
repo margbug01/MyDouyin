@@ -167,6 +167,40 @@ return { http: r.status, code, text: t.slice(0, 300) };`
 	return fmt.Errorf("抖音没接受（HTTP %d）：%.200s", r.HTTP, r.Text)
 }
 
+// pageGet reads path with query from the page, whose scripts sign it as
+// theirs: a read Douyin holds back from the client for its verification
+// (ErrVerify) it gives the page once the page has passed it (2026-11-19,
+// replies: passed in the page, the client's next ask was held back again).
+func (c *Client) pageGet(path, query string) ([]byte, error) {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	if c.web == nil {
+		return nil, ErrVerify
+	}
+	args, _ := json.Marshal("https://www.douyin.com" + path + "?device_platform=webapp&aid=6383&channel=channel_pc_web&" + query)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	b, err := c.web.Eval(ctx, "const r = await fetch("+string(args)+`, { credentials: "include" });
+return { http: r.status, text: await r.text() };`)
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		HTTP int
+		Text string
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, err
+	}
+	switch {
+	case r.HTTP != 200:
+		return nil, fmt.Errorf("dy: %s HTTP %d", path, r.HTTP)
+	case r.Text == "":
+		return nil, ErrVerify // the page is held back too: it has to pass first
+	}
+	return []byte(r.Text), nil
+}
+
 // syncCookies saves the page's cookies, which it renews as it goes, while
 // they hold the login.
 func (c *Client) syncCookies() {

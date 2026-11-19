@@ -33,6 +33,9 @@ type Client struct {
 	web     Web                   // the app's Douyin page, which writes go through (write.go)
 	imSeq   atomic.Int32          // the IM requests' sequence
 	refresh atomic.Int32          // the feed's page, which two lists of it share
+	// replyPage: Douyin held replies back for its verification, which only the
+	// page passes; they are read from the page from then on (pageGet).
+	replyPage atomic.Bool
 }
 
 // Video is one entry of the recommend feed that has a playable video.
@@ -826,9 +829,22 @@ func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
 		q := fmt.Sprintf("item_id=%s&comment_id=%s&cut_version=1&cursor=%d&count=20&item_type=0", videoID, commentID, cursor)
 		var b []byte
 		for try := 0; try < 2 && len(b) == 0; try++ {
+			if c.replyPage.Load() {
+				var err error
+				if b, err = c.pageGet(path, q); err != nil {
+					return nil, false, err
+				}
+				break
+			}
 			h, err := guardHeaders(path, time.Now())
 			if err == nil {
-				if b, err = c.call("GET", path, q, "", h); err != nil {
+				b, err = c.call("GET", path, q, "", h)
+				if errors.Is(err, ErrVerify) {
+					c.replyPage.Store(true)
+					try-- // the same try, from the page
+					continue
+				}
+				if err != nil {
 					return nil, false, err
 				}
 			} else if !errors.Is(err, errNoGuard) {

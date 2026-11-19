@@ -235,6 +235,7 @@ type login struct {
 	status string     // what the scan is at, for the panel
 	verify bool       // Douyin asks more than the scan: its page shows instead
 	stop   func()     // ends what waits for the verification (verifyFor), if any
+	retry  []func()   // what runs once Douyin's verification is passed
 }
 
 // loginJS reads the login the page shows: its code, the text about it, and
@@ -483,6 +484,9 @@ func (a *app) loginPanel(c *ui.Context) {
 // answer the verification closes and retry runs.
 func (a *app) verify(path string, retry func()) {
 	if a.loginOpen {
+		if a.login.verify && a.login.stop != nil { // one verification open already: runs this too once passed
+			a.login.retry = append(a.login.retry, retry)
+		}
 		return
 	}
 	u := ""
@@ -495,7 +499,7 @@ func (a *app) verify(path string, retry func()) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	a.loginOpen, a.web.layout = true, true
-	a.login = login{verify: true, stop: cancel}
+	a.login = login{verify: true, stop: cancel, retry: []func(){retry}}
 	a.loginGen++
 	gen := a.loginGen
 	go func() {
@@ -508,11 +512,14 @@ return r.status === 200 && (await r.text()).length > 0;`)
 			if a.loginGen != gen { // closed already
 				return
 			}
+			retries := a.login.retry
 			a.loginOpen, a.web.layout, a.login = false, false, login{}
 			a.loginGen++
 			a.web.touch()
 			if passed {
-				retry()
+				for _, retry := range retries {
+					retry()
+				}
 			} else {
 				a.toast = "验证没有完成"
 			}

@@ -759,6 +759,7 @@ type thread struct {
 	fetching   bool
 	done       bool
 	msg        string
+	verified   bool // Douyin's verification passed for it once: not asked again
 }
 
 // comments opens s's comments beside it; the video goes on playing. Their
@@ -815,14 +816,19 @@ func (a *app) moreReplies(th *thread) {
 			th.fetching = false
 			if err != nil {
 				th.msg = err.Error()
-				if errors.Is(err, dy.ErrVerify) {
+				switch {
+				case !errors.Is(err, dy.ErrVerify):
+				case th.verified: // passed, and held back still: asking again would only flash the verification
+					th.msg = "验证过了，抖音仍没给回复，稍后点「展开」再试"
+					th.verified = false
+				default:
 					th.msg += "，完成后会自动载入"
 					a.verify("/aweme/v1/web/comment/list/reply/?device_platform=webapp&aid=6383&channel=channel_pc_web&item_id="+th.video+
-						"&comment_id="+th.cid+"&cut_version=1&cursor=0&count=20&item_type=0", func() { a.moreReplies(th) })
+						"&comment_id="+th.cid+"&cut_version=1&cursor=0&count=20&item_type=0", func() { th.verified = true; a.moreReplies(th) })
 				}
 				return
 			}
-			th.msg, th.done = "", len(cs) == 0
+			th.msg, th.done, th.verified = "", len(cs) == 0, false
 			th.items = append(th.items, cs...)
 		})
 	}()
