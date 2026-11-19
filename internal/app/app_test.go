@@ -1530,3 +1530,40 @@ func TestCommentsAhead(t *testing.T) {
 		t.Fatalf("after a failed fetch ahead: asked %d, %d items, msg %q", asked, len(a.sheet.items), a.sheet.msg)
 	}
 }
+
+// The rail's 评论 opens the comments from anywhere in it, its count too,
+// with a press held as a hand holds it; in 网页全屏 the comments show beside
+// the video.
+func TestRailHitArea(t *testing.T) {
+	p := stub("推荐", 1)
+	p.list[0].v = dy.Video{ID: "42", Author: "作者", Comments: 758}
+	p.list[0].comments = &sheet{total: 758, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条"}}}
+	ready(t, p.list[0])
+	a := withRoots(&app{pages: []*page{p}})
+	tt := newTester(a)
+	r, _ := tt.Find("评论")
+	n, _ := tt.Find("758")
+	for _, at := range [][2]float32{{r.X + r.W - 2, r.Y + 25}, {r.X + r.W/2, r.Y + 2}, {n.X + n.W/2, n.Y + n.H/2}} {
+		a.sheet = nil
+		tt.Frame()
+		tt.Press(at[0], at[1])
+		for range 8 { // some 130 ms
+			tt.Advance(16 * time.Millisecond)
+			tt.Frame()
+		}
+		tt.Release(at[0], at[1])
+		tt.Frame()
+		if a.sheet == nil || a.paused {
+			t.Fatalf("a press at %v in %+v: comments %v, paused %v", at, r, a.sheet != nil, a.paused)
+		}
+	}
+	a.sheet, a.theater = nil, true
+	tt.Frame()
+	if err := tt.Click("评论"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("第一条") {
+		t.Fatal("no comments in 网页全屏")
+	}
+}

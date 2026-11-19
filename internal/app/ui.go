@@ -99,8 +99,13 @@ func (a *app) view(c *ui.Context) {
 			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-2)
 		}
 		a.mainVideo.background(c, pal.bg)
-		if a.theater && p.plays() { // 网页全屏: the video alone, filling the window
-			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() { a.stage(c, p) })
+		if a.theater && p.plays() { // 网页全屏: the video filling the window, its comments beside it once opened
+			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+				a.stage(c, p)
+				if a.sheet != nil {
+					ui.Row(c).Padding(16, 16, 16, 0).AlignItems(ui.Stretch).Children(func() { a.commentPanel(c, a.sheet) })
+				}
+			})
 			return
 		}
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
@@ -1363,16 +1368,21 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 		under := func(text string) {
 			ui.Text(c, text).FontSize(14).FontWeight(600).TextColor(ui.RGBA(255, 255, 255, 0.9)).TextShadow(0, 1, 3, shadow).SingleLine()
 		}
-		// shown is a count with its icon, which does nothing.
+		// action is a button of the rail: its icon in a circle, and its count
+		// under it, which a press on takes too, as Douyin's.
 		action := func(key string, ic *ui.SVG, label, text string, color ui.Color) ui.Element {
-			var b ui.Element
-			ui.Column(c).Gap(2).AlignItems(ui.Center).Children(func() {
-				b = iconButton(c.Key(key), ic, icon, color, label)
+			b := ui.ButtonBase(c.Key(key)).Column().Gap(2).AlignItems(ui.Center).Label(label).TextColor(color).FocusRing(false)
+			bg := ui.Transparent
+			if b.Hovered() {
+				bg = ui.RGBA(128, 128, 128, 0.2)
+			}
+			bg = b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond})
+			return b.Children(func() {
+				ui.Box(c).Size(icon+16, icon+16).Center().Radius(999).Background(bg).Children(func() { pressedIcon(c, b, ic, icon) })
 				if text != "" {
 					under(text)
 				}
 			})
-			return b
 		}
 		shares := count(s.v.Shares)
 		if s.v.Live == nil { // a room has no counts, nor comments the client reads
@@ -2040,12 +2050,18 @@ func iconButton(c *ui.Context, icon *ui.SVG, size float32, color ui.Color, label
 		bg = ui.RGBA(128, 128, 128, 0.2)
 	}
 	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
+	return b.Children(func() { pressedIcon(c, b, icon, size) })
+}
+
+// pressedIcon is icon in b, shrinking while b is pressed. The icon shrinks,
+// not b, whose shrinking took its edge from a press soon after the last
+// (2026-11-19: 50 ms after) and, on the rail, would shrink the count with it.
+func pressedIcon(c *ui.Context, b ui.Element, icon *ui.SVG, size float32) {
 	pose := ui.Pose{}
 	if b.Pressed() {
 		pose.Scale = 0.88
 	}
-	b.AnimatePose(pose, ui.Snappy)
-	return b.Children(func() { ui.Icon(c, icon).Size(size, size) })
+	ui.Icon(c, icon).Size(size, size).AnimatePose(pose, ui.Snappy)
 }
 
 // ago is when something was posted, as Douyin says it: minutes, hours or
