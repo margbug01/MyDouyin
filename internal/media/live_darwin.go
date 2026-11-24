@@ -89,8 +89,13 @@ func videoAsset(url string, headers map[string]string) (objc.ID, error) {
 	for k, v := range headers {
 		h.Send(sel("setObject:forKey:"), nsString(v), nsString(k))
 	}
+	// Without AVURLAssetUsesNoPersistentCacheKey, which WebKit sets too, the
+	// player downloads the whole MP4 at once into $TMPDIR/MediaCache: 466 MB
+	// fetched and 424 MB written for two 225 MB videos watched 8 s each. With
+	// it, it reads ahead about 40 MB in memory and nothing goes to disk.
+	yes := objc.ID(objc.GetClass("NSNumber")).Send(sel("numberWithBool:"), true)
 	return objc.ID(clsAsset).Send(sel("URLAssetWithURL:options:"), u,
-		nsDict("AVURLAssetHTTPHeaderFieldsKey", h)), nil
+		nsDict("AVURLAssetHTTPHeaderFieldsKey", h, "AVURLAssetUsesNoPersistentCacheKey", yes)), nil
 }
 
 func openAsset(asset objc.ID, vod, pixels bool) (*Live, error) {

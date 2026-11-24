@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -80,6 +81,29 @@ func TestVideoStream(t *testing.T) {
 	l.Close()
 	if _, err := l.Next(); err != io.EOF {
 		t.Fatalf("closed Next: %v", err)
+	}
+}
+
+// A streamed video is kept in memory, not in CoreMedia's disk cache, which
+// lists each URL it holds in $TMPDIR/MediaCache/diskcacherepository.plist.
+func TestVideoStreamSkipsDiskCache(t *testing.T) {
+	path, err := filepath.Abs("../../testdata/silent.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, path) }))
+	defer srv.Close()
+	l, err := OpenVideo(srv.URL+"/disk.mp4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Next(); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	repo, _ := os.ReadFile(filepath.Join(os.TempDir(), "MediaCache", "diskcacherepository.plist"))
+	if bytes.Contains(repo, []byte(srv.URL)) {
+		t.Fatal("the video went into CoreMedia's disk cache")
 	}
 }
 
