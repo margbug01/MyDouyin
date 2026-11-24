@@ -177,3 +177,114 @@ func TestOrbitPlayFetchesThroughSource(t *testing.T) {
 		t.Fatalf("source: %s after %d fetches, played %s", got, calls, played)
 	}
 }
+
+func TestOrbitPicksDefaultFirstAndInfiniteNonRepeating(t *testing.T) {
+	if orbitSources[0].id != orbitPicks || (orbitState{}).source != orbitPicks {
+		t.Fatalf("orbitPicks must be first and default: sources=%+v default=%v", orbitSources, (orbitState{}).source)
+	}
+
+	// Sidebar 精选 already holds p1 and p2; orbit stream must never repeat them,
+	// nor repeat duplicates returned across category tabs or infinite fallback.
+	sidebarIDs := map[string]bool{"p1": true, "p2": true}
+	tab1Done := false
+	tab1 := func() ([]dy.Video, error) {
+		if tab1Done {
+			return nil, nil
+		}
+		tab1Done = true
+		return []dy.Video{
+			{ID: "p1"}, {ID: "a1"}, {ID: "a2"}, {ID: "a3"}, {ID: "a3"},
+			{ID: "a4"}, {ID: "a5"}, {ID: "a6"}, {ID: "a7"}, {ID: "a8"},
+		}, nil
+	}
+	tab2Calls := 0
+	tab2 := func() ([]dy.Video, error) {
+		tab2Calls++
+		if tab2Calls == 1 {
+			// Overlaps heavily with tab1 and sidebar 精选; only b1..b3 are new.
+			return []dy.Video{{ID: "p2"}, {ID: "a1"}, {ID: "b1"}, {ID: "b2"}, {ID: "b3"}}, nil
+		}
+		return nil, nil
+	}
+	infSeq := 0
+	infinite := func() ([]dy.Video, error) {
+		batch := make([]dy.Video, 0, orbitRing+2)
+		// Include an old duplicate on every pull to ensure dedup holds forever.
+		batch = append(batch, dy.Video{ID: "a1"}, dy.Video{ID: "p1"})
+		for range orbitRing {
+			infSeq++
+			batch = append(batch, dy.Video{ID: fmt.Sprintf("inf%d", infSeq)})
+		}
+		return batch, nil
+	}
+
+	pager := newOrbitStreamPager([]dy.Pager[dy.Video]{tab1, tab2}, infinite, func(id string) bool { return sidebarIDs[id] })
+	seen := map[string]bool{}
+	for round := range 12 {
+		vs, err := pager()
+		if err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		if len(vs) < orbitRing {
+			t.Fatalf("round %d: got only %d videos, want >= %d", round, len(vs), orbitRing)
+		}
+		for _, v := range vs {
+			if sidebarIDs[v.ID] {
+				t.Fatalf("round %d leaked sidebar video %s", round, v.ID)
+			}
+			if seen[v.ID] {
+				t.Fatalf("round %d repeated video %s", round, v.ID)
+			}
+			seen[v.ID] = true
+		}
+	}
+}
+
+func TestCycleOrbitWaitsForFreshBatchInsteadOfWrapping(t *testing.T) {
+	gate := make(chan struct{})
+	seq := 0
+	orbitPage := &page{
+		title: "精选",
+		grid:  true,
+		next: func() ([]dy.Video, error) {
+			<-gate
+			out := make([]dy.Video, orbitRing)
+			for i := range orbitRing {
+				seq++
+				out[i] = dy.Video{ID: fmt.Sprintf("fresh%d", seq)}
+			}
+			return out, nil
+		},
+	}
+	for i := range orbitRing {
+		orbitPage.list = append(orbitPage.list, &slot{v: dy.Video{ID: fmt.Sprintf("init%d", i)}})
+	}
+	home := &page{title: "引力场", grid: true}
+	a := &app{
+		home:       home,
+		orbitPicks: orbitPage,
+		pages:      []*page{home},
+		orbit:      orbitState{source: orbitPicks},
+		posted:     make(chan func(), 16),
+	}
+
+	// Clicking 换一批 when only 1 ring is loaded must NOT wrap back to 0; it waits for fresh videos.
+	a.cycleOrbit()
+	if a.orbit.offset != 0 || !a.orbit.pendingAdvance {
+		t.Fatalf("expected pendingAdvance while fetching: offset=%d pending=%v", a.orbit.offset, a.orbit.pendingAdvance)
+	}
+	close(gate)
+	// First batch finishes -> automatically advances offset to 8 (fresh1..fresh8) and prefetches next ring.
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fresh orbit batch")
+	}
+	if a.orbit.pendingAdvance || a.orbit.offset != orbitRing {
+		t.Fatalf("did not advance to fresh ring: offset=%d pending=%v len=%d", a.orbit.offset, a.orbit.pendingAdvance, len(orbitPage.list))
+	}
+	if got := orbitPage.list[a.orbit.offset].v.ID; got != "fresh1" {
+		t.Fatalf("new ring starts at %s, want fresh1", got)
+	}
+}

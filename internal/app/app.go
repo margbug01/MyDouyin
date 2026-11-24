@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -201,6 +202,8 @@ type app struct {
 
 	picks, feed *page             // the roots: 精选's covers, 推荐's videos one by one
 	home        *page             // 引力场: centered search with orbiting covers
+	orbitPicks  *page             // 引力场's own deduplicated, infinitely refreshable 精选 stream
+	picksIDs    sync.Map          // video IDs already shown in sidebar 精选 (race-free lookup from orbit pager)
 	orbit       orbitState        // 引力场 state (orbit.go)
 	winBg       string            // the window's background color, as last set (view)
 	img        *images                   // covers and avatars
@@ -249,6 +252,14 @@ type app struct {
 	setLater    func(id string, on bool) error
 	dragging    bool    // the progress pressed, being dragged
 	dragAt      float32 // where along it, 0 to 1
+
+	// Stage control bar auto-hide state (ui.go).
+	stageSlot      *slot
+	stageActiveAt  time.Time
+	stagePointerX  float32
+	stagePointerY  float32
+	stageWasOver   bool
+	controlsAlpha  float32
 
 	posted chan func() // what post runs, in a test without a window
 
@@ -1141,9 +1152,27 @@ func (a *app) more(p *page) {
 				return
 			}
 			p.msg, p.done = "", len(vs) == 0
-			for _, v := range vs {
-				p.list = append(p.list, &slot{v: v})
+			existing := make(map[string]bool, len(p.list))
+			for _, s := range p.list {
+				if s.v.ID != "" {
+					existing[s.v.ID] = true
+				}
 			}
+			added := 0
+			for _, v := range vs {
+				if v.ID != "" && existing[v.ID] {
+					continue
+				}
+				if v.ID != "" {
+					existing[v.ID] = true
+					if p == a.picks {
+						a.picksIDs.Store(v.ID, struct{}{})
+					}
+				}
+				p.list = append(p.list, &slot{v: v})
+				added++
+			}
+			a.onOrbitSourceLoaded(p, added)
 			if c := a.cur(); c == p || c.from == p { // a page opened over p while it loaded prepares nothing of p
 				a.fill()
 			}
@@ -1348,12 +1377,6 @@ func (a *app) loadAccount() {
 					"稍后再看": list("稍后再看", a.c.WatchLater),
 				}
 				a.mineTab = "作品"
-			}
-			if me.ID != "" && !a.orbit.userPicked {
-				a.orbit.source = orbitFollow
-				if a.isHome(a.cur()) {
-					a.ensureOrbitLoaded()
-				}
 			}
 			if err != nil {
 				a.followMsg = "关注列表没载入：" + err.Error()
@@ -1843,6 +1866,7 @@ func Run() error {
 	a.picks = picksPage(c, "精选", 0)
 	a.tabPages[0] = a.picks
 	a.home = &page{title: "引力场", grid: true}
+	a.orbitPicks = a.orbitPicksPage(c)
 	a.orbit = orbitState{source: orbitPicks}
 	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true, restart: c.FollowFeed}
 	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true, restart: c.FriendFeed}

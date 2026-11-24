@@ -2,22 +2,26 @@ package app
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
+	"douyin/internal/dy"
 	"github.com/egoist/mygo/ui"
 )
 
 // orbitSource names which video list orbits the centered search hub.
+// orbitPicks is the zero value and the fixed first landing source.
 type orbitSource int
 
 const (
-	orbitFollow orbitSource = iota
+	orbitPicks orbitSource = iota
+	orbitFollow
 	orbitLater
 	orbitHistory
-	orbitPicks
 )
 
 type orbitSourceSpec struct {
@@ -27,20 +31,21 @@ type orbitSourceSpec struct {
 }
 
 var orbitSources = []orbitSourceSpec{
+	{id: orbitPicks, label: "精选"},
 	{id: orbitFollow, label: "关注", needSignIn: true},
 	{id: orbitLater, label: "稍后", needSignIn: true},
 	{id: orbitHistory, label: "历史", needSignIn: true},
-	{id: orbitPicks, label: "精选"},
 }
 
 // orbitState holds all UI state for the Orbital Home (引力场).
 type orbitState struct {
-	source     orbitSource
-	userPicked bool   // true once the user explicitly chooses a source pill
-	hidden     bool   // 「收起周围画面」 pure-search mode
-	hotOpen    bool   // 「热搜潜望」 opt-in hot-search popover
-	offset     int    // starting index for 「换一批」 cycling
-	theme      string // "", "light", or "dark"; "" follows system appearance
+	source         orbitSource
+	userPicked     bool   // true once the user explicitly chooses a source pill
+	hidden         bool   // 「收起周围画面」 pure-search mode
+	hotOpen        bool   // 「热搜潜望」 opt-in hot-search popover
+	offset         int    // starting index for 「换一批」 cycling
+	pendingAdvance bool   // waiting for a freshly fetched ring before advancing
+	theme          string // "", "light", or "dark"; "" follows system appearance
 }
 
 // orbitCardRect is one card's placed rectangle on the orbital canvas.
@@ -94,14 +99,132 @@ func (a *app) orbitSourcePage(src orbitSource) *page {
 		}
 		return nil
 	default:
+		if a.orbitPicks != nil {
+			return a.orbitPicks
+		}
 		return a.picks
 	}
 }
 
-// ensureOrbitLoaded kicks off fetching the active orbit source when empty.
+// orbitPicksPage builds an independent, deduplicated, infinitely refreshable
+// 精选 page for 引力场 so refreshing never duplicates videos or mirrors the
+// sidebar 精选 list.
+func (a *app) orbitPicksPage(c *dy.Client) *page {
+	next := func() dy.Pager[dy.Video] {
+		var tabs []int
+		for _, tab := range dy.Tabs {
+			if tab.ID != 0 {
+				tabs = append(tabs, tab.ID)
+			}
+		}
+		rand.Shuffle(len(tabs), func(i, j int) { tabs[i], tabs[j] = tabs[j], tabs[i] })
+		streams := make([]dy.Pager[dy.Video], 0, len(tabs)+1)
+		for _, id := range tabs {
+			streams = append(streams, c.Picks(id))
+		}
+		streams = append(streams, c.Picks(0))
+		return newOrbitStreamPager(streams, c.Feed, func(id string) bool {
+			return a.picksHasID(id)
+		})
+	}
+	return &page{title: "精选", grid: true, next: next(), restart: next}
+}
+
+func (a *app) picksHasID(id string) bool {
+	if id == "" {
+		return false
+	}
+	_, ok := a.picksIDs.Load(id)
+	return ok
+}
+
+// newOrbitStreamPager merges multiple finite category pagers and an infinite
+// fallback feed into one deduplicated stream that delivers at least orbitRing
+// unseen videos per call and never loops back to already-seen video IDs.
+func newOrbitStreamPager(streams []dy.Pager[dy.Video], infinite dy.Pager[dy.Video], skip func(id string) bool) dy.Pager[dy.Video] {
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	idx := 0
+	staleInTab := 0
+
+	return func() ([]dy.Video, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		var out []dy.Video
+		var lastErr error
+		const maxPulls = 6
+
+		for pulls := 0; pulls < maxPulls && len(out) < orbitRing; pulls++ {
+			var batch []dy.Video
+			var err error
+			if idx < len(streams) {
+				batch, err = streams[idx]()
+				if err != nil {
+					lastErr = err
+					idx++
+					staleInTab = 0
+					continue
+				}
+				if len(batch) == 0 {
+					idx++
+					staleInTab = 0
+					continue
+				}
+			} else if infinite != nil {
+				batch, err = infinite()
+				if err != nil {
+					lastErr = err
+					break
+				}
+				if len(batch) == 0 {
+					break
+				}
+			} else {
+				break
+			}
+
+			added := 0
+			for _, v := range batch {
+				if v.ID != "" {
+					if seen[v.ID] || (skip != nil && skip(v.ID)) {
+						continue
+					}
+					seen[v.ID] = true
+				}
+				out = append(out, v)
+				added++
+			}
+			if idx < len(streams) {
+				if added == 0 {
+					staleInTab++
+					if staleInTab >= 1 {
+						idx++
+						staleInTab = 0
+					}
+				} else {
+					staleInTab = 0
+					// Rotate across categories after a full batch so consecutive rings stay varied.
+					if len(out) >= orbitRing {
+						idx++
+					}
+				}
+			}
+		}
+		if len(out) == 0 && lastErr != nil {
+			return nil, lastErr
+		}
+		return out, nil
+	}
+}
+
+// ensureOrbitLoaded kicks off fetching the active orbit source when empty or
+// running low on upcoming rings so 「换一批」 stays instant and non-repeating.
 func (a *app) ensureOrbitLoaded() {
 	src := a.orbitSourcePage(a.orbit.source)
-	if src != nil && len(src.list) == 0 && !src.fetching && !src.done && src.next != nil {
+	if src == nil || src.fetching || src.done || src.next == nil {
+		return
+	}
+	if len(src.list) == 0 || len(src.list)-a.orbit.offset < 2*orbitRing {
 		a.more(src)
 	}
 }
@@ -110,14 +233,16 @@ func (a *app) setOrbitSource(src orbitSource) {
 	a.orbit.source = src
 	a.orbit.userPicked = true
 	a.orbit.offset = 0
+	a.orbit.pendingAdvance = false
 	if src == orbitHistory && a.mine != nil {
 		a.freshHistory()
 	}
 	a.ensureOrbitLoaded()
 }
 
-// cycleOrbit advances to the next ring of videos in the active source, or
-// fetches another page when nearing the end.
+// cycleOrbit advances to the next ring of unseen videos in the active source.
+// When an infinite or still-loading source does not have a full next ring yet,
+// it waits for the fresh fetch instead of looping back to already-seen videos.
 func (a *app) cycleOrbit() {
 	src := a.orbitSourcePage(a.orbit.source)
 	if src == nil {
@@ -128,13 +253,52 @@ func (a *app) cycleOrbit() {
 		return
 	}
 	nextOff := a.orbit.offset + orbitRing
-	if nextOff+orbitRing > len(src.list) && !src.done && src.next != nil {
+	if nextOff+2*orbitRing > len(src.list) && !src.done && src.next != nil {
 		a.more(src)
 	}
-	if nextOff >= len(src.list) {
-		nextOff = 0
+	if nextOff+orbitRing <= len(src.list) {
+		a.orbit.offset = nextOff
+		a.orbit.pendingAdvance = false
+		return
 	}
-	a.orbit.offset = nextOff
+	if !src.done && src.next != nil {
+		a.orbit.pendingAdvance = true
+		a.more(src)
+		return
+	}
+	if nextOff < len(src.list) {
+		a.orbit.offset = nextOff
+	} else {
+		a.orbit.offset = 0
+	}
+	a.orbit.pendingAdvance = false
+}
+
+// onOrbitSourceLoaded completes a pending 「换一批」 advance once fresh videos arrive.
+func (a *app) onOrbitSourceLoaded(p *page, added int) {
+	if p == nil || p != a.orbitSourcePage(a.orbit.source) {
+		return
+	}
+	if a.orbit.pendingAdvance {
+		nextOff := a.orbit.offset + orbitRing
+		switch {
+		case nextOff+orbitRing <= len(p.list):
+			a.orbit.offset = nextOff
+			a.orbit.pendingAdvance = false
+		case p.done || added == 0:
+			if nextOff < len(p.list) {
+				a.orbit.offset = nextOff
+			} else {
+				a.orbit.offset = 0
+			}
+			a.orbit.pendingAdvance = false
+		default:
+			a.more(p)
+		}
+	}
+	if a.isHome(a.cur()) && added > 0 && len(p.list)-a.orbit.offset < 2*orbitRing && !p.done && !p.fetching && p.next != nil {
+		a.more(p)
+	}
 }
 
 // playFromOrbit plays src's video idx on top of the Orbital Home so Escape
@@ -454,7 +618,10 @@ func (a *app) orbitCenterHub(c *ui.Context, w, h float32) {
 				return
 			}
 			if srcPage != nil && len(srcPage.list) > 0 && !a.orbit.hidden {
-				if iconButton(c.Key("orbit-cycle"), iconRefresh, 14, pal.faint, "换一批").Clicked() {
+				btn := iconButton(c.Key("orbit-cycle"), iconRefresh, 14, onOff(a.orbit.pendingAdvance, pal.accent, pal.faint), "换一批")
+				if a.orbit.pendingAdvance {
+					btn.Opacity(0.6)
+				} else if btn.Clicked() {
 					a.cycleOrbit()
 				}
 			}

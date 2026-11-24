@@ -645,6 +645,10 @@ func (a *app) bigCard(c *ui.Context, p *page, s *slot, grow float32, height floa
 	}
 }
 
+// controlsHideAfter is how long the bottom playback bar stays visible after
+// pointer activity or switching to a video before fading out during playback.
+const controlsHideAfter = 2500 * time.Millisecond
+
 // stage is p's current video, with its author and text over its foot, the
 // play controls along its bottom and its actions down its right side. All of
 // it takes the wheel, which steps through the list; the picture takes
@@ -703,6 +707,41 @@ func (a *app) stage(c *ui.Context, p *page) {
 			return
 		}
 		s := p.list[p.idx]
+		bounds := box.Bounds()
+		now := c.Now()
+		px, py, over := box.PointerPosition()
+		if a.stageSlot != s {
+			a.stageSlot = s
+			a.stageActiveAt = now
+		}
+		switch {
+		case over && (!a.stageWasOver || px != a.stagePointerX || py != a.stagePointerY):
+			a.stageActiveAt = now
+			a.stagePointerX, a.stagePointerY = px, py
+		case !over && a.stageWasOver:
+			a.stageActiveAt = time.Time{}
+		}
+		a.stageWasOver = over
+
+		overBar := over && bounds.H > 0 && py >= bounds.H-68
+		pinned := a.paused || a.dragging || a.listen || a.pipOn ||
+			a.qualityOpen || a.speedOpen || a.volumeOpen || a.moreOpen ||
+			c.Focused(a.dmBox) || overBar
+		wantControls := pinned
+		if !wantControls && !a.stageActiveAt.IsZero() {
+			elapsed := now.Sub(a.stageActiveAt)
+			if elapsed < controlsHideAfter {
+				wantControls = true
+				c.After(controlsHideAfter - elapsed)
+			}
+		}
+		targetAlpha := float32(0)
+		if wantControls {
+			targetAlpha = 1
+		}
+		alpha := box.AnimateTo("controls-alpha", targetAlpha, ui.Animation{Duration: 200 * time.Millisecond})
+		a.controlsAlpha = alpha
+
 		picture.Children(func() {
 			if s.vp != nil && a.listen { // 听抖音: the sound goes on, the picture gives way to the cover
 				if bmp := a.img.get(s.v.Cover); bmp != nil {
@@ -731,7 +770,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					a.playbackCover(c, s.v.Cover, ui.Contain)
 				}
 			}
-			a.slideIn(c, s, box.Bounds().H)
+			a.slideIn(c, s, bounds.H)
 			if a.paused && s.vp != nil {
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Children(func() {
 					ui.Icon(c, iconPlay).Size(60, 60).TextColor(white).Opacity(0.85)
@@ -758,7 +797,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 			// Isolate dynamic danmaku children inside a keyed pass-through layer so
 			// arriving/leaving bullets never shift the positional IDs of caption, rail, or controls.
 			ui.Box(c.Key("danmaku-layer")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Children(func() {
-				danmakuShown = a.danmakuLayer(c, s, box.Bounds().W, danmakuAt)
+				danmakuShown = a.danmakuLayer(c, s, bounds.W, danmakuAt)
 			})
 		}
 		if danmakuShown && !a.paused {
@@ -767,10 +806,10 @@ func (a *app) stage(c *ui.Context, p *page) {
 			c.After(500 * time.Millisecond) // the time moves on
 		}
 		if !a.clear { // 清屏: the video alone, the bar left to bring the rest back
-			a.caption(c, p, s)
-			a.rail(c, p, s, box.Bounds().H)
+			a.caption(c, p, s, alpha)
+			a.rail(c, p, s, bounds.H)
 		}
-		a.controls(c, s, at, box.Bounds().W)
+		a.controls(c, s, at, bounds.W, alpha, wantControls)
 	})
 }
 
@@ -969,10 +1008,12 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 }
 
 // caption is the author, the day and the text, over the foot of the video;
-// the fade keeps it readable over a bright frame.
-func (a *app) caption(c *ui.Context, p *page, s *slot) {
+// the fade keeps it readable over a bright frame. It glides down when the
+// bottom playback bar auto-hides.
+func (a *app) caption(c *ui.Context, p *page, s *slot, controlsAlpha float32) {
 	ui.Column(c.Key("caption")).Absolute().Left(0).Right(0).Bottom(0).Padding(64, 96, 44+18+6, 18).Gap(6). // clear of the bar and its progress
-												Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
+														Translate(0, (1-controlsAlpha)*44).
+														Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			name := "@" + s.v.Author
 			b := ui.ButtonBase(c.Key("author")).FocusRing(false).Label(name)
@@ -1019,8 +1060,12 @@ func (a *app) caption(c *ui.Context, p *page, s *slot) {
 // controls is the bar under the video, as Douyin's: play, the time, the
 // bullet comments on the left; 连播 and 清屏, the definition, the speed, the
 // volume, filling the window and the screen on the right; above it the
-// progress, which a press or a drag moves the video to.
-func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w float32) {
+// progress, which a press or a drag moves the video to. It fades away during
+// playback when idle and reappears on pointer hover/movement.
+func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float32, active bool) {
+	if alpha <= 0.01 && !active {
+		return
+	}
 	live := s.v.Live != nil
 	show := barFit(w, live)
 	var of time.Duration
@@ -1030,7 +1075,13 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w float32) {
 	if of <= 0 {
 		of = s.v.Duration
 	}
-	ui.Column(c.Key("controls")).Absolute().Left(0).Right(0).Bottom(0).Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.5), 180).Children(func() {
+	col := ui.Column(c.Key("controls")).Absolute().Left(0).Right(0).Bottom(0).
+		Opacity(alpha).Translate(0, (1-alpha)*8).
+		Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.5), 180)
+	if !active {
+		col.PassThrough()
+	}
+	col.Children(func() {
 		if !live {
 			a.progress(c, s, at, of)
 		}
