@@ -88,10 +88,10 @@ var qualityChoices = []string{"智能", "1080P", "720P", "540P"}
 func (a *app) settingsDialog(c *ui.Context) {
 	ui.DialogBase(c.Key("settings"), &a.settingsOpen, func(back, panel ui.Element) {
 		back.Background(ui.RGBA(0, 0, 0, 0.45))
-		panel.Width(420).Padding(18, 20, 20, 20).Gap(6).Radius(14).Background(ui.Hex("#252632")).
-			Border(0.5, ui.RGBA(255, 255, 255, 0.12)).Shadow(0, 10, 30, -6, ui.RGBA(0, 0, 0, 0.5)).Label("设置")
+		panel.Width(420).Padding(18, 20, 20, 20).Gap(6).Radius(14).Background(pal.popover).
+			Border(1, pal.popoverBd).Shadow(0, 10, 30, -6, pal.cardShadow).Label("设置")
 		ui.Row(c).AlignItems(ui.Center).Margin(0, 0, 8, 0).Children(func() {
-			ui.Text(c, "设置").FontSize(17).FontWeight(700).TextColor(white).Grow(1)
+			ui.Text(c, "设置").FontSize(17).FontWeight(700).TextColor(pal.strong).Grow(1)
 			if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭设置").Clicked() {
 				a.settingsOpen = false
 			}

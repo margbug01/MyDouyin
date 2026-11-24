@@ -14,7 +14,7 @@ import (
 // holds, and they go up with the GitHub release. The app reads the latest
 // release's manifest at launch and every few hours, unless the settings
 // turn that off, and when asked there; a newer version shows at the foot of
-// the sidebar, and a click downloads it, checks its signature, puts it in
+// the dock, and a click downloads it, checks its signature, puts it in
 // place of this copy and starts it. A build of go build, which has no key,
 // never checks.
 
@@ -131,7 +131,7 @@ func (a *app) installUpdate() {
 	}()
 }
 
-// updateBanner is at the foot of the sidebar while a newer version is
+// updateBanner is at the foot of the dock while a newer version is
 // there: a click installs it; then how far the download is, or why it
 // failed.
 func (a *app) updateBanner(c *ui.Context) {
@@ -154,7 +154,7 @@ func (a *app) updateBanner(c *ui.Context) {
 		case u.err != "":
 			sub = u.err + "，点击重试"
 		}
-		ui.Text(c, title).FontSize(13).FontWeight(700).TextColor(white)
+		ui.Text(c, title).FontSize(13).FontWeight(700).TextColor(pal.strong)
 		ui.Text(c, sub).FontSize(11.5).TextColor(pal.muted).MaxLines(3)
 	})
 	if b.Clicked() {

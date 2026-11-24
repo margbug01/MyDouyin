@@ -478,13 +478,13 @@ func (a *app) loginPanel(c *ui.Context) {
 	verify := l.verify && a.web.v != nil
 	ui.DialogBase(c.Key("login"), &a.loginOpen, func(back, panel ui.Element) {
 		back.Background(ui.RGBA(0, 0, 0, 0.55))
-		panel.Radius(16).Clip().Background(ui.Hex("#252632")).Border(0.5, ui.RGBA(255, 255, 255, 0.12)).
-			Shadow(0, 10, 30, -6, ui.RGBA(0, 0, 0, 0.5)).Label("扫码登录抖音")
+		panel.Radius(16).Clip().Background(pal.popover).Border(1, pal.popoverBd).
+			Shadow(0, 10, 30, -6, pal.cardShadow).Label("扫码登录抖音")
 		if verify {
 			w, h := c.Size()
 			panel.Width(min(960, w-48)).Height(min(660, h-48))
 			ui.Row(c).Height(52).PaddingX(18).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "抖音要求验证身份，请按页面提示完成").FontSize(14).FontWeight(600).TextColor(white).Grow(1)
+				ui.Text(c, "抖音要求验证身份，请按页面提示完成").FontSize(14).FontWeight(600).TextColor(pal.strong).Grow(1)
 				if ui.Button(c.Key("later"), "以后再说").Clicked() {
 					a.loginOpen = false
 				}
@@ -496,10 +496,10 @@ func (a *app) loginPanel(c *ui.Context) {
 		if a.web.v != nil { // Douyin's page, laid out for its code to show, under what covers it
 			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0)
 		}
-		ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.Hex("#252632")).
+		ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(pal.popover).
 			Padding(22, 24, 20, 24).Gap(14).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "扫码登录抖音").FontSize(17).FontWeight(700).TextColor(white)
-			ui.Box(c).Size(220, 220).Radius(12).Background(white).Center().Children(func() {
+			ui.Text(c, "扫码登录抖音").FontSize(17).FontWeight(700).TextColor(pal.strong)
+			ui.Box(c).Size(220, 220).Radius(12).Background(white).Border(1, pal.hairline).Center().Children(func() {
 				if l.qr != nil {
 					ui.Image(c, l.qr).Size(196, 196).Opacity(onOff(strings.HasPrefix(l.status, "已扫码"), float32(0.25), 1))
 				} else {

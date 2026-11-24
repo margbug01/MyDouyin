@@ -234,7 +234,7 @@ func (a *app) liveMessageLine(c *ui.Context, msg dy.LiveMessage) {
 	var label strings.Builder
 	offset := 0
 	for _, badge := range msg.Badges {
-		badgeText, background := pal.text, ui.Hex("#3b3d51")
+		badgeText, background := ui.RGBA(255, 255, 255, 0.92), ui.Hex("#3b3d51")
 		switch badge.Kind {
 		case 1:
 			badgeText, background = ui.Hex("#bcd5ff"), ui.Hex("#293d60")

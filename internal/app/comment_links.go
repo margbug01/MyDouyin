@@ -112,7 +112,7 @@ func (a *app) commentGroupDialog(c *ui.Context) {
 		default:
 			g := d.group
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				a.avatar(c, g.Avatar, g.Name, 40)
+				a.avatar(c, pal, g.Avatar, g.Name, 40)
 				ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 					ui.Text(c, fmt.Sprintf("%s · %d 人", g.Name, g.Members)).FontWeight(700)
 					if g.Owner.Name != "" {

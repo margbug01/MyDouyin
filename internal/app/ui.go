@@ -17,33 +17,29 @@ import (
 	"douyin/internal/dy"
 )
 
-// The window is laid out as Douyin's own, with less in it: a narrow sidebar
-// (精选, 推荐, the accounts followed), the search field centered along the
-// top, and under it a grid of covers or the video playing. The components
+// The window is laid out as Douyin's own, with less in it: a floating dock
+// down the left (引力场, 精选, 推荐, 关注…), the search field centered along
+// the top, and under it a grid of covers or the video playing. The components
 // are MySpotify's: its buttons, its rows, its type sizes.
 
 const (
-	sidebarWidth = 200
 	// barGutter is the room a scroll keeps clear for its bar, which MyGo
 	// draws over the content 3 to 9 DIPs in from the edge: a list whose rows
 	// keep this much clear themselves needs none.
 	barGutter    = 12
 	topBarHeight = 56
-	bgHex        = "#161823" // Douyin's dark, which the window always is
 )
 
-// palette holds the app's colors, on Douyin's dark.
-type palette struct {
-	bg, raised, text, muted, faint ui.Color
-	hairline, hover, press, accent ui.Color
-}
-
-var pal = palette{
-	bg:       ui.Hex(bgHex),
+// pal is the window's colors, light or dark as the user chose (a.view sets
+// it as each frame starts); vid is what sits over a video, always dark.
+var pal, vid = darkPal, palette{
+	bg:       ui.Hex("#161823"),
 	raised:   ui.Hex("#21232e"),
+	popover:  ui.Hex("#252632"),
 	text:     ui.RGBA(255, 255, 255, 0.92),
 	muted:    ui.RGBA(255, 255, 255, 0.6),
 	faint:    ui.RGBA(255, 255, 255, 0.36),
+	strong:   white,
 	hairline: ui.RGBA(255, 255, 255, 0.08),
 	hover:    ui.RGBA(255, 255, 255, 0.06),
 	press:    ui.RGBA(255, 255, 255, 0.1),
@@ -61,22 +57,19 @@ var white = ui.RGB(255, 255, 255)
 
 func (a *app) view(c *ui.Context) {
 	p := a.cur()
-	homeLight := a.isHome(p) && !a.orbitIsDark()
-	var t ui.Theme
-	if homeLight {
-		op := orbitLightPal
-		t = *ui.LightTheme()
-		t.Background, t.Text, t.TextMuted = ui.Color{}, op.text, op.muted
-	} else {
-		t = *ui.DarkTheme()
-		t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
+	pal = onOff(a.orbitIsDark(), darkPal, lightPal)
+	t := *onOff(pal.dark, ui.DarkTheme(), ui.LightTheme())
+	t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
+	if a.win != nil && a.winBg != pal.bgHex { // what shows as the window resizes, before a frame
+		a.winBg = pal.bgHex
+		a.win.SetBackgroundColor(pal.bgHex)
 	}
 	a.syncLiveRoom(p)
 	giftOpen := a.liveChat != nil && a.liveChat.gifts.open
 	a.mainVideo.begin(a.win)
 	a.mainVideo.off = giftOpen || a.group.open || a.loginOpen && a.login.verify && a.web.v != nil
 	t.Accent, t.AccentText = pal.accent, white
-	t.Inverse, t.InverseText = white, pal.bg // toasts': by default the text is the Background, clear here
+	t.Inverse, t.InverseText = onOff(pal.dark, white, ui.Hex("#11141e")), onOff(pal.dark, ui.Hex("#11141e"), white) // toasts': by default the text is the Background, clear here
 	t.Selection = pal.accent.Alpha(0.35)
 	t.Font = appFont
 	c.SetTheme(&t)
@@ -116,13 +109,13 @@ func (a *app) view(c *ui.Context) {
 			})
 			return
 		}
+		a.chrome(c, p) // first: the focus comes to the dock first; it is drawn over the page
 		if a.isHome(p) {
 			a.orbitView(c)
 			return
 		}
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
-			ui.Column(c.Key("main")).Grow(1).Children(func() {
+			ui.Column(c.Key("main")).Grow(1).PaddingStart(contentLeft).Children(func() {
 				a.topBar(c, p)
 				if !p.plays() {
 					switch {
@@ -177,11 +170,11 @@ func (a *app) view(c *ui.Context) {
 }
 
 // searchField is where the search field sits in the window: its left edge
-// and width, centered over the content.
+// and width, centered over the content, clear of the buttons at the right.
 func searchField(c *ui.Context) (left, width float32) {
 	w, _ := c.Size()
-	width = min(460, w-sidebarWidth-2*260)
-	return sidebarWidth + (w-sidebarWidth-width)/2, width
+	width = min(460, w-contentLeft-2*290)
+	return contentLeft + (w-contentLeft-width)/2, width
 }
 
 // searchList drops from the focused search field: the hot search list's
@@ -205,7 +198,7 @@ func (a *app) searchList(c *ui.Context) {
 	}
 	left, width := searchField(c)
 	ui.Column(c.Key("hot")).Absolute().Top(52).Left(left).Width(width).Padding(8, 6).Radius(12).
-		Background(ui.Hex("#252733")).Border(0.5, pal.hairline).Shadow(0, 10, 30, -6, ui.RGBA(0, 0, 0, 0.5)).Children(func() {
+		Background(pal.popover).Border(1, pal.popoverBd).Shadow(0, 10, 30, -6, pal.cardShadow).Children(func() {
 		if q == "" {
 			ui.Text(c, "抖音热搜").FontSize(12).FontWeight(600).TextColor(pal.faint).Margin(2, 10, 6, 10)
 		}
@@ -245,95 +238,6 @@ func (a *app) searchList(c *ui.Context) {
 	})
 }
 
-// sidebar is Douyin's: 精选 and 推荐; the user's 关注, 朋友 and 我的; then
-// 直播 and 短剧. A root not there (no client, or the account not yet known)
-// leaves its row out.
-func (a *app) sidebar(c *ui.Context) {
-	// Below the window buttons, which sit over it.
-	ui.Column(c).Fill().Padding(48, 12, 14, 12).Gap(4).DragWindow().Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(0, 10, 14, 10).Children(func() {
-			ui.Image(c, logo).Size(26, 26)
-			ui.Text(c, "MyDouyin").FontSize(20).FontWeight(800).TextColor(white)
-		})
-		root := a.pages[0]
-		nav := func(icon *ui.SVG, label string, r *page, on bool) bool {
-			return r != nil && a.navItem(c, icon, label, on).Clicked()
-		}
-		if nav(iconOrbit, "引力场", a.home, root == a.home) {
-			a.root(a.home)
-		}
-		if nav(iconCompass, "精选", a.picks, root == a.picks) {
-			a.root(a.picks)
-		}
-		if nav(iconSpark, "推荐", a.feed, root == a.feed) {
-			a.root(a.feed)
-		}
-		divider := func() { ui.Box(c).Height(1).Background(pal.hairline).Margin(8, 10) }
-		divider()
-		if nav(iconFollow, "关注", a.follow, root == a.follow) {
-			a.root(a.follow)
-		}
-		if nav(iconFriends, "朋友", a.friends, root == a.friends) {
-			a.root(a.friends)
-		}
-		divider()
-		if a.live != nil {
-			b := a.listItem(c.Key("直播"), root == a.live, "直播")
-			color := pal.muted
-			if root == a.live {
-				color = white
-			}
-			b.Children(func() {
-				ui.Icon(c, iconLive).Size(18, 18).TextColor(color)
-				ui.Text(c, "直播").FontSize(14.5).FontWeight(600).TextColor(color).Grow(1)
-				ui.Text(c, "LIVE").FontSize(9.5).FontWeight(800).TextColor(pal.accent).PaddingX(5).Height(16).Radius(4).
-					Background(ui.RGBA(254, 44, 85, 0.16)).Center()
-			})
-			if b.Clicked() {
-				a.root(a.live)
-			}
-		}
-		if nav(iconDrama, "短剧", a.drama, root == a.drama) {
-			a.root(a.drama)
-		}
-		ui.Box(c).Grow(1)
-		a.updateBanner(c)
-		a.accountRow(c, root)
-	})
-}
-
-// accountRow ends the sidebar: the account, which opens 我的, or 登录 while
-// logged out; beside it the settings.
-func (a *app) accountRow(c *ui.Context, root *page) {
-	ui.Row(c).AlignSelf(ui.Stretch).Gap(4).AlignItems(ui.Center).Children(func() {
-		switch {
-		case a.signedIn || a.me.Name != "":
-			mine := a.mine[a.mineTab]
-			label := a.me.Name
-			if mine != nil {
-				label = "我的"
-			}
-			b := a.listItem(c.Key("account"), a.isMine(root), label).Grow(1).Shrink(1).MinWidth(0)
-			b.Children(func() {
-				a.avatar(c, a.me.Avatar, a.me.Name, 24)
-				ui.Text(c, a.me.Name).FontSize(14).FontWeight(600).TextColor(onOff(a.isMine(root), white, pal.text)).SingleLine().Shrink(1)
-			})
-			if b.Clicked() && mine != nil {
-				a.showMine(a.mineTab)
-			}
-		case a.c != nil:
-			if a.navItem(c, iconUser, "登录", a.loginOpen).Grow(1).Clicked() {
-				a.openLogin()
-			}
-		default:
-			ui.Box(c).Grow(1)
-		}
-		if iconButton(c.Key("settings"), iconSettings, 18, onOff(a.settingsOpen, white, pal.muted), "设置").Clicked() {
-			a.settingsOpen = true
-		}
-	})
-}
-
 // followsRow runs along the top of 关注: the accounts followed, each a
 // picture over its name, which opens its videos.
 func (a *app) followsRow(c *ui.Context) {
@@ -357,7 +261,7 @@ func (a *app) usersRow(c *ui.Context, us []dy.User) {
 				b.Background(pal.hover)
 			}
 			b.Children(func() {
-				a.avatar(c, u.Avatar, u.Name, 44)
+				a.avatar(c, pal, u.Avatar, u.Name, 44)
 				ui.Text(c, u.Name).FontSize(11.5).TextColor(pal.muted).SingleLine().MaxWidth(64)
 			})
 			if b.Clicked() {
@@ -379,7 +283,7 @@ func (a *app) mineHeader(c *ui.Context) {
 				color, weight := pal.muted, 500
 				switch {
 				case on:
-					color, weight = white, 700
+					color, weight = pal.strong, 700
 				case b.Hovered():
 					color = pal.text
 				}
@@ -400,9 +304,9 @@ func (a *app) mineHeader(c *ui.Context) {
 // where known, and signature: atop 我的 and an author's videos.
 func (a *app) profileHeader(c *ui.Context, me dy.User) {
 	ui.Row(c).Padding(6, 24, 14, 24).Gap(18).AlignItems(ui.Center).Children(func() {
-		a.avatar(c, me.Avatar, me.Name, 72)
+		a.avatar(c, pal, me.Avatar, me.Name, 72)
 		ui.Column(c).Gap(8).Shrink(1).MinWidth(0).Children(func() {
-			ui.Text(c, me.Name).FontSize(20).FontWeight(700).TextColor(white).SingleLine()
+			ui.Text(c, me.Name).FontSize(20).FontWeight(700).TextColor(pal.strong).SingleLine()
 			ui.Row(c).Gap(18).Children(func() {
 				for _, kv := range [][2]string{{"关注", count(me.Following)}, {"粉丝", count(me.Followers)}, {"获赞", count(me.Liked)}} {
 					ui.Row(c).Gap(5).AlignItems(ui.Baseline).Children(func() {
@@ -429,34 +333,10 @@ func (a *app) profileHeader(c *ui.Context, me dy.User) {
 	})
 }
 
-// listItem is a row of the sidebar: highlighted under the pointer, and
-// marked when it is the page shown.
-func (a *app) listItem(c *ui.Context, selected bool, label string) ui.Element {
-	b := ui.ButtonBase(c).Height(38).PaddingX(10).Gap(10).Radius(10).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(label)
-	bg := ui.Transparent
-	switch {
-	case selected:
-		bg = pal.press
-	case b.Hovered():
-		bg = pal.hover
-	}
-	return b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
-}
-
-func (a *app) navItem(c *ui.Context, icon *ui.SVG, label string, selected bool) ui.Element {
-	color := pal.muted
-	if selected {
-		color = white
-	}
-	return a.listItem(c.Key(label), selected, label).Children(func() {
-		ui.Icon(c, icon).Size(18, 18).TextColor(color)
-		ui.Text(c, label).FontSize(14.5).FontWeight(600).TextColor(color)
-	})
-}
-
-// avatar is an account's picture in a circle, or its name's first character while it loads.
-func (a *app) avatar(c *ui.Context, url, name string, size float32) {
-	box := ui.Box(c).Size(size, size).Radius(size / 2).Clip().Background(pal.press).Center()
+// avatar is an account's picture in a circle, or its name's first character
+// while it loads, in p's colors: vid's over a video.
+func (a *app) avatar(c *ui.Context, p palette, url, name string, size float32) {
+	box := ui.Box(c).Size(size, size).Radius(size / 2).Clip().Background(p.press).Center()
 	box.Children(func() {
 		if bmp := a.img.get(url); bmp != nil {
 			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
@@ -466,66 +346,35 @@ func (a *app) avatar(c *ui.Context, url, name string, size float32) {
 		if r := []rune(name); len(r) > 0 {
 			ch = strings.ToUpper(string(r[0]))
 		}
-		ui.Text(c, ch).FontSize(size * 0.44).FontWeight(600).TextColor(pal.muted)
+		ui.Text(c, ch).FontSize(size * 0.44).FontWeight(600).TextColor(p.muted)
 	})
 }
 
 // topBar holds the way back with the page's name, and the search field in
-// the middle; it drags the window.
+// the middle; it drags the window. The buttons at its right are chrome's.
 func (a *app) topBar(c *ui.Context, p *page) {
-	right := float32(16)
-	if runtime.GOOS == "windows" {
-		right += 138 // three native caption buttons, 46 DIPs each
-	}
-	ui.Row(c).Height(topBarHeight).PaddingX(16).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
+	ui.Row(c).Height(topBarHeight).PaddingX(8).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
 		if len(a.pages) > 1 || p.grid && p.playing {
 			if iconButton(c.Key("back"), iconBack, 18, pal.muted, "返回").Clicked() {
 				a.back()
 			}
-			if a.pages[0] != p { // the roots are named in the sidebar
-				ui.Text(c, p.title).FontSize(15).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).MaxWidth(220)
-			}
 		}
-		dm := pal.muted
-		if a.dms != nil {
-			dm = white
+		if a.pages[0] != p || p.grid && p.playing {
+			ui.Text(c, p.title).FontSize(15).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).MaxWidth(220)
+		} else { // a root, which the dock names: the mark, where 引力场 has it
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Image(c, logo).Size(22, 22)
+				ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
+			})
 		}
-		if iconButton(c.Key("dm"), iconChat, 20, dm, "私信").Absolute().Top(6).Right(right + 36 + 4).Clicked() {
-			if a.dms != nil {
-				a.dms = nil
-			} else {
-				a.openDMs()
-			}
-		}
-		bell := ui.Box(c).Absolute().Top(6).Right(right)
-		bell.Children(func() {
-			color := pal.muted
-			if a.notes != nil {
-				color = white
-			}
-			if iconButton(c.Key("bell"), iconBell, 20, color, "通知").Clicked() {
-				if a.notes != nil {
-					a.notes = nil
-				} else {
-					a.openNotes()
-				}
-			}
-			if a.unread > 0 {
-				ui.Box(c).Absolute().Top(4).Right(2).MinWidth(16).Height(16).PaddingX(4).Radius(8).Background(pal.accent).Center().
-					HitTest(func(x, y float32, r ui.Rect) bool { return false }). // the bell under it takes the click
-					Children(func() {
-						ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(10).FontWeight(700).TextColor(white)
-					})
-			}
-		})
 		left, fieldW := searchField(c)
-		left -= sidebarWidth // the bar starts beside the sidebar
-		field := ui.Row(c).Absolute().Top(10).Left(left).Width(fieldW).Height(36).Radius(10).PaddingStart(14).
-			AlignItems(ui.Center).Background(pal.hover)
+		left -= contentLeft // the bar starts beside the dock
+		field := ui.Row(c).Absolute().Top(10).Left(left).Width(fieldW).Height(36).Radius(12).PaddingStart(14).
+			AlignItems(ui.Center).Background(pal.searchTint).Shadow(0, 6, 18, -8, pal.searchShadow)
 		if c.Focused(a.searchBox) {
-			field.Border(1, pal.muted)
+			field.Border(1, pal.focusBorder)
 		} else {
-			field.Border(1, pal.hairline)
+			field.Border(1, pal.searchBorder)
 		}
 		field.Children(func() {
 			in := ui.TextInputBase(c.Key("search"), &a.query).Bind(&a.searchBox).Grow(1).
@@ -562,7 +411,7 @@ func (a *app) tabsRow(c *ui.Context) {
 				color := pal.muted
 				switch {
 				case on:
-					color = white
+					color = pal.strong
 				case b.Hovered():
 					color = pal.text
 				}
@@ -587,7 +436,7 @@ func (a *app) tabsRow(c *ui.Context) {
 // first video is a big card that plays, silent, as Douyin's does.
 func (a *app) grid(c *ui.Context, p *page) {
 	w, h := c.Size()
-	inner := w - sidebarWidth - 24 - barGutter - 16 // the grid's padding, the row's
+	inner := w - contentLeft - 24 - barGutter - 16 // the grid's padding, the row's
 	if a.notes != nil || a.dms != nil {
 		inner -= 360 + 16
 	}
@@ -632,10 +481,10 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 	v := s.v
 	b := ui.ButtonBase(c).Column().AlignItems(ui.Stretch).Justify(ui.Start).Gap(8).FocusRing(false).Label(v.Desc)
 	b.Children(func() {
-		cover := ui.Box(c).AspectRatio(16.0 / 9).Radius(10).Clip().Background(pal.raised)
+		cover := ui.Box(c).AspectRatio(16.0 / 9).Radius(10).Clip().Background(pal.well)
 		cover.Children(func() {
 			if bmp := a.img.get(v.Cover); bmp != nil {
-				ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+				ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover).Transition(coverFade)
 			}
 			if b.Hovered() {
 				ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGBA(255, 255, 255, 0.06))
@@ -644,7 +493,7 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 				liveBadge(c)
 			} else if p.authorID != "" && v.Pinned {
 				ui.Row(c).Absolute().Top(8).Left(8).Height(20).PaddingX(8).Radius(5).AlignItems(ui.Center).Background(ui.Hex("#f9cc66")).Children(func() {
-					ui.Text(c, "置顶").FontSize(11).FontWeight(700).TextColor(pal.bg)
+					ui.Text(c, "置顶").FontSize(11).FontWeight(700).TextColor(vid.bg)
 				})
 			}
 			ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Padding(18, 10, 7, 10).AlignItems(ui.Center).
@@ -660,7 +509,7 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 		})
 		title := ui.Text(c, v.Desc).FontSize(14).TextColor(pal.text).MaxLines(2)
 		if b.Hovered() {
-			title.TextColor(white)
+			title.TextColor(pal.strong)
 		}
 		ui.Text(c, byline(v)).FontSize(12).TextColor(pal.faint).SingleLine()
 	})
@@ -748,7 +597,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 				text = "没有结果"
 			}
 			picture.Center().Children(func() {
-				ui.Text(c, text).FontSize(13).TextColor(pal.muted)
+				ui.Text(c, text).FontSize(13).TextColor(vid.muted)
 			})
 			return
 		}
@@ -1005,7 +854,7 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 				a.toggle()
 			}
 			if live {
-				ui.Box(c).Size(7, 7).Radius(4).Background(pal.accent)
+				ui.Box(c).Size(7, 7).Radius(4).Background(vid.accent)
 				ui.Text(c, "直播中 · "+s.v.Live.Viewers+" 人在看").FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.8))
 				if chat := a.liveChat; chat != nil {
 					if chip(c.Key("live-danmaku"), "弹幕", !a.dmOff).Clicked() {
@@ -1046,14 +895,14 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 			}
 			if !live {
 				on := a.later[s.v.ID]
-				b := iconButton(c.Key("later"), onOff(on, iconLaterOn, iconLater), 17, onOff(on, pal.accent, white), onOff(on, "移出稍后再看", "稍后再看"))
+				b := iconButton(c.Key("later"), onOff(on, iconLaterOn, iconLater), 17, onOff(on, vid.accent, white), onOff(on, "移出稍后再看", "稍后再看"))
 				if a.laterBusy[s.v.ID] {
 					b.Opacity(0.5)
 				} else if b.Clicked() {
 					a.toggleLater(s.v)
 				}
 			}
-			if iconButton(c.Key("pip"), iconPip, 17, onOff(a.pipOn, pal.accent, white), onOff(a.pipOn, "关闭小窗", "小窗")).Clicked() {
+			if iconButton(c.Key("pip"), iconPip, 17, onOff(a.pipOn, vid.accent, white), onOff(a.pipOn, "关闭小窗", "小窗")).Clicked() {
 				a.setPip(!a.pipOn)
 			}
 			a.volumeButton(c)
@@ -1080,13 +929,13 @@ func (a *app) danmakuInput(c *ui.Context, s *slot) {
 	}
 	field := ui.Row(c).Width(260).Height(30).Radius(8).PaddingStart(10).Gap(4).AlignItems(ui.Center).Background(ui.RGBA(255, 255, 255, 0.12)).Margin(0, 0, 0, 4)
 	field.Children(func() {
-		in := ui.TextInputBase(c.Key("dm-input"), &a.dmText).Bind(&a.dmBox).Grow(1).Placeholder("发一条友好的弹幕吧").FontSize(12.5).Label("弹幕内容")
+		in := ui.TextInputBase(c.Key("dm-input"), &a.dmText).Bind(&a.dmBox).Grow(1).Placeholder("发一条友好的弹幕吧").PlaceholderColor(vid.faint).TextColor(vid.text).FontSize(12.5).Label("弹幕内容")
 		if in.Submitted() {
 			a.sendBullet(s)
 		}
 		b := ui.ButtonBase(c.Key("dm-send")).Height(30).PaddingX(12).Radius(0, 8, 8, 0).Center().FocusRing(false).Label("发送弹幕")
 		ready := strings.TrimSpace(a.dmText) != ""
-		b.Background(onOff(ready, pal.accent, ui.RGBA(255, 255, 255, 0.08))).Children(func() {
+		b.Background(onOff(ready, vid.accent, ui.RGBA(255, 255, 255, 0.08))).Children(func() {
 			ui.Text(c, "发送").FontSize(12.5).FontWeight(600).TextColor(onOff(ready, white, ui.RGBA(255, 255, 255, 0.5)))
 		})
 		if b.Clicked() {
@@ -1114,7 +963,7 @@ func (a *app) pipView(c *ui.Context) {
 		}
 		if s == nil || s.vp == nil {
 			box.Center().Children(func() {
-				ui.Text(c, "在主窗口里选一个视频播放").FontSize(13).TextColor(pal.muted)
+				ui.Text(c, "在主窗口里选一个视频播放").FontSize(13).TextColor(vid.muted)
 			})
 			return
 		}
@@ -1240,7 +1089,7 @@ func toggleChip(c *ui.Context, label string, on bool) ui.Element {
 		b.Background(ui.RGBA(255, 255, 255, 0.1))
 	}
 	return b.Children(func() {
-		ui.Box(c).Width(26).Height(15).Radius(8).Background(onOff(on, pal.accent, ui.RGBA(255, 255, 255, 0.3))).Children(func() {
+		ui.Box(c).Width(26).Height(15).Radius(8).Background(onOff(on, vid.accent, ui.RGBA(255, 255, 255, 0.3))).Children(func() {
 			ui.Box(c).Absolute().Top(2).Left(onOff[float32](on, 13, 2)).Size(11, 11).Radius(6).Background(white)
 		})
 		ui.Text(c, label).FontSize(12.5).FontWeight(500).TextColor(onOff(on, white, ui.RGBA(255, 255, 255, 0.75)))
@@ -1263,10 +1112,10 @@ func choice(c *ui.Context, label string, on bool) ui.Element {
 	b := ui.ButtonBase(c.Key(label)).Role(ui.RoleMenuItemRadio).Checked(on).Label(label).Height(30).PaddingX(10).Radius(7).
 		AlignItems(ui.Center).Justify(ui.Center).FocusRing(false)
 	if b.Hovered() || b.FocusVisible() {
-		b.Background(pal.press)
+		b.Background(vid.press)
 	}
 	return b.Children(func() {
-		ui.Text(c, label).FontSize(13).FontWeight(onOff(on, 700, 500)).TextColor(onOff(on, pal.accent, pal.text))
+		ui.Text(c, label).FontSize(13).FontWeight(onOff(on, 700, 500)).TextColor(onOff(on, vid.accent, vid.text))
 	})
 }
 
@@ -1333,7 +1182,7 @@ func (a *app) volumeButton(c *ui.Context) {
 		a.volumeOpen = !a.volumeOpen
 	}
 	barMenu(c, "volume-menu", b, &a.volumeOpen, 48, func() {
-		ui.Text(c, fmt.Sprint(int(math.Round(a.loudness()*100)))).FontSize(12).TextColor(pal.text).AlignSelf(ui.Center).Margin(4, 0)
+		ui.Text(c, fmt.Sprint(int(math.Round(a.loudness()*100)))).FontSize(12).TextColor(vid.text).AlignSelf(ui.Center).Margin(4, 0)
 		const knob, track = 14, 4
 		v := a.volume
 		if a.muted {
@@ -1349,10 +1198,10 @@ func (a *app) volumeButton(c *ui.Context) {
 			x := r.X + (r.W-track)/2
 			y := foot - (foot-top)*float32(v)
 			p.Fill(ui.Rect{X: x, Y: top - track/2, W: track, H: foot - top + track}, ui.RGBA(255, 255, 255, 0.2), track/2)
-			p.Fill(ui.Rect{X: x, Y: y, W: track, H: foot - y + track/2}, pal.accent, track/2)
+			p.Fill(ui.Rect{X: x, Y: y, W: track, H: foot - y + track/2}, vid.accent, track/2)
 			p.Fill(ui.Rect{X: r.X + (r.W-knob)/2, Y: y - knob/2, W: knob, H: knob}, white, knob/2)
 		})
-		m := iconButton(c.Key("mute"), onOff(a.muted, iconMuted, iconVolume), 15, pal.text, onOff(a.muted, "取消静音", "静音")).AlignSelf(ui.Center)
+		m := iconButton(c.Key("mute"), onOff(a.muted, iconMuted, iconVolume), 15, vid.text, onOff(a.muted, "取消静音", "静音")).AlignSelf(ui.Center)
 		if m.Clicked() {
 			if a.volume == 0 {
 				a.volume = 0.5
@@ -1376,7 +1225,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 	ui.Column(c).Absolute().Right(14).Bottom(64).Gap(gap).AlignItems(ui.Center).Children(func() {
 		ab := ui.ButtonBase(c.Key("avatar")).FocusRing(false).Label("作者主页").Margin(0, 0, 4, 0).
 			Radius(999).Border(2, white)
-		ab.Children(func() { a.avatar(c, s.v.Avatar, s.v.Author, icon+16) })
+		ab.Children(func() { a.avatar(c, vid, s.v.Avatar, s.v.Author, icon+16) })
 		if ab.Clicked() {
 			a.openAuthor(p, s.v.Author, s.v.AuthorID)
 		}
@@ -1401,14 +1250,14 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 		}
 		shares := count(s.v.Shares)
 		if s.v.Live == nil { // a room has no counts, nor comments the client reads
-			if b := action("like", iconHeartFill, onOff(s.v.Liked, "取消点赞", "点赞"), count(s.v.Likes), onOff(s.v.Liked, pal.accent, white)); s.liking {
+			if b := action("like", iconHeartFill, onOff(s.v.Liked, "取消点赞", "点赞"), count(s.v.Likes), onOff(s.v.Liked, vid.accent, white)); s.liking {
 				b.Opacity(0.55)
 			} else if b.Clicked() {
 				a.like(s)
 			}
 			color := white
 			if a.sheet != nil {
-				color = pal.accent
+				color = vid.accent
 			}
 			if action("comments", iconComment, "评论", count(s.v.Comments), color).Clicked() {
 				if a.sheet != nil {
@@ -1430,7 +1279,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 				a.copyLink(s.v)
 			}
 		} else {
-			share := action("share", iconShare, "分享", shares, onOff(a.shareOpen, pal.accent, white))
+			share := action("share", iconShare, "分享", shares, onOff(a.shareOpen, vid.accent, white))
 			if share.Clicked() {
 				a.shareOpen, a.shareQuery = !a.shareOpen, ""
 			}
@@ -1438,7 +1287,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 		}
 		color := white
 		if a.listen {
-			color = pal.accent
+			color = vid.accent
 		}
 		if action("listen", iconHeadphones, "听抖音", "听抖音", color).Clicked() {
 			a.listen = !a.listen
@@ -1462,11 +1311,11 @@ func (a *app) sharePanel(c *ui.Context, anchor ui.Element, s *slot) {
 			Role(ui.RoleDialog).Label("分享").
 			Transition(ui.ElementTransition{Animation: &ui.Snappy, Enter: &ui.Motion{Scale: 0.96}, Exit: &ui.Motion{Scale: 0.98}})
 		panel.Children(func() {
-			ui.Row(c).Height(38).Margin(0, 12, 8, 12).PaddingX(12).Gap(8).Radius(10).AlignItems(ui.Center).Background(pal.hover).Children(func() {
-				ui.Icon(c, iconSearch).Size(15, 15).TextColor(pal.faint)
-				ui.TextInputBase(c.Key("share-search"), &a.shareQuery).Bind(&a.shareBox).Grow(1).Placeholder("搜索").FontSize(13.5).Label("搜索朋友")
+			ui.Row(c).Height(38).Margin(0, 12, 8, 12).PaddingX(12).Gap(8).Radius(10).AlignItems(ui.Center).Background(vid.hover).Children(func() {
+				ui.Icon(c, iconSearch).Size(15, 15).TextColor(vid.faint)
+				ui.TextInputBase(c.Key("share-search"), &a.shareQuery).Bind(&a.shareBox).Grow(1).Placeholder("搜索").PlaceholderColor(vid.faint).TextColor(vid.text).FontSize(13.5).Label("搜索朋友")
 			})
-			ui.Text(c, "分享给朋友").FontSize(12).TextColor(pal.faint).Margin(4, 16, 6, 16)
+			ui.Text(c, "分享给朋友").FontSize(12).TextColor(vid.faint).Margin(4, 16, 6, 16)
 			ui.Scroll(c.Key("share-list")).Grow(1).Children(func() {
 				q := strings.ToLower(strings.TrimSpace(a.shareQuery))
 				shown := 0
@@ -1477,14 +1326,14 @@ func (a *app) sharePanel(c *ui.Context, anchor ui.Element, s *slot) {
 					shown++
 					state := a.shared[s.v.ID+"|"+u.ID]
 					ui.Row(c.Key("to:" + u.ID)).Height(56).PaddingX(16).Gap(12).AlignItems(ui.Center).Children(func() {
-						a.avatar(c, u.Avatar, u.Name, 40)
-						ui.Text(c, u.Name).FontSize(14).TextColor(pal.text).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+						a.avatar(c, vid, u.Avatar, u.Name, 40)
+						ui.Text(c, u.Name).FontSize(14).TextColor(vid.text).SingleLine().Grow(1).Shrink(1).MinWidth(0)
 						label := map[string]string{"": "分享", "sending": "发送中…", "done": "已分享"}[state]
 						b := ui.ButtonBase(c.Key("send")).Height(32).Width(72).Radius(8).Center().FocusRing(false).Label("分享给" + u.Name)
-						bg := pal.accent
+						bg := vid.accent
 						switch {
 						case state != "":
-							bg = pal.press
+							bg = vid.press
 						case b.Hovered():
 							bg = ui.Hex("#ff4d6d")
 						}
@@ -1503,14 +1352,14 @@ func (a *app) sharePanel(c *ui.Context, anchor ui.Element, s *slot) {
 					if len(a.follows) == 0 {
 						text = "还没有关注的人"
 					}
-					ui.Text(c, text).FontSize(12.5).TextColor(pal.faint).Margin(16, 16)
+					ui.Text(c, text).FontSize(12.5).TextColor(vid.faint).Margin(16, 16)
 				}
 			})
-			ui.Row(c).Padding(10, 12, 12, 12).Gap(8).AlignItems(ui.Center).BorderWidth(0.5, 0, 0, 0).BorderColor(pal.hairline).Children(func() {
+			ui.Row(c).Padding(10, 12, 12, 12).Gap(8).AlignItems(ui.Center).BorderWidth(0.5, 0, 0, 0).BorderColor(vid.hairline).Children(func() {
 				link := ui.ButtonBase(c.Key("copy")).Grow(1).Height(38).Radius(10).Gap(6).Center().FocusRing(false).Label("复制链接")
-				link.Background(onOff(link.Hovered(), pal.press, pal.hover)).Children(func() {
-					ui.Icon(c, iconLink).Size(15, 15).TextColor(pal.text)
-					ui.Text(c, "复制链接").FontSize(13.5).TextColor(pal.text)
+				link.Background(onOff(link.Hovered(), vid.press, vid.hover)).Children(func() {
+					ui.Icon(c, iconLink).Size(15, 15).TextColor(vid.text)
+					ui.Text(c, "复制链接").FontSize(13.5).TextColor(vid.text)
 				})
 				if link.Clicked() {
 					a.shareOpen = false
@@ -1518,8 +1367,8 @@ func (a *app) sharePanel(c *ui.Context, anchor ui.Element, s *slot) {
 				}
 				square := func(key string, ic *ui.SVG, label string) ui.Element {
 					b := ui.ButtonBase(c.Key(key)).Size(38, 38).Radius(10).Center().FocusRing(false).Label(label)
-					return b.Background(onOff(b.Hovered(), pal.press, pal.hover)).Children(func() {
-						ui.Icon(c, ic).Size(16, 16).TextColor(pal.text)
+					return b.Background(onOff(b.Hovered(), vid.press, vid.hover)).Children(func() {
+						ui.Icon(c, ic).Size(16, 16).TextColor(vid.text)
 					})
 				}
 				if b := square("download", iconDownload, "下载"); s.vp == nil || s.saved == "保存中…" {
@@ -1583,11 +1432,11 @@ func menuItem(c *ui.Context, ic *ui.SVG, label string) ui.Element {
 	b := ui.ButtonBase(c.Key(label)).Role(ui.RoleMenuItem).Label(label).Height(32).PaddingX(9).Gap(9).Radius(7).
 		AlignItems(ui.Center).Justify(ui.Start).FocusRing(false)
 	if b.Hovered() || b.FocusVisible() {
-		b.Background(pal.press)
+		b.Background(vid.press)
 	}
 	return b.Children(func() {
-		ui.Icon(c, ic).Size(15, 15).TextColor(pal.muted)
-		ui.Text(c, label).FontSize(13).TextColor(pal.text)
+		ui.Icon(c, ic).Size(15, 15).TextColor(vid.muted)
+		ui.Text(c, label).FontSize(13).TextColor(vid.text)
 	})
 }
 
@@ -1623,7 +1472,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 				b.Children(func() {
 					color, weight := pal.muted, 500
 					if on {
-						color, weight = white, 700
+						color, weight = pal.strong, 700
 					}
 					ui.Text(c, label).FontSize(14).FontWeight(weight).TextColor(color)
 					bar := ui.Box(c).Width(14).Height(2).Radius(1)
@@ -1654,7 +1503,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 		ui.Scroll(c.Key("comment-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
 			for i, cm := range sh.items {
 				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
-					a.avatar(c, cm.Avatar, cm.Author, 30)
+					a.avatar(c, pal, cm.Avatar, cm.Author, 30)
 					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 						a.commentText(c, sh, cm, 14, false)
 						if cm.Replies > 0 {
@@ -1793,7 +1642,7 @@ func (a *app) replyThread(c *ui.Context, sh *sheet, cm dy.Comment) {
 	if open {
 		for j, r := range th.items {
 			ui.Row(c.Key("r"+fmt.Sprint(j))).Gap(8).Margin(6, 0, 0, 0).AlignItems(ui.Start).Children(func() {
-				a.avatar(c, r.Avatar, r.Author, 22)
+				a.avatar(c, pal, r.Avatar, r.Author, 22)
 				ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() { a.commentText(c, sh, r, 13, true) })
 			})
 		}
@@ -1925,7 +1774,7 @@ func (a *app) notePanel(c *ui.Context, n *notes) {
 		ui.Scroll(c.Key("note-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
 			for i, it := range n.items {
 				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
-					a.avatar(c, it.User.Avatar, it.User.Name, 34)
+					a.avatar(c, pal, it.User.Avatar, it.User.Name, 34)
 					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 							b := ui.ButtonBase(c.Key("who")).FocusRing(false).Label(it.User.Name).Shrink(1).MinWidth(0)
@@ -1997,7 +1846,7 @@ func (a *app) dmPanel(c *ui.Context, d *dms) {
 						b.Background(pal.hover)
 					}
 					b.Children(func() {
-						a.avatar(c, ch.Peer.Avatar, ch.Peer.Name, 40)
+						a.avatar(c, pal, ch.Peer.Avatar, ch.Peer.Name, 40)
 						ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 							var m dy.Message
 							if len(ch.Msgs) > 0 {
@@ -2040,15 +1889,15 @@ func (a *app) chatView(c *ui.Context, ch *dy.Chat) {
 				continue
 			}
 			row := ui.Row(c.Key(fmt.Sprint(i))).Justify(ui.Start)
-			bg := pal.hover
+			bg, ink, when := pal.press, pal.text, pal.faint
 			if m.Mine {
 				row.Justify(ui.End)
-				bg = pal.accent
+				bg, ink, when = pal.accent, white, ui.RGBA(255, 255, 255, 0.55)
 			}
 			row.Children(func() {
 				ui.Column(c).MaxWidth(250).Padding(8, 12).Radius(12).Background(bg).Gap(3).Children(func() {
-					ui.Text(c, m.Text).FontSize(13.5).TextColor(white).Selectable()
-					ui.Text(c, ago(m.Time, time.Now())).FontSize(10).TextColor(ui.RGBA(255, 255, 255, 0.55))
+					ui.Text(c, m.Text).FontSize(13.5).TextColor(ink).Selectable()
+					ui.Text(c, ago(m.Time, time.Now())).FontSize(10).TextColor(when)
 				})
 			})
 		}

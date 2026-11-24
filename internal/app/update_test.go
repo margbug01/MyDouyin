@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// A newer version shows at the foot of the sidebar once a check finds it,
+// A newer version shows at the foot of the dock once a check finds it,
 // and nothing shows before; a click downloads it, its progress shown, and
 // a failed install says why and can be tried again.
 func TestUpdateBanner(t *testing.T) {

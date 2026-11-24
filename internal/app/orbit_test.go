@@ -21,18 +21,18 @@ func TestOrbitLayoutNoOverlap(t *testing.T) {
 	for _, sz := range sizes {
 		w, h := sz[0], sz[1]
 		rects := orbitLayout(w, h)
-		minCards := 4
-		if w >= 1280 && h >= 820 {
-			minCards = 8
+		if len(rects) != orbitRing {
+			t.Fatalf("%gx%g: expected %d cards, got %d", w, h, orbitRing, len(rects))
 		}
-		if len(rects) < minCards {
-			t.Fatalf("%gx%g: expected at least %d cards, got %d", w, h, minCards, len(rects))
+		// Large enough to see what plays: the old ring's covers were 182 to 212 wide.
+		if minW := min(240, w/4); rects[0].w < minW {
+			t.Fatalf("%gx%g: cards %gx%g, want at least %g wide", w, h, rects[0].w, rects[0].h, minW)
 		}
 		hx, hy, hw, hh := orbitHubRect(w, h)
 		hub := orbitCardRect{x: hx, y: hy, w: hw, h: hh}
 		for i, r := range rects {
-			if r.x < dockSafeLeft || r.y < 62 || r.x+r.w > w-22 || r.y+r.h > h-18 {
-				t.Fatalf("%gx%g card %d out of bounds (must stay clear of expanded dock %.0f): %+v", w, h, i, dockSafeLeft, r)
+			if r.x < contentLeft || r.y < 62 || r.x+r.w > w-contentLeft || r.y+r.h > h-18 {
+				t.Fatalf("%gx%g card %d out of bounds (must stay clear of the dock at rest, %.0f): %+v", w, h, i, contentLeft, r)
 			}
 			if r.x < hub.x+hub.w && r.x+r.w > hub.x && r.y < hub.y+hub.h && r.y+r.h > hub.y {
 				t.Fatalf("%gx%g card %d overlaps hub: card=%+v hub=%+v", w, h, i, r, hub)
@@ -67,7 +67,7 @@ func TestOrbitHomeInteractions(t *testing.T) {
 		picks: picks,
 		feed:  stub("推荐", 2),
 		pages: []*page{home},
-		orbit: orbitState{source: orbitPicks, hovered: -1},
+		orbit: orbitState{source: orbitPicks},
 		hot:   []dy.Hot{{Word: "热搜第一", Value: 120000}},
 	}
 	tt := ui.NewTester(a.view, 1280, 820)

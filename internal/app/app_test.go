@@ -149,7 +149,7 @@ func TestLiveAuthor(t *testing.T) {
 	}
 }
 
-// The sidebar is Douyin's: 关注 shows the accounts followed along its top,
+// The dock is Douyin's: 关注 shows the accounts followed along its top,
 // a name of which opens its videos; 精选 goes back to the root with every
 // page on it let go. Live: the author's videos load in the background.
 func TestLiveSidebar(t *testing.T) {
@@ -161,7 +161,7 @@ func TestLiveSidebar(t *testing.T) {
 	tt := newTester(a)
 	for _, want := range []string{"精选", "推荐", "关注", "朋友", "直播", "LIVE", "短剧"} {
 		if !tt.HasText(want) {
-			t.Fatalf("sidebar lacks %q: %q", want, tt.Texts())
+			t.Fatalf("dock lacks %q: %q", want, tt.Texts())
 		}
 	}
 	if tt.HasText("某人") || tt.HasText("我的") {
@@ -610,7 +610,7 @@ func TestNotes(t *testing.T) {
 			t.Fatalf("panel shows %q", tt.Texts())
 		}
 	}
-	for _, how := range []string{"关闭通知", "通知", "Escape"} {
+	for _, how := range []string{"关闭通知", "收起通知", "Escape"} {
 		open()
 		if how == "Escape" {
 			tt.Key(0, ui.KeyEscape)
@@ -846,7 +846,7 @@ func TestLiveHotList(t *testing.T) {
 	}
 }
 
-// 我的 shows in the sidebar once the account is known, with the user's
+// 我的 shows in the dock once the account is known, with the user's
 // counts and four tabs, each its own grid, which 我的 comes back to.
 func TestMine(t *testing.T) {
 	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, me: dy.User{Name: "我自己", Following: 13, Followers: 2, Liked: 45}})
