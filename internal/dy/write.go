@@ -358,6 +358,73 @@ func (c *Client) SetSaved(id string, on bool) error {
 	return c.write("/aweme/v1/web/aweme/collect/", fmt.Sprintf("action=%d&aweme_id=%s&aweme_type=0", b2i(on), id))
 }
 
+// SetFollowed follows or unfollows a user (type 1 follows, 0 unfollows) through
+// the logged-in WebView page and returns the resulting follow_status (0, 1, or 2).
+func (c *Client) SetFollowed(uid, secUID string, on bool) (int, error) {
+	if uid == "" && secUID == "" {
+		return 0, errors.New("缺少作者信息")
+	}
+	writeGate.lock(true)
+	defer writeGate.unlock()
+	if c.web == nil {
+		return 0, errNoWeb
+	}
+	q := url.Values{
+		"type":       {fmt.Sprint(b2i(on))},
+		"channel_id": {"3"},
+		"from":       {"0"},
+		"from_pre":   {"0"},
+	}
+	if uid != "" {
+		q.Set("user_id", uid)
+	}
+	if secUID != "" {
+		q.Set("sec_user_id", secUID)
+	}
+	u := "https://www-hj.douyin.com/aweme/v1/web/commit/follow/user/?device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0"
+	args, _ := json.Marshal([]string{u, form, q.Encode()})
+	js := "const [u, type, body] = " + string(args) + `;
+const r = await fetch(u, { method: "POST", credentials: "include", headers: { "content-type": type }, body });
+const t = await r.text();
+let code = null, follow = null;
+try { const j = JSON.parse(t); code = j.status_code; if (typeof j.follow_status === "number") follow = j.follow_status; } catch {}
+return { http: r.status, code, follow, text: t.slice(0, 300) };`
+	var r struct {
+		HTTP   int
+		Code   *int
+		Follow *int
+		Text   string
+	}
+	var err error
+	for try := range 3 {
+		if try > 0 {
+			time.Sleep(time.Second)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		var b []byte
+		b, err = c.web.Eval(ctx, js)
+		cancel()
+		if err == nil {
+			err = json.Unmarshal(b, &r)
+		}
+		switch {
+		case err != nil:
+		case r.HTTP == 200 && r.Code != nil && *r.Code == 0:
+			c.syncCookies()
+			if r.Follow != nil {
+				return *r.Follow, nil
+			}
+			return b2i(on), nil
+		case r.Code != nil && *r.Code == 8:
+			return 0, ErrNeedLogin
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("抖音没接受关注操作（HTTP %d）：%.200s", r.HTTP, r.Text)
+}
+
 // SetCommentLiked likes a comment (cid) of the video with the given ID, or
 // takes the like back, as the page's heart does: digg_type 1 likes, 2 takes
 // back; level 1 is a comment, 3 a reply (read from Douyin's page, 2026-11-16).

@@ -73,6 +73,7 @@ type Video struct {
 	ID, Desc, Author string
 	AuthorID         string // sec_uid, which Posts takes
 	AuthorUID        string // the numeric ID, which Watched takes
+	AuthorFollow     int    // 0: not following, 1: following, 2: mutual
 	Size             int64
 	PlayURL          string // carries audio; the bit_rate gears named adapt_* are video-only
 	W, H             int
@@ -464,10 +465,11 @@ type aweme struct {
 	Saved   int   `json:"collect_stat"`
 	Top     int   `json:"is_top"`
 	Author  struct {
-		Nickname string
-		UID      string `json:"uid"`
-		SecUID   string `json:"sec_uid"`
-		Avatar   addr   `json:"avatar_thumb"`
+		Nickname     string
+		UID          string `json:"uid"`
+		SecUID       string `json:"sec_uid"`
+		Avatar       addr   `json:"avatar_thumb"`
+		FollowStatus int    `json:"follow_status"`
 	}
 	Video struct {
 		Duration int  `json:"duration"`
@@ -522,7 +524,7 @@ func videos(list []aweme) []Video {
 		if a.Mix != nil {
 			mix = Mix{a.Mix.ID, a.Mix.Name, a.Mix.Statis.Episode, a.Mix.Statis.Updated}
 		}
-		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, AuthorUID: a.Author.UID, PlayURL: play,
+		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, AuthorUID: a.Author.UID, AuthorFollow: a.Author.FollowStatus, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
 			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),
@@ -702,9 +704,10 @@ type profile struct {
 	Followers int  `json:"follower_count"`
 	Liked     int  `json:"total_favorited"`
 	UID       string
-	UniqueID  string `json:"unique_id"`
-	ShortID   string `json:"short_id"`
-	Place     string `json:"ip_location"`
+	UniqueID     string `json:"unique_id"`
+	ShortID      string `json:"short_id"`
+	Place        string `json:"ip_location"`
+	FollowStatus int    `json:"follow_status"`
 }
 
 func (p profile) user() User {
@@ -714,7 +717,7 @@ func (p profile) user() User {
 	}
 	return User{ID: p.SecUID, Name: p.Nickname, Signature: p.Signature, Avatar: p.Avatar.first(),
 		Following: p.Following, Followers: p.Followers, Liked: p.Liked, UID: p.UID,
-		Handle: handle, Place: strings.TrimPrefix(p.Place, "IP属地：")}
+		Handle: handle, Place: strings.TrimPrefix(p.Place, "IP属地："), FollowStatus: p.FollowStatus}
 }
 
 // Posts pages through a user's videos, with their pinned posts first.
@@ -752,6 +755,7 @@ type User struct {
 	Following, Followers, Liked int    // the counts of a profile, which Self and Profile fill in
 	UID                         string // the numeric ID, which Self and Profile fill in
 	Handle, Place               string // 抖音号 and IP属地, which Profile fills in
+	FollowStatus                int    // 0: not following, 1: following, 2: mutual
 }
 
 // Self returns the logged-in user.
@@ -825,8 +829,10 @@ func (p CommentPic) Full() string {
 // Comment is a comment on a video, or a reply to one.
 type Comment struct {
 	ID, Author, Text, Place string // Place is the region Douyin shows, as 广东
+	AuthorID                string // the commenter's sec_uid, for opening their profile
 	Avatar                  string // the author's picture
 	ReplyTo                 string // in a reply to a reply, whom it answers
+	ReplyToID               string // the answered user's sec_uid, when Douyin includes it
 	Likes, Replies          int
 	Time                    time.Time
 	Liked                   bool         // the user logged in has liked it
@@ -841,15 +847,17 @@ type comment struct {
 	Extra []commentExtra `json:"text_extra"`
 	User  struct {
 		Nickname string
-		Avatar   addr `json:"avatar_thumb"`
+		SecUID   string `json:"sec_uid"`
+		Avatar   addr   `json:"avatar_thumb"`
 	}
-	Likes   int    `json:"digg_count"`
-	Replies int    `json:"reply_comment_total"`
-	Time    int64  `json:"create_time"`
-	Place   string `json:"ip_label"`
-	ReplyTo string `json:"reply_to_username"`
-	Digged  int    `json:"user_digged"`
-	Images  []struct {
+	Likes         int    `json:"digg_count"`
+	Replies       int    `json:"reply_comment_total"`
+	Time          int64  `json:"create_time"`
+	Place         string `json:"ip_label"`
+	ReplyTo       string `json:"reply_to_username"`
+	ReplyToSecUID string `json:"reply_to_user_sec_id"`
+	Digged        int    `json:"user_digged"`
+	Images        []struct {
 		Medium addr `json:"medium_url"`
 		Thumb  addr `json:"thumb_url"`
 		Origin addr `json:"origin_url"`
@@ -861,7 +869,8 @@ type comment struct {
 }
 
 func (x comment) comment() Comment {
-	cm := Comment{ID: x.CID, Author: x.User.Nickname, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
+	cm := Comment{ID: x.CID, Author: x.User.Nickname, AuthorID: x.User.SecUID, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place,
+		ReplyTo: x.ReplyTo, ReplyToID: x.ReplyToSecUID,
 		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0), Liked: x.Digged != 0, Links: x.links()}
 	for _, im := range x.Images {
 		thumb := firstNonEmpty(im.Medium.first(), im.Thumb.first(), im.Origin.first())

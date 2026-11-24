@@ -73,7 +73,7 @@ func (a *app) view(c *ui.Context) {
 	giftOpen := a.liveChat != nil && a.liveChat.gifts.open
 	a.mainVideo.begin(a.win)
 	defer a.mainVideo.end()
-	a.mainVideo.off = giftOpen || a.group.open || a.picViewer.open || a.loginOpen && a.login.verify && a.web.v != nil
+	a.mainVideo.off = giftOpen || a.group.open || a.picViewer.open || a.upd.dialogOpen || a.loginOpen && a.login.verify && a.web.v != nil
 	t.Accent, t.AccentText = pal.accent, white
 	t.Inverse, t.InverseText = onOff(pal.dark, white, ui.Hex("#11141e")), onOff(pal.dark, ui.Hex("#11141e"), white) // toasts': by default the text is the Background, clear here
 	t.Selection = pal.accent.Alpha(0.35)
@@ -84,13 +84,13 @@ func (a *app) view(c *ui.Context) {
 
 	liveInputFocused := a.liveChat != nil && c.Focused(a.liveChat.input)
 	commentInputFocused := a.sheet != nil && !a.sheet.related && (c.Focused(a.sheet.draft.input) || a.sheet.draft.emojiOpen)
-	if !giftOpen && !a.picViewer.open && !liveInputFocused && !commentInputFocused {
+	if !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused {
 		c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
 		c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
 	}
 	c.OnShortcut(0, ui.KeyEscape, a.escape)
 	root := ui.Box(c).Fill()
-	if !giftOpen && !a.picViewer.open && !liveInputFocused && !commentInputFocused && !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
+	if !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused && !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
 		// Space pauses wherever the focus is, as in MySpotify: on the box
 		// around everything it comes before a button the pointer focused,
 		// which would take it as a click; on the window, as nothing has
@@ -133,7 +133,7 @@ func (a *app) view(c *ui.Context) {
 					case a.isMine(p):
 						a.mineHeader(c)
 					case p.user != nil:
-						a.profileHeader(c, *p.user)
+						a.profileHeader(c, *p.user, false)
 					case len(p.users) > 0:
 						a.usersRow(c.Key("users"), p.users)
 					}
@@ -162,6 +162,7 @@ func (a *app) view(c *ui.Context) {
 		a.searchList(c)
 	}
 	a.settingsDialog(c)
+	a.updateDialog(c)
 	a.commentGroupDialog(c)
 	a.picViewerDialog(c)
 	if a.liveChat != nil && a.liveChat.gifts.open && p.idx < len(p.list) {
@@ -179,10 +180,22 @@ func (a *app) view(c *ui.Context) {
 
 // searchField is where the search field sits in the window: its left edge
 // and width, centered over the content, clear of the buttons at the right.
-func searchField(c *ui.Context) (left, width float32) {
+func (a *app) searchField(c *ui.Context) (left, width float32) {
 	w, _ := c.Size()
-	width = min(460, w-contentLeft-2*290)
-	return contentLeft + (w-contentLeft-width)/2, width
+	rightReserve := float32(290)
+	if a.showUpdatePill() {
+		if w < 1080 {
+			rightReserve = 360
+		} else {
+			rightReserve = 415
+		}
+	}
+	width = min(460, w-contentLeft-2*rightReserve)
+	if width >= 220 {
+		return contentLeft + (w-contentLeft-width)/2, width
+	}
+	width = min(460, max(160, w-contentLeft-rightReserve-150))
+	return w - rightReserve - width, width
 }
 
 // searchList drops from the focused search field: the hot search list's
@@ -204,7 +217,7 @@ func (a *app) searchList(c *ui.Context) {
 	if len(words) == 0 {
 		return
 	}
-	left, width := searchField(c)
+	left, width := a.searchField(c)
 	ui.Column(c.Key("hot")).Absolute().Top(52).Left(left).Width(width).Padding(8, 6).Radius(12).
 		Background(pal.popover).Border(1, pal.popoverBd).Shadow(0, 10, 30, -6, pal.cardShadow).Children(func() {
 		if q == "" {
@@ -282,7 +295,7 @@ func (a *app) usersRow(c *ui.Context, us []dy.User) {
 // mineHeader tops 我的: the user's profile, and the tabs of their videos,
 // likes, saves and watch history.
 func (a *app) mineHeader(c *ui.Context) {
-	a.profileHeader(c, a.me)
+	a.profileHeader(c, a.me, true)
 	ui.Row(c).Height(40).PaddingX(24).Gap(26).AlignItems(ui.Center).Children(func() {
 		for _, name := range mineTabs {
 			on := name == a.mineTab
@@ -308,15 +321,49 @@ func (a *app) mineHeader(c *ui.Context) {
 	})
 }
 
-// profileHeader is an account's picture, name, counts, 抖音号 and region
-// where known, and signature: atop 我的 and an author's videos.
-func (a *app) profileHeader(c *ui.Context, me dy.User) {
+// profileHeader is an account's picture, name, follow button (on others'
+// profiles), counts, 抖音号 and region where known, and signature.
+func (a *app) profileHeader(c *ui.Context, u dy.User, isSelf bool) {
 	ui.Row(c).Padding(6, 24, 14, 24).Gap(18).AlignItems(ui.Center).Children(func() {
-		a.avatar(c, pal, me.Avatar, me.Name, 72)
-		ui.Column(c).Gap(8).Shrink(1).MinWidth(0).Children(func() {
-			ui.Text(c, me.Name).FontSize(20).FontWeight(700).TextColor(pal.strong).SingleLine()
+		a.avatar(c, pal, u.Avatar, u.Name, 72)
+		ui.Column(c).Gap(8).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, u.Name).FontSize(20).FontWeight(700).TextColor(pal.strong).SingleLine().Shrink(1).MinWidth(0)
+				if !isSelf && u.ID != "" && u.ID != a.me.ID {
+					status := a.followStatus(u.ID, u.FollowStatus)
+					busy := a.followBusy[u.ID]
+					followed := status > 0
+					label := "关注"
+					if status == 2 {
+						label = "互相关注"
+					} else if followed {
+						label = "已关注"
+					}
+					fb := ui.ButtonBase(c.Key("profile-follow:" + u.ID)).Height(32).PaddingX(16).Gap(5).Radius(8).
+						AlignItems(ui.Center).FocusRing(false).Label(onOff(followed, "取消关注", "关注"))
+					if followed {
+						text := label
+						if fb.Hovered() && !busy {
+							text = "取消关注"
+						}
+						fb.Background(onOff(fb.Hovered(), pal.press, pal.hover)).Border(1, pal.pillBorder).Children(func() {
+							ui.Text(c, text).FontSize(13).FontWeight(600).TextColor(pal.text).SingleLine()
+						})
+					} else {
+						fb.Background(onOff(fb.Hovered(), pal.accent.Alpha(0.9), pal.accent)).Children(func() {
+							ui.Icon(c, iconPlus).Size(13, 13).TextColor(white)
+							ui.Text(c, label).FontSize(13).FontWeight(600).TextColor(white).SingleLine()
+						})
+					}
+					if busy {
+						fb.Opacity(0.55)
+					} else if fb.Clicked() {
+						a.toggleFollow(u.ID, u.UID, u.Name, u.FollowStatus)
+					}
+				}
+			})
 			ui.Row(c).Gap(18).Children(func() {
-				for _, kv := range [][2]string{{"关注", count(me.Following)}, {"粉丝", count(me.Followers)}, {"获赞", count(me.Liked)}} {
+				for _, kv := range [][2]string{{"关注", count(u.Following)}, {"粉丝", count(u.Followers)}, {"获赞", count(u.Liked)}} {
 					ui.Row(c).Gap(5).AlignItems(ui.Baseline).Children(func() {
 						ui.Text(c, kv[0]).FontSize(13).TextColor(pal.muted)
 						ui.Text(c, kv[1]).FontSize(15).FontWeight(700).TextColor(pal.text)
@@ -324,18 +371,18 @@ func (a *app) profileHeader(c *ui.Context, me dy.User) {
 				}
 			})
 			var ids []string
-			if me.Handle != "" {
-				ids = append(ids, "抖音号："+me.Handle)
+			if u.Handle != "" {
+				ids = append(ids, "抖音号："+u.Handle)
 			}
-			if me.Place != "" {
-				ids = append(ids, "IP属地："+me.Place)
+			if u.Place != "" {
+				ids = append(ids, "IP属地："+u.Place)
 			}
 			if len(ids) > 0 {
 				ui.Text(c, strings.Join(ids, "   ")).FontSize(12).TextColor(pal.faint).SingleLine()
 			}
-			if me.Signature != "" {
+			if u.Signature != "" {
 				// On one line: a signature's blank lines would leave the second empty but for its ellipsis.
-				ui.Text(c, strings.Join(strings.Fields(me.Signature), " ")).FontSize(12.5).TextColor(pal.faint).MaxLines(2)
+				ui.Text(c, strings.Join(strings.Fields(u.Signature), " ")).FontSize(12.5).TextColor(pal.faint).MaxLines(2)
 			}
 		})
 	})
@@ -375,7 +422,7 @@ func (a *app) topBar(c *ui.Context, p *page) {
 				ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
 			})
 		}
-		left, fieldW := searchField(c)
+		left, fieldW := a.searchField(c)
 		left -= contentLeft // the bar starts beside the dock
 		field := ui.Row(c).Absolute().Top(10).Left(left).Width(fieldW).Height(36).Radius(12).PaddingStart(14).
 			AlignItems(ui.Center).Background(pal.searchTint).Shadow(0, 6, 18, -8, pal.searchShadow)
@@ -1411,12 +1458,39 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 	}
 	shadow := ui.RGBA(0, 0, 0, 0.45)
 	ui.Column(c.Key("rail")).Absolute().Right(14).Bottom(64).Gap(gap).AlignItems(ui.Center).Children(func() {
-		ab := ui.ButtonBase(c.Key("avatar")).FocusRing(false).Label("作者主页").Margin(0, 0, 4, 0).
-			Radius(999).Border(2, white)
-		ab.Children(func() { a.avatar(c, vid, s.v.Avatar, s.v.Author, icon+16) })
-		if ab.Clicked() {
-			a.openAuthor(p, s.v.Author, s.v.AuthorID)
-		}
+		avatarSize := icon + 16
+		canFollow := s.v.AuthorID != "" && s.v.AuthorID != a.me.ID
+		ui.Box(c.Key("author-wrap")).Size(avatarSize, avatarSize+onOff(canFollow, float32(10), float32(0))).Margin(0, 0, 2, 0).Children(func() {
+			ab := ui.ButtonBase(c.Key("avatar")).Absolute().Top(0).Left(0).FocusRing(false).Label("作者主页").
+				Radius(999).Border(2, white)
+			ab.Children(func() { a.avatar(c, vid, s.v.Avatar, s.v.Author, avatarSize) })
+			if ab.Clicked() {
+				a.openAuthor(p, s.v.Author, s.v.AuthorID)
+			}
+			if canFollow {
+				status := a.followStatus(s.v.AuthorID, s.v.AuthorFollow)
+				busy := a.followBusy[s.v.AuthorID]
+				followed := status > 0
+				const badge = float32(22)
+				fb := ui.ButtonBase(c.Key("follow:" + s.v.AuthorID)).Absolute().
+					Left((avatarSize - badge) / 2).Bottom(0).Size(badge, badge).Radius(badge / 2).
+					Center().FocusRing(false).Label(onOff(followed, "取消关注作者", "关注作者"))
+				if followed {
+					fb.Background(ui.RGBA(34, 38, 48, 0.94)).Border(1.5, ui.RGBA(255, 255, 255, 0.75)).Children(func() {
+						ui.Icon(c, iconCheck).Size(12, 12).TextColor(white)
+					})
+				} else {
+					fb.Background(vid.accent).Border(1.5, white).Children(func() {
+						ui.Icon(c, iconPlus).Size(12, 12).TextColor(white)
+					})
+				}
+				if busy {
+					fb.Opacity(0.55)
+				} else if fb.Clicked() {
+					a.toggleFollow(s.v.AuthorID, s.v.AuthorUID, s.v.Author, s.v.AuthorFollow)
+				}
+			}
+		})
 		under := func(text string) {
 			ui.Text(c, text).FontSize(14).FontWeight(600).TextColor(ui.RGBA(255, 255, 255, 0.9)).TextShadow(0, 1, 3, shadow).SingleLine()
 		}
@@ -1743,7 +1817,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 						padBottom = 2
 					}
 					ui.Row(c).Padding(10, 16, padBottom, 16).Gap(10).AlignItems(ui.Start).Children(func() {
-						a.avatar(c, pal, cm.Avatar, cm.Author, 30)
+						a.commentAvatar(c, cm, 30)
 						ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 							a.commentText(c, sh, cm, 14, false, cm.ID)
 						})
@@ -1753,7 +1827,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 					th := sh.threads[cm.ID]
 					rep := th.items[r.ri]
 					ui.Row(c).Padding(6, 16, 0, 56).Gap(8).AlignItems(ui.Start).Children(func() {
-						a.avatar(c, pal, rep.Avatar, rep.Author, 22)
+						a.commentAvatar(c, rep, 22)
 						ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 							a.commentText(c, sh, rep, 13, true, cm.ID)
 						})
@@ -1792,14 +1866,56 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 	})
 }
 
+func (a *app) commentAvatar(c *ui.Context, cm dy.Comment, size float32) {
+	if cm.AuthorID == "" {
+		a.avatar(c, pal, cm.Avatar, cm.Author, size)
+		return
+	}
+	b := ui.ButtonBase(c.Key("avatar:" + cm.ID)).Size(size, size).Radius(size / 2).Clip().FocusRing(false).
+		Cursor(ui.CursorPointer).Label("查看 " + cm.Author + " 主页")
+	b.Children(func() {
+		a.avatar(c, pal, cm.Avatar, cm.Author, size)
+	})
+	if b.Clicked() {
+		a.openAuthor(a.cur(), cm.Author, cm.AuthorID)
+	}
+}
+
 // commentText is a comment's author (and whom a reply answers), its text,
 // and when and where from, in its text size, beside its reply and like buttons.
 func (a *app) commentText(c *ui.Context, sh *sheet, cm dy.Comment, size float32, reply bool, rootID string) {
-	who := cm.Author
-	if cm.ReplyTo != "" {
-		who += " ▸ " + cm.ReplyTo
+	nameSize := size - 2
+	nameBtn := func(key, name, id string) {
+		if id == "" {
+			ui.Text(c, name).FontSize(nameSize).TextColor(pal.muted).SingleLine().Shrink(1).MinWidth(0)
+			return
+		}
+		b := ui.ButtonBase(c.Key(key)).Radius(4).FocusRing(false).Cursor(ui.CursorPointer).Shrink(1).MinWidth(0).Label(name)
+		b.Children(func() {
+			t := ui.Text(c, name).FontSize(nameSize).TextColor(onOff(b.Hovered(), pal.strong, pal.muted)).SingleLine()
+			if b.Hovered() {
+				t.Underline()
+			}
+		})
+		if b.Clicked() {
+			a.openAuthor(a.cur(), name, id)
+		}
 	}
-	ui.Text(c, who).FontSize(size - 2).TextColor(pal.muted).SingleLine()
+	if cm.AuthorID == "" && cm.ReplyToID == "" {
+		who := cm.Author
+		if cm.ReplyTo != "" {
+			who += " ▸ " + cm.ReplyTo
+		}
+		ui.Text(c, who).FontSize(nameSize).TextColor(pal.muted).SingleLine()
+	} else {
+		ui.Row(c.Key("who")).Gap(4).AlignItems(ui.Center).Children(func() {
+			nameBtn("author:"+cm.ID, cm.Author, cm.AuthorID)
+			if cm.ReplyTo != "" {
+				ui.Text(c, "▸").FontSize(nameSize).TextColor(pal.faint)
+				nameBtn("replyto:"+cm.ID, cm.ReplyTo, cm.ReplyToID)
+			}
+		})
+	}
 	a.commentBody(c, sh, cm, size)
 	meta := ago(cm.Time, time.Now())
 	if cm.Place != "" {
@@ -2323,4 +2439,5 @@ var (
 	iconCopy       = strokeIcon(`<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`)
 	iconSmile      = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.5 2.2 2.2 3.5 2.2s2.5-.7 3.5-2.2"/><circle cx="9" cy="9.5" r=".8" fill="currentColor"/><circle cx="15" cy="9.5" r=".8" fill="currentColor"/>`)
 	iconImage      = strokeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5-6 6-2-2-5 5"/>`)
+	iconPlus       = strokeIcon(`<path d="M12 5v14"/><path d="M5 12h14"/>`)
 )

@@ -244,17 +244,12 @@ func (a *app) orbitView(c *ui.Context) {
 	})
 }
 
-// chrome is what every page shares, over it: the dock down the left, the
-// buttons at the top right, and the update offer at the bottom left.
+// chrome is what every page shares, over it: the dock down the left and the
+// buttons at the top right (including the update pill when a release is found).
 func (a *app) chrome(c *ui.Context, p *page) {
 	_, h := c.Size()
 	a.dock(c, h)
 	a.topRight(c)
-	if a.upd.found != nil {
-		ui.Column(c.Key("update-wrap")).Absolute().Left(dockLeft - 2).Bottom(12).Width(200).ZIndex(36).Children(func() {
-			a.updateBanner(c)
-		})
-	}
 }
 
 func (a *app) topRight(c *ui.Context) {
@@ -263,6 +258,7 @@ func (a *app) topRight(c *ui.Context) {
 		right += 138 // three native caption buttons, 46 DIPs each
 	}
 	ui.Row(c.Key("top-right")).Absolute().Top(11).Right(right).Gap(6).AlignItems(ui.Center).ZIndex(30).Children(func() {
+		a.updatePill(c)
 		themeIcon := onOff(pal.dark, iconSun, iconMoon)
 		themeLabel := onOff(pal.dark, "切换浅色主题", "切换深色主题")
 		if iconButton(c.Key("theme"), themeIcon, 16, pal.muted, themeLabel).Clicked() {
@@ -316,9 +312,15 @@ func (a *app) topRight(c *ui.Context) {
 				a.openLogin()
 			}
 		}
-		if iconButton(c.Key("settings"), iconSettings, 16, onOff(a.settingsOpen, pal.strong, pal.muted), "设置").Clicked() {
-			a.settingsOpen = true
-		}
+		ui.Box(c.Key("settings-wrap")).Children(func() {
+			if iconButton(c.Key("settings"), iconSettings, 16, onOff(a.settingsOpen, pal.strong, pal.muted), "设置").Clicked() {
+				a.settingsOpen = true
+			}
+			if a.upd.found != nil && a.upd.dismissed && !a.upd.busy {
+				ui.Box(c).Absolute().Top(5).Right(5).Size(7, 7).Radius(4).Background(pal.accent).
+					HitTest(func(float32, float32, ui.Rect) bool { return false })
+			}
+		})
 	})
 }
 

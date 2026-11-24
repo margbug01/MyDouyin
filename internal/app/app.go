@@ -261,8 +261,11 @@ type app struct {
 	// sendShare sends a video to an account by name; a test puts its own.
 	sendShare func(videoID, name string) error
 
-	// setLiked and setSaved send a like or a save to Douyin; a test puts its own.
+	// setLiked, setSaved, and setFollowed write to Douyin; a test puts its own.
 	setLiked, setSaved func(id string, on bool) error
+	setFollowed        func(uid, secUID string, on bool) (int, error)
+	followState        map[string]int  // latest follow_status by sec_uid (0, 1, 2)
+	followBusy         map[string]bool // follow/unfollow request in flight by sec_uid
 	// likeComment likes a comment or a reply of a video, or takes it back; a test puts its own.
 	likeComment func(videoID, cid string, reply, on bool) error
 	// publishComment posts a comment or reply; a test puts its own.
@@ -270,7 +273,8 @@ type app struct {
 	// uploadCommentImage uploads a comment image to ImageX; a test puts its own.
 	uploadCommentImage func(data []byte, fileName, userID string, measured dy.CommentImage) (dy.CommentImage, error)
 	// replies pages through a comment's replies; a test puts its own.
-	replies  func(videoID, commentID string) dy.Pager[dy.Comment]
+	replies      func(videoID, commentID string) dy.Pager[dy.Comment]
+	openAuthorFn func(p *page, name, id string) // test override for openAuthor
 	listen   bool    // 听抖音: the cover in the picture's place, the sound on
 	moreOpen bool    // the rail's 更多 menu
 	upd      updates // checking for new versions and installing them (update.go)
@@ -400,6 +404,102 @@ func (a *app) like(s *slot) {
 // keeping its file in Downloads.
 func (a *app) collect(s *slot) {
 	a.write(s, &s.saving, &s.v.Saved, &s.v.Collects, a.setSaved, "收藏")
+}
+
+// followStatus returns the latest known follow status (0, 1, or 2) for secUID.
+func (a *app) followStatus(secUID string, fallback int) int {
+	if secUID != "" {
+		if st, ok := a.followState[secUID]; ok {
+			return st
+		}
+	}
+	return fallback
+}
+
+// toggleFollow follows or unfollows a user from a video or their profile page,
+// syncing the result across all views referencing the same secUID.
+func (a *app) toggleFollow(secUID, uid, name string, fallback int) {
+	if secUID == "" || (a.me.ID != "" && secUID == a.me.ID) || a.followBusy[secUID] {
+		return
+	}
+	if !a.signedIn {
+		a.openLogin()
+		return
+	}
+	send := a.setFollowed
+	if send == nil && a.c != nil {
+		send = a.c.SetFollowed
+	}
+	if send == nil {
+		return
+	}
+	prev := a.followStatus(secUID, fallback)
+	want := prev == 0
+	optimistic := 0
+	step := -1
+	if want {
+		optimistic = 1
+		step = 1
+	}
+	if a.followState == nil {
+		a.followState = map[string]int{}
+	}
+	if a.followBusy == nil {
+		a.followBusy = map[string]bool{}
+	}
+	a.followState[secUID] = optimistic
+	a.followBusy[secUID] = true
+	a.adjustProfileFollowers(secUID, step)
+
+	go func() {
+		targetUID := uid
+		if targetUID == "" && a.c != nil {
+			if u, err := a.c.Profile(secUID); err == nil {
+				targetUID = u.UID
+			}
+		}
+		st, err := send(targetUID, secUID, want)
+		a.post(func() {
+			delete(a.followBusy, secUID)
+			if err != nil {
+				a.followState[secUID] = prev
+				a.adjustProfileFollowers(secUID, -step)
+				a.toast = onOff(want, "关注", "取消关注") + "没成功：" + err.Error()
+				if errors.Is(err, dy.ErrNeedLogin) {
+					a.loginLost(onOff(want, "关注", "取消关注"))
+				}
+				return
+			}
+			a.followState[secUID] = st
+			if a.me.Following+step >= 0 {
+				a.me.Following += step
+			}
+			if want {
+				if name != "" {
+					a.toast = "已关注 " + name
+				} else {
+					a.toast = "已关注"
+				}
+			} else {
+				a.toast = "已取消关注"
+			}
+		})
+	}()
+}
+
+func (a *app) adjustProfileFollowers(secUID string, delta int) {
+	for _, p := range a.pages {
+		if p.user != nil && p.user.ID == secUID && p.user.Followers+delta >= 0 {
+			p.user.Followers += delta
+		}
+	}
+	for _, stack := range a.stacks {
+		for _, p := range stack {
+			if p.user != nil && p.user.ID == secUID && p.user.Followers+delta >= 0 {
+				p.user.Followers += delta
+			}
+		}
+	}
 }
 
 func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) error, what string) {
@@ -962,6 +1062,10 @@ func (a *app) moreComments(sh *sheet) {
 func (a *app) escape() {
 	if a.picViewer.open {
 		a.picViewer.open = false
+		return
+	}
+	if a.upd.dialogOpen {
+		a.upd.dialogOpen = false
 		return
 	}
 	if chat := a.liveChat; chat != nil && chat.gifts.open {
@@ -1627,7 +1731,14 @@ func (a *app) suggest() {
 // openAuthor opens a user's videos, their profile above, unless p is that
 // page already.
 func (a *app) openAuthor(p *page, name, id string) {
-	if id != "" && a.c != nil && p.authorID != id {
+	if id == "" || p.authorID == id {
+		return
+	}
+	if a.openAuthorFn != nil {
+		a.openAuthorFn(p, name, id)
+		return
+	}
+	if a.c != nil {
 		q := &page{title: "@" + name, authorID: id, next: a.c.Posts(id), grid: true}
 		a.open(q)
 		go func() {
@@ -1741,6 +1852,7 @@ func Run() error {
 	a.img = newImages(c.Image, a.post)
 	a.img.releasePixels = true
 	a.setLiked, a.setSaved, a.likeComment = c.SetLiked, c.SetSaved, c.SetCommentLiked
+	a.setFollowed = c.SetFollowed
 	a.publishComment, a.uploadCommentImage = c.PublishComment, c.UploadCommentImage
 	a.replies = c.Replies
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }

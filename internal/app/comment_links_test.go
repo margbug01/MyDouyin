@@ -57,3 +57,68 @@ func TestCommentInlineLinkClickAndGroupEscape(t *testing.T) {
 		t.Fatal("Escape should close the invite, leaving comments open")
 	}
 }
+
+func TestCommentAuthorAvatarAndNameOpenProfile(t *testing.T) {
+	var a *app
+	a = withRoots(&app{
+		pages: []*page{stub("推荐", 1)},
+		openAuthorFn: func(_ *page, name, id string) {
+			a.open(&page{title: "@" + name, authorID: id, grid: true, done: true})
+		},
+	})
+	sh := &sheet{
+		done: true,
+		items: []dy.Comment{{
+			ID:       "c1",
+			Author:   "评论甲",
+			AuthorID: "sec-jia",
+			Text:     "你好",
+			Replies:  1,
+		}},
+		threads: map[string]*thread{
+			"c1": {
+				open: true,
+				done: true,
+				items: []dy.Comment{{
+					ID:        "r1",
+					Author:    "回复乙",
+					AuthorID:  "sec-yi",
+					ReplyTo:   "被回复丙",
+					ReplyToID: "sec-bing",
+					Text:      "回你",
+				}},
+			},
+		},
+	}
+	a.sheet = sh
+	tt := newTester(a)
+
+	if err := tt.Click("评论甲"); err != nil {
+		t.Fatalf("click comment author name: %v", err)
+	}
+	if cur := a.cur(); cur.authorID != "sec-jia" || cur.title != "@评论甲" || a.sheet != nil {
+		t.Fatalf("author page not opened from name: cur=%+v sheet=%v", cur, a.sheet != nil)
+	}
+
+	// Return and click avatar of a reply.
+	a.back()
+	a.sheet = sh
+	tt.Frame()
+	if err := tt.Click("查看 回复乙 主页"); err != nil {
+		t.Fatalf("click reply avatar: %v", err)
+	}
+	if cur := a.cur(); cur.authorID != "sec-yi" || cur.title != "@回复乙" {
+		t.Fatalf("author page not opened from reply avatar: cur=%+v", cur)
+	}
+
+	// Return and click ReplyTo target name.
+	a.back()
+	a.sheet = sh
+	tt.Frame()
+	if err := tt.Click("被回复丙"); err != nil {
+		t.Fatalf("click reply-to name: %v", err)
+	}
+	if cur := a.cur(); cur.authorID != "sec-bing" || cur.title != "@被回复丙" {
+		t.Fatalf("author page not opened from reply-to name: cur=%+v", cur)
+	}
+}

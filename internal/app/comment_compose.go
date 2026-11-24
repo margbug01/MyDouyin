@@ -521,7 +521,7 @@ func (a *app) sendComment(sh *sheet) {
 	img := sh.draft.image
 	videoID := sh.v.ID
 	uid := a.me.UID
-	meName, meAvatar := a.me.Name, a.me.Avatar
+	meID, meName, meAvatar := a.me.ID, a.me.Name, a.me.Avatar
 	upload := a.uploadCommentImage
 	if upload == nil && a.c != nil {
 		upload = a.c.UploadCommentImage
@@ -598,6 +598,9 @@ func (a *app) sendComment(sh *sheet) {
 
 			if cm.Author == "" {
 				cm.Author = meName
+			}
+			if cm.AuthorID == "" {
+				cm.AuthorID = meID
 			}
 			if cm.Avatar == "" {
 				cm.Avatar = meAvatar

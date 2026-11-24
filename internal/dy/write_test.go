@@ -161,3 +161,37 @@ func TestSaveCookiesSkipsUnchangedWrite(t *testing.T) {
 		t.Fatalf("unchanged cookies rewrote %s", file)
 	}
 }
+
+func TestSetFollowedThroughWeb(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	c := &Client{}
+	w := &fakeWeb{
+		replies: []string{
+			`{"http":200,"code":0,"follow":2,"text":"{\"status_code\":0,\"follow_status\":2}"}`,
+			`{"http":200,"code":0,"follow":0,"text":"{\"status_code\":0,\"follow_status\":0}"}`,
+			`{"http":200,"code":8,"follow":null,"text":"{\"status_code\":8}"}`,
+		},
+		cookies: []Cookie{{Name: "sessionid", Value: "s"}},
+	}
+	c.SetWeb(w)
+
+	st, err := c.SetFollowed("12345", "MS4wLjAB_test", true)
+	if err != nil || st != 2 {
+		t.Fatalf("follow: st=%d err=%v", st, err)
+	}
+	if !strings.Contains(w.scripts[0], "/aweme/v1/web/commit/follow/user/") ||
+		!strings.Contains(w.scripts[0], "user_id=12345") ||
+		!strings.Contains(w.scripts[0], "sec_user_id=MS4wLjAB_test") ||
+		!strings.Contains(w.scripts[0], "type=1") {
+		t.Fatalf("follow script: %s", w.scripts[0])
+	}
+
+	st, err = c.SetFollowed("12345", "MS4wLjAB_test", false)
+	if err != nil || st != 0 || !strings.Contains(w.scripts[1], "type=0") {
+		t.Fatalf("unfollow: st=%d err=%v script=%s", st, err, w.scripts[1])
+	}
+
+	if _, err := c.SetFollowed("12345", "MS4wLjAB_test", true); !errors.Is(err, ErrNeedLogin) {
+		t.Fatalf("need login: %v", err)
+	}
+}

@@ -179,8 +179,9 @@ func (a *app) settingsDialog(c *ui.Context) {
 		row("检查更新", status, func() {
 			switch {
 			case u.found != nil && !u.busy:
-				if ui.Button(c.Key("install"), "更新并重启").Clicked() {
-					a.installUpdate()
+				if ui.Button(c.Key("install"), "查看更新").Clicked() {
+					a.settingsOpen = false
+					u.dialogOpen = true
 				}
 			default:
 				b := ui.Button(c.Key("check"), "检查更新")
