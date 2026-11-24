@@ -694,3 +694,81 @@ func TestRepliesRecoverAfterCooldownAndReset(t *testing.T) {
 		t.Fatalf("after reset: rs=%+v err=%v scripts=%d->%d", rs, err, scriptsBefore, len(w.scripts))
 	}
 }
+
+func TestPageGetCaptchaFlagReturnsVerify(t *testing.T) {
+	c := &Client{signer: sign.New(ua)}
+	w := &fakeWeb{replies: []string{`{"http":200,"text":"","verify":true}`}}
+	c.SetWeb(w)
+	if _, err := c.pageGet("/aweme/v1/web/comment/list/reply/", "item_id=1"); !errors.Is(err, ErrVerify) {
+		t.Fatalf("pageGet with verify flag: got %v, want ErrVerify", err)
+	}
+	if len(w.scripts) != 1 || !strings.Contains(w.scripts[0], "captcha_container") {
+		t.Fatalf("expected passive captcha observer in pageGet script, got %q", w.scripts)
+	}
+}
+
+func TestRepliesEmptyDirectFallsBackToPage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	directCalls := 0
+	c := &Client{
+		http: &http.Client{Transport: funcRT(func(r *http.Request) (*http.Response, error) {
+			directCalls++
+			// Silent empty 200 OK without X-Vc-Bdturing-Parameters.
+			return &http.Response{StatusCode: 200, Status: "200 OK", Header: http.Header{}, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})},
+		signer: sign.New(ua),
+	}
+	c.login.Store(&login{cookie: "sessionid=s"})
+	testGuard(t)
+	w := &fakeWeb{
+		// First Eval is RefreshGuard returning null (no material), second Eval is pageGet succeeding.
+		replies: []string{
+			"null",
+			reply(`{"status_code":0,"comments":[{"cid":"r1","text":"页面兜底回复"}],"cursor":1,"has_more":0}`),
+		},
+	}
+	c.SetWeb(w)
+
+	rs, err := c.Replies("1", "2")()
+	if err != nil || len(rs) != 1 || rs[0].Text != "页面兜底回复" || directCalls != 1 || len(w.scripts) != 2 {
+		t.Fatalf("fallback on refresh failure: rs=%+v err=%v direct=%d scripts=%d", rs, err, directCalls, len(w.scripts))
+	}
+
+	// Reset cooldown and test when RefreshGuard succeeds with valid guard, second direct call still returns empty.
+	c.ResetReplyPage()
+	guardRaw, err := os.ReadFile(func() string { f, _ := guardFile(); return f }())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2 := &fakeWeb{
+		replies: []string{
+			string(guardRaw),
+			reply(`{"status_code":0,"comments":[{"cid":"r2","text":"二次空包兜底"}],"cursor":1,"has_more":0}`),
+		},
+	}
+	c.SetWeb(w2)
+	directCalls = 0
+	rs, err = c.Replies("1", "2")()
+	if err != nil || len(rs) != 1 || rs[0].Text != "二次空包兜底" || directCalls != 2 || len(w2.scripts) != 2 {
+		t.Fatalf("fallback after double empty direct: rs=%+v err=%v direct=%d scripts=%d", rs, err, directCalls, len(w2.scripts))
+	}
+}
+
+func TestCommentsFallsBackToPageOnVerifyOrEmpty(t *testing.T) {
+	c := &Client{
+		http: &http.Client{Transport: funcRT(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Status: "200 OK", Header: http.Header{}, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})},
+		signer: sign.New(ua),
+	}
+	c.login.Store(&login{cookie: "sessionid=s"})
+	w := &fakeWeb{
+		replies: []string{reply(`{"status_code":0,"comments":[{"cid":"c1","text":"页面评论"}],"cursor":1,"has_more":0}`)},
+	}
+	c.SetWeb(w)
+
+	cs, err := c.Comments("v1")()
+	if err != nil || len(cs) != 1 || cs[0].Text != "页面评论" || len(w.scripts) != 1 {
+		t.Fatalf("comments fallback: cs=%+v err=%v scripts=%d", cs, err, len(w.scripts))
+	}
+}

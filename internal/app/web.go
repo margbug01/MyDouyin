@@ -39,7 +39,7 @@ type web struct {
 
 const (
 	douyinHome = "https://www.douyin.com/user/self" // no video plays there; logged out, it shows the login
-	webIdle    = 15 * time.Second
+	webIdle    = 10 * time.Second
 	// safariUA ends WebKit's own user agent as Safari's, which Douyin's pages
 	// expect. Fixed, not read from Safari: the user agent is part of the
 	// device the login is bound to.
@@ -47,7 +47,13 @@ const (
 )
 
 // call runs fn on the UI goroutine and waits for it; not from there.
+// On a real window it uses RunOnMain so non-visual state updates (web busy/idle)
+// do not trigger redundant full UI frame redraws.
 func (a *app) call(fn func()) {
+	if a.win != nil {
+		mygo.RunOnMain(fn)
+		return
+	}
 	done := make(chan struct{})
 	a.post(func() { fn(); close(done) })
 	<-done
@@ -144,6 +150,15 @@ if (st.state === "starting") return "wait";
 return "fallback";
 `
 
+// fullPageCheckJS rejects the lightweight signPage so callers that navigated to
+// a full Douyin page (verify, Load, signPage fallback) wait until WebKit commits
+// the real page rather than evaluating against the dying signPage context.
+const fullPageCheckJS = `
+if (!location.hostname.endsWith("douyin.com") || document.readyState !== "complete") return "wait";
+if (window.__mdSignPage) return "wait";
+return typeof window.bdms === "object" ? "ready" : "wait";
+`
+
 const signPageTimeout = 6 * time.Second
 
 // page returns the signing page once its security SDKs are ready. When no page
@@ -153,6 +168,7 @@ func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 	var p *mygo.Page
 	var err error
 	var startedSign bool
+	var wantFull bool
 	w.a.call(func() {
 		if w.v == nil {
 			if err = w.open(""); err == nil {
@@ -162,6 +178,7 @@ func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 			}
 		}
 		if err == nil {
+			wantFull = !w.signOnly
 			w.touch()
 			p = w.v.Page()
 		}
@@ -169,9 +186,14 @@ func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	fallbackAt := time.Now().Add(signPageTimeout)
+	startAt := time.Now()
+	fallbackAt := startAt.Add(signPageTimeout)
 	for {
-		state, err := p.EvalContext(ctx, signPageCheckJS)
+		checkJS := signPageCheckJS
+		if wantFull {
+			checkJS = fullPageCheckJS
+		}
+		state, err := p.EvalContext(ctx, checkJS)
 		if err == nil {
 			switch state {
 			case "ready":
@@ -179,18 +201,24 @@ func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 			case "fallback":
 				if startedSign {
 					startedSign = false
+					wantFull = true
 					w.a.call(func() { _ = w.open(douyinHome) })
 				}
 			}
 		}
 		if startedSign && time.Now().After(fallbackAt) {
 			startedSign = false
+			wantFull = true
 			w.a.call(func() { _ = w.open(douyinHome) })
+		}
+		poll := 150 * time.Millisecond
+		if time.Since(startAt) < time.Second {
+			poll = 60 * time.Millisecond
 		}
 		select {
 		case <-ctx.Done():
 			return nil, errors.New("抖音页面没载入")
-		case <-time.After(150 * time.Millisecond):
+		case <-time.After(poll):
 		}
 	}
 }
@@ -540,11 +568,8 @@ func (a *app) verify(path string, retry func()) {
 		}
 		return
 	}
-	u := ""
-	if a.web.v == nil || a.web.signOnly {
-		u = douyinHome
-	}
-	if err := a.web.open(u); err != nil {
+	wasFull := a.web.v != nil && !a.web.signOnly
+	if err := a.web.open(douyinHome); err != nil {
 		a.toast = "验证页打不开：" + err.Error()
 		return
 	}
@@ -555,6 +580,14 @@ func (a *app) verify(path string, retry func()) {
 	gen := a.loginGen
 	go func() {
 		defer cancel()
+		if wasFull {
+			// Reloading douyinHome over a previous full page: wait past the old
+			// document's readyState === "complete" before polling for the new one.
+			select {
+			case <-ctx.Done():
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
 		path, _ := json.Marshal(path)
 		b, err := a.web.Eval(ctx, "const r = await fetch("+string(path)+`, { credentials: "include" });
 return r.status === 200 && (await r.text()).length > 0;`)
@@ -562,7 +595,9 @@ return r.status === 200 && (await r.text()).length > 0;`)
 		if passed && a.c != nil {
 			a.c.SyncCookies()
 			_ = a.c.RefreshGuard()
-			a.c.ResetReplyPage()
+			// Keep replies routed through the just-verified page during cooldown:
+			// Douyin continues holding back direct Go requests right after page verification.
+			a.c.KeepReplyPage()
 		}
 		a.post(func() {
 			if a.loginGen != gen { // closed already

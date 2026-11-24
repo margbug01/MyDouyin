@@ -125,7 +125,11 @@ func (v *Layer) PlaceIn(window uintptr, picture, clip ui.Rect, cover bool, radiu
 		y = bounds.H - y - h
 	}
 	if v.hidden {
+		transaction := objc.ID(objc.GetClass("CATransaction"))
+		transaction.Send(sel("begin"))
+		transaction.Send(sel("setDisableActions:"), true)
 		v.layer.Send(sel("setHidden:"), false)
+		transaction.Send(sel("commit"))
 		v.hidden = false
 	}
 	frame := [8]float64{x, y, w, h, mx, my, mw, mh}
@@ -207,7 +211,11 @@ func (v *Layer) AttachedTo(window uintptr) bool {
 func (v *Layer) Hide(window uintptr) {
 	defer autorelease()()
 	if v.layer != 0 && v.window == window && !v.hidden {
+		transaction := objc.ID(objc.GetClass("CATransaction"))
+		transaction.Send(sel("begin"))
+		transaction.Send(sel("setDisableActions:"), true)
 		v.layer.Send(sel("setHidden:"), true)
+		transaction.Send(sel("commit"))
 		v.hidden = true
 	}
 }

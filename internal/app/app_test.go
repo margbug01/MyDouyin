@@ -1797,3 +1797,166 @@ func TestRepliesVerifyOnce(t *testing.T) {
 		t.Fatalf("verified, held back still: %d waiting, %q", len(a.login.retry), passed.msg)
 	}
 }
+
+// A danmaku entering or leaving mid-press must never shift rail button IDs or
+// drop clicks on 评论, 点赞, or 收藏.
+func TestDanmakuArrivalDoesNotDropRailClick(t *testing.T) {
+	p := stub("推荐", 1)
+	p.list[0].v = dy.Video{ID: "42", Author: "作者", Likes: 10, Collects: 5, Comments: 758, Duration: time.Minute}
+	p.list[0].comments = &sheet{total: 758, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条"}}}
+	p.list[0].danmaku = []dy.Danmaku{
+		{At: 1 * time.Second, Text: "第一条弹幕"},
+		{At: 2 * time.Second, Text: "第二条弹幕"},
+	}
+	p.list[0].resume = 1500 * time.Millisecond
+	ready(t, p.list[0])
+	a := withRoots(&app{
+		pages:    []*page{p},
+		posted:   make(chan func(), 16),
+		setLiked: func(string, bool) error { return nil },
+		setSaved: func(string, bool) error { return nil },
+	})
+	tt := newTester(a)
+	tt.Frame()
+
+	clickAcrossDanmaku := func(label string) {
+		t.Helper()
+		p.list[0].resume = 1500 * time.Millisecond
+		tt.Frame()
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("%s button not found", label)
+		}
+		x, y := r.X+r.W/2, r.Y+r.H/2
+		tt.Press(x, y)
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		p.list[0].resume = 2100 * time.Millisecond // second danmaku enters mid-press
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		tt.Release(x, y)
+		tt.Frame()
+	}
+
+	clickAcrossDanmaku("评论")
+	if a.sheet == nil {
+		t.Fatal("评论 click dropped when danmaku arrived mid-press")
+	}
+	a.sheet = nil
+	clickAcrossDanmaku("点赞")
+	if !p.list[0].v.Liked {
+		t.Fatal("点赞 click dropped when danmaku arrived mid-press")
+	}
+	clickAcrossDanmaku("收藏")
+	if !p.list[0].v.Saved {
+		t.Fatal("收藏 click dropped when danmaku arrived mid-press")
+	}
+}
+
+// Releasing an off-screen slot drops its cached comment sheet so scrolled-past
+// videos do not accumulate comments in memory.
+func TestReleaseClearsOffscreenComments(t *testing.T) {
+	s1 := &slot{v: dy.Video{ID: "1"}, comments: &sheet{total: 10, items: []dy.Comment{{ID: "c1", Text: "a"}}}}
+	s2 := &slot{v: dy.Video{ID: "2"}, comments: &sheet{total: 10, items: []dy.Comment{{ID: "c2", Text: "b"}}}}
+	a := &app{sheet: s2.comments}
+	a.release(s1)
+	if s1.comments != nil {
+		t.Fatal("release retained off-screen slot comments")
+	}
+	a.release(s2)
+	if s2.comments == nil {
+		t.Fatal("release dropped currently open comment sheet")
+	}
+}
+
+// Failing to load comments or replies keeps a clickable 重试 button so the
+// user is never stranded on an error message, and background comment prefetch
+// does not pop up verification until the comment panel is actually open.
+func TestCommentsAndRepliesRetryAndPrefetchVerify(t *testing.T) {
+	feed := stub("推荐", 1)
+	ready(t, feed.list[0])
+	a := withRoots(&app{pages: []*page{feed}, posted: make(chan func(), 16)})
+
+	commentAttempt := 0
+	sh := &sheet{
+		v:     dy.Video{ID: "v1"},
+		total: 5,
+		next: func() ([]dy.Comment, error) {
+			commentAttempt++
+			if commentAttempt == 1 {
+				return nil, dy.ErrVerify
+			}
+			return []dy.Comment{{ID: "c1", Author: "甲", Text: "一级评论", Replies: 2}}, nil
+		},
+	}
+	// Background prefetch (a.sheet != sh) must not trigger verify overlay.
+	a.moreComments(sh)
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("prefetch did not settle")
+	}
+	if a.loginOpen || sh.msg == "" {
+		t.Fatalf("prefetch verify: loginOpen=%v msg=%q", a.loginOpen, sh.msg)
+	}
+
+	// Opening the panel with the error shows a 重试 button that reloads comments.
+	a.sheet = sh
+	tt := newTester(a)
+	tt.Frame()
+	if !tt.HasText("重试") {
+		t.Fatalf("missing retry button on comment error: %q", tt.Texts())
+	}
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("comment retry did not settle")
+	}
+	tt.Frame()
+	if !tt.HasText("一级评论") || sh.msg != "" {
+		t.Fatalf("after comment retry: msg=%q texts=%q", sh.msg, tt.Texts())
+	}
+
+	// Reply expand failure shows 重试 and recovers on click.
+	replyAttempt := 0
+	a.replies = func(_, _ string) dy.Pager[dy.Comment] {
+		return func() ([]dy.Comment, error) {
+			replyAttempt++
+			if replyAttempt == 1 {
+				return nil, errors.New("网络抖动")
+			}
+			return []dy.Comment{{ID: "r1", Author: "乙", Text: "重试后的回复"}}, nil
+		}
+	}
+	if err := tt.Click("展开 2 条回复"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("first reply fetch did not settle")
+	}
+	tt.Frame()
+	if !tt.HasText("网络抖动") || !tt.HasText("重试") {
+		t.Fatalf("reply failure UI: %q", tt.Texts())
+	}
+	if err := tt.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("reply retry did not settle")
+	}
+	tt.Frame()
+	if !tt.HasText("重试后的回复") {
+		t.Fatalf("after reply retry: %q", tt.Texts())
+	}
+}

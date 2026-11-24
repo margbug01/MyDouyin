@@ -1,6 +1,7 @@
 package dy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,20 +60,31 @@ func (c *Client) SetWeb(w Web) { c.web = w }
 
 // SaveCookies keeps cs as the client's login, in cookies.json too.
 func (c *Client) SaveCookies(cs []Cookie) error {
+	b, _ := json.Marshal(cs)
+	c.cookieSaveMu.Lock()
+	defer c.cookieSaveMu.Unlock()
+	if bytes.Equal(b, c.savedCookies) && c.login.Load() != nil {
+		return nil
+	}
 	file, err := cookieFile()
 	if err != nil {
 		return err
 	}
-	b, _ := json.Marshal(cs)
 	if err := writePrivate(file, b); err != nil {
 		return err
 	}
-	return c.ReloadCookies()
+	c.savedCookies = b
+	l := loginFromCookies(cs)
+	c.login.Store(&l)
+	return nil
 }
 
 // Logout forgets the login, its cookies and ticket guard material; the
 // client goes on anonymous.
 func (c *Client) Logout() error {
+	c.cookieSaveMu.Lock()
+	c.savedCookies = nil
+	c.cookieSaveMu.Unlock()
 	for _, f := range []func() (string, error){cookieFile, guardFile} {
 		if p, err := f(); err == nil {
 			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -94,8 +106,45 @@ func writePrivate(path string, b []byte) error {
 	return os.Rename(path+".tmp", path)
 }
 
-// writeMu keeps writes one at a time: they share the page.
-var writeMu sync.Mutex
+// writeGate serializes page-backed requests while giving interactive user actions
+// (like, collect, comment like, reply expansion) priority over background
+// watch-history flushes so a batch never blocks a click.
+var writeGate = func() *pageGate {
+	g := &pageGate{}
+	g.cond = sync.NewCond(&g.mu)
+	return g
+}()
+
+type pageGate struct {
+	mu          sync.Mutex
+	cond        *sync.Cond
+	busy        bool
+	interactive int
+}
+
+func (g *pageGate) lock(interactive bool) {
+	g.mu.Lock()
+	if interactive {
+		g.interactive++
+		for g.busy {
+			g.cond.Wait()
+		}
+		g.interactive--
+	} else {
+		for g.busy || g.interactive > 0 {
+			g.cond.Wait()
+		}
+	}
+	g.busy = true
+	g.mu.Unlock()
+}
+
+func (g *pageGate) unlock() {
+	g.mu.Lock()
+	g.busy = false
+	g.cond.Broadcast()
+	g.mu.Unlock()
+}
 
 var (
 	errNoWeb = errors.New("要先扫码登录抖音")
@@ -116,10 +165,14 @@ func (c *Client) post(path, query, body, typ string) error {
 	return c.send(path, query, body, typ, 3)
 }
 
-// send is post, tried up to tries times.
+// send is post, tried up to tries times, with interactive priority and cookie sync.
 func (c *Client) send(path, query, body, typ string, tries int) error {
-	writeMu.Lock()
-	defer writeMu.Unlock()
+	return c.sendOpt(path, query, body, typ, tries, true, true)
+}
+
+func (c *Client) sendOpt(path, query, body, typ string, tries int, interactive, syncCookie bool) error {
+	writeGate.lock(interactive)
+	defer writeGate.unlock()
 	if c.web == nil {
 		return errNoWeb
 	}
@@ -155,7 +208,9 @@ return { http: r.status, code, text: t.slice(0, 300) };`
 		switch {
 		case err != nil:
 		case r.HTTP == 200 && r.Code != nil && *r.Code == 0:
-			c.syncCookies()
+			if syncCookie {
+				c.syncCookies()
+			}
 			return nil
 		case r.Code != nil && *r.Code == 8:
 			return ErrNeedLogin
@@ -171,28 +226,72 @@ return { http: r.status, code, text: t.slice(0, 300) };`
 // theirs: a read Douyin holds back from the client for its verification
 // (ErrVerify) it gives the page once the page has passed it (2026-11-19,
 // replies: passed in the page, the client's next ask was held back again).
+// Because pageGet runs in the hidden WebView, verifyCenter can intercept fetch
+// and mount an invisible captcha modal that holds fetch pending; polling for
+// captcha DOM changes and bounding the wait returns ErrVerify promptly instead
+// of stalling writeGate for 30s.
 func (c *Client) pageGet(path, query string) ([]byte, error) {
-	writeMu.Lock()
-	defer writeMu.Unlock()
+	writeGate.lock(true)
+	defer writeGate.unlock()
 	if c.web == nil {
 		return nil, ErrVerify
 	}
 	args, _ := json.Marshal("https://www.douyin.com" + path + "?device_platform=webapp&aid=6383&channel=channel_pc_web&" + query)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	b, err := c.web.Eval(ctx, "const r = await fetch("+string(args)+`, { credentials: "include" });
-return { http: r.status, text: await r.text() };`)
+	b, err := c.web.Eval(ctx, "const url = "+string(args)+`;
+const capEl = document.getElementById("captcha_container");
+const capBefore = capEl ? capEl.childElementCount : 0;
+const bodyBefore = document.body ? document.body.childElementCount : 0;
+const hasCaptcha = () => {
+  if (capEl && capEl.childElementCount > capBefore) return true;
+  if (window.__mdSignPage && document.body && document.body.childElementCount > bodyBefore) {
+    for (let i = bodyBefore; i < document.body.children.length; i++) {
+      const tag = document.body.children[i].tagName;
+      if (tag !== "SCRIPT" && tag !== "STYLE" && tag !== "LINK") return true;
+    }
+  }
+  return !!document.querySelector(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='captcha'], iframe[src*='verifycenter']");
+};
+return await new Promise((resolve, reject) => {
+  let done = false;
+  const finish = (v) => {
+    if (done) return;
+    done = true;
+    clearInterval(iv);
+    clearTimeout(to);
+    resolve(v);
+  };
+  const iv = setInterval(() => {
+    if (hasCaptcha()) finish({ http: 200, text: "", verify: true });
+  }, 200);
+  const to = setTimeout(() => finish({ http: 200, text: "", verify: true }), 10000);
+  fetch(url, { credentials: "include" }).then(async (r) => {
+    const text = await r.text();
+    finish({ http: r.status, text });
+  }).catch((e) => {
+    if (!done) {
+      done = true;
+      clearInterval(iv);
+      clearTimeout(to);
+      reject(e);
+    }
+  });
+});`)
 	if err != nil {
 		return nil, err
 	}
 	var r struct {
-		HTTP int
-		Text string
+		HTTP   int
+		Text   string
+		Verify bool
 	}
 	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, err
 	}
 	switch {
+	case r.Verify:
+		return nil, ErrVerify // hidden page mounted or stalled on verification captcha
 	case r.HTTP != 200:
 		return nil, fmt.Errorf("dy: %s HTTP %d", path, r.HTTP)
 	case r.Text == "":
@@ -220,8 +319,8 @@ func (c *Client) syncCookies() {
 // RefreshGuard saves the ticket guard's material (guard.go), which the page
 // keeps in its localStorage.
 func (c *Client) RefreshGuard() error {
-	writeMu.Lock()
-	defer writeMu.Unlock()
+	writeGate.lock(true)
+	defer writeGate.unlock()
 	if c.web == nil {
 		return errNoWeb
 	}
@@ -278,13 +377,13 @@ func (c *Client) SetCommentLiked(videoID, cid string, reply, on bool) error {
 // authorUID is the author's numeric ID (Video.AuthorUID).
 func (c *Client) Watched(id, authorUID string) error {
 	q := url.Values{"author_id": {authorUID}, "aweme_id": {id}}
-	if err := c.write("/aweme/v1/web/history/write/", q.Encode()); err != nil {
+	if err := c.sendOpt("/aweme/v1/web/history/write/", "", q.Encode(), form, 3, false, false); err != nil {
 		return err
 	}
 	// Best effort, once: Douyin answers most videos' play with nothing, its
 	// own page's too (2026-11-19, 3 of 4 from www.douyin.com, fetch and XHR).
 	q = url.Values{"aweme_type": {"0"}, "item_id": {id}, "play_delta": {"1"}, "source": {"0"}}
-	c.send("/aweme/v2/web/aweme/stats/", "", q.Encode(), form, 1)
+	c.sendOpt("/aweme/v2/web/aweme/stats/", "", q.Encode(), form, 1, false, false)
 	return nil
 }
 
@@ -319,8 +418,8 @@ func (c *Client) SendDanmaku(id, uid string, at time.Duration, text string) erro
 // and finds others by name. With dry it goes as far as the message leaving
 // and stops it there, which tests the way without sending anything.
 func (c *Client) ShareTo(videoID, name string, dry bool) error {
-	writeMu.Lock()
-	defer writeMu.Unlock()
+	writeGate.lock(true)
+	defer writeGate.unlock()
 	if c.web == nil {
 		return errNoWeb
 	}

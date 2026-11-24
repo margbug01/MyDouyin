@@ -43,8 +43,9 @@ type slot struct {
 	seeking    bool
 	dmGen      int // counts seeks: bullet comments loaded before one are let go
 
-	danmaku   []dy.Danmaku       // the bullet comments loaded, in time order
-	dmLane    map[dy.Danmaku]int // each one's lane once it set off, kept as it flies; -1: no room, not shown
+	danmaku   []dy.Danmaku           // the bullet comments loaded, in time order
+	dmLane    map[dy.Danmaku]int     // each one's lane once it set off, kept as it flies; -1: no room, not shown
+	dmWidth   map[dy.Danmaku]float32 // each one's measured width, cached once when placed
 	dmTail    [dmLanes]laneTail
 	dmOwn     dy.Danmaku    // the user's last sent: shown even when the lanes are full
 	dmTo      time.Duration // how far into the video they are loaded
@@ -148,10 +149,10 @@ type page struct {
 	title    string
 	next     dy.Pager[dy.Video]
 	list     []*slot
-	grid     bool
-	playing  bool // a grid page playing its idx
-	scroll   ui.ScrollState
-	idx      int
+	grid      bool
+	playing   bool // a grid page playing its idx
+	gridList  ui.ListState
+	idx       int
 	fetching bool
 	gen      int  // counts refreshes: a page fetched before one is dropped
 	done     bool // next returned its last page
@@ -201,8 +202,9 @@ type app struct {
 	home        *page             // 引力场: centered search with orbiting covers
 	orbit       orbitState        // 引力场 state (orbit.go)
 	winBg       string            // the window's background color, as last set (view)
-	img         *images           // covers and avatars
-	emoji       map[string]string // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
+	img        *images                   // covers and avatars
+	emoji      map[string]string         // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
+	emojiCache map[emojiKey]emojiCached  // parsed emoji spans, bounded and cleared when emoji loads
 
 	// The dock's other roots, each a grid; nil where there is no client.
 	follow, friends, live, drama *page
@@ -711,6 +713,7 @@ func (s *slot) pruneDanmaku(at time.Duration) {
 	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flight }); i > 0 {
 		for _, d := range s.danmaku[:i] {
 			delete(s.dmLane, d)
+			delete(s.dmWidth, d)
 		}
 		s.danmaku = slices.Delete(s.danmaku, 0, i)
 	}
@@ -745,6 +748,21 @@ func (a *app) loadDanmaku(s *slot, at time.Duration) {
 	}()
 }
 
+type commentRowKind uint8
+
+const (
+	rowComment commentRowKind = iota
+	rowReply
+	rowReplyActions
+	rowFooter
+)
+
+type commentRow struct {
+	kind commentRowKind
+	ci   int
+	ri   int
+}
+
 // sheet is the comments of the current video, loaded a page at a time.
 type sheet struct {
 	total    int
@@ -753,6 +771,9 @@ type sheet struct {
 	fetching bool
 	done     bool
 	msg      string
+	verified bool // Douyin's verification passed for comments once: not asked again
+	list     ui.ListState
+	rows     []commentRow
 
 	threads map[string]*thread // the replies of comments, by comment ID, once asked for
 	liking  map[string]bool    // the comments, by ID, whose like is on its way
@@ -905,9 +926,21 @@ func (a *app) moreComments(sh *sheet) {
 			sh.fetching = false
 			if err != nil {
 				sh.msg = err.Error()
+				switch {
+				case !errors.Is(err, dy.ErrVerify):
+				case sh.verified:
+					sh.msg = "验证过了，抖音仍没给评论，稍后点「重试」再试"
+					sh.verified = false
+				default:
+					if a.sheet == sh {
+						sh.msg += "，完成后会自动载入"
+						a.verify("/aweme/v1/web/comment/list/?device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id="+sh.v.ID+
+							"&cursor=0&count=20&item_type=0&insert_ids=&whale_cut_token=&cut_version=1&rcFT=", func() { sh.verified = true; a.moreComments(sh) })
+					}
+				}
 				return
 			}
-			sh.msg, sh.done = "", len(cs) == 0
+			sh.msg, sh.done, sh.verified = "", len(cs) == 0, false
 			sh.items = append(sh.items, cs...)
 		})
 	}()
@@ -957,7 +990,6 @@ func (a *app) post(fn func()) {
 	}
 	a.win.Update(func() {
 		fn()
-		a.win.Invalidate()
 		if a.pip != nil {
 			a.pip.Invalidate()
 		}
@@ -1094,6 +1126,9 @@ func (a *app) root(r *page) {
 		return
 	}
 	a.cur().paused = a.paused
+	if a.held != nil {
+		a.release(a.held)
+	}
 	for _, p := range a.pages {
 		for _, s := range p.list {
 			a.release(s)
@@ -1111,6 +1146,7 @@ func (a *app) root(r *page) {
 	}
 	delete(a.stacks, r)
 	a.pages, a.sheet, a.paused = pages, nil, pages[len(pages)-1].paused
+	a.emojiCache = nil
 	a.fill()
 }
 
@@ -1134,7 +1170,7 @@ func (a *app) empty(p *page) {
 		p.next = p.restart()
 	}
 	p.list, p.idx, p.playing, p.done, p.msg, p.paused = nil, 0, false, false, "", false
-	p.scroll = ui.ScrollState{}
+	p.gridList = ui.ListState{}
 }
 
 // play plays p's video i, from its covers.
@@ -1420,6 +1456,9 @@ func (a *app) release(s *slot) {
 	s.players = players{}
 	s.err = nil
 	s.clearDanmaku()
+	if s.comments != nil && a.sheet != s.comments {
+		s.comments = nil
+	}
 	s.dmLoading, s.seeking = false, false
 	s.dmTo = max(0, s.resume-flight) / (32 * time.Second) * (32 * time.Second)
 	s.dmGen++
@@ -1639,6 +1678,7 @@ func Run() error {
 	a.drama = picksPage(c, "短剧", 300214) // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.home}
 	a.img = newImages(c.Image, a.post)
+	a.img.releasePixels = true
 	a.setLiked, a.setSaved, a.likeComment = c.SetLiked, c.SetSaved, c.SetCommentLiked
 	a.replies = c.Replies
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }

@@ -165,6 +165,9 @@ func (a *app) sendWatchedNow() {
 			}
 			sent++
 		}
+		if sent > 0 && a.c != nil {
+			a.c.SyncCookies()
+		}
 		if err != nil { // dropped, not retried: a broken login would only fail again
 			log.Printf("douyin: told %d of %d videos watched: %v", sent, len(vs), err)
 		}

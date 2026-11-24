@@ -58,3 +58,33 @@ func TestImages(t *testing.T) {
 	}
 	none.sweep()
 }
+
+func TestImagesSizedAndReleasePixels(t *testing.T) {
+	var buf bytes.Buffer
+	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 800, 800)))
+	done := make(chan func(), 4)
+	im := newImages(func(string) ([]byte, error) { return buf.Bytes(), nil }, func(fn func()) { done <- fn })
+	im.releasePixels = true
+
+	if im.getSized("av", avatarEdge) != nil {
+		t.Fatal("returned picture before load")
+	}
+	(<-done)()
+	im.sweep() // frame 0 -> 1
+	bmp := im.getSized("av", avatarEdge)
+	if bmp == nil {
+		t.Fatal("missing loaded avatar")
+	}
+	if w, h := bmp.Size(); w != avatarEdge || h != avatarEdge {
+		t.Fatalf("avatar scaled to %dx%d, want %dx%d", w, h, avatarEdge, avatarEdge)
+	}
+	im.sweep() // frame 1 -> 2 (drawn=2; GPU paints frame 1 after sweep)
+	if im.m["av"].released {
+		t.Fatal("released pixels before GPU upload frame")
+	}
+	im.getSized("av", avatarEdge)
+	im.sweep() // frame 2 -> 3 (frame >= drawn -> ReleasePixels called)
+	if !im.m["av"].released {
+		t.Fatal("did not release CPU pixels after GPU upload frame")
+	}
+}

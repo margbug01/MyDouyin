@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/jpeg"
+	"image/png"
 
 	"github.com/egoist/mygo/ui"
 	"golang.org/x/image/draw"
@@ -13,76 +15,118 @@ import (
 // a time, and keeps those shown lately: a grid scrolled far down lets the
 // ones above go, and loads them again if they come back.
 type images struct {
-	fetch    func(url string) ([]byte, error)
-	post     func(func()) // runs on the main thread, where get and sweep run
-	m        map[string]*picture
-	slots    chan struct{} // downloads at once
-	decoding chan struct{} // full-size source images being decoded at once
-	frame    int
-	bytes    int
+	fetch         func(url string) ([]byte, error)
+	post          func(func()) // runs on the main thread, where get and sweep run
+	m             map[string]*picture
+	slots         chan struct{} // downloads at once
+	decoding      chan struct{} // full-size source images being decoded at once
+	frame         int
+	bytes         int
+	releasePixels bool // true on GPU windows: drop CPU pixels after GPU upload
 }
 
 type picture struct {
-	bmp     *ui.Bitmap
-	loading bool
-	failed  bool // kept, so a broken address is not asked for every frame
-	used    int  // the frame that last showed it
-	bytes   int
+	bmp      *ui.Bitmap
+	loading  bool
+	failed   bool // kept, so a broken address is not asked for every frame
+	used     int  // the frame that last showed it
+	drawn    int  // first frame (1-based) that returned bmp to the view
+	released bool // ReleasePixels called after GPU upload
+	bytes    int
 }
 
-const keepPictures = 96
-const pictureBudget = 24 << 20 // decoded pixels; GPU textures may hold another copy
-const pictureEdge = 720
+const (
+	keepPictures   = 48
+	pictureBudget  = 12 << 20 // decoded pixels; GPU textures may hold another copy
+	pictureEdge    = 720
+	coverEdge      = 540
+	thumbEdge      = 320
+	commentPicEdge = 256
+	avatarEdge     = 160
+	emojiEdge      = 64
+)
 
 func newImages(fetch func(string) ([]byte, error), post func(func())) *images {
 	return &images{fetch: fetch, post: post, m: map[string]*picture{}, slots: make(chan struct{}, 6), decoding: make(chan struct{}, 2)}
 }
 
-// get returns the picture at url, nil while it loads or if it failed; asking
-// starts the loading. A nil images has none, as in a test without a client.
+// get returns the picture at url decoded up to pictureEdge, nil while it loads
+// or if it failed; asking starts the loading. A nil images has none, as in a
+// test without a client.
 func (im *images) get(url string) *ui.Bitmap {
+	return im.getSized(url, pictureEdge)
+}
+
+// getSized returns the picture at url scaled to fit within maxEdge pixels on
+// its longest side, keeping memory proportional to the display size.
+func (im *images) getSized(url string, maxEdge int) *ui.Bitmap {
 	if im == nil || url == "" {
 		return nil
 	}
+	if maxEdge <= 0 {
+		maxEdge = pictureEdge
+	}
 	p := im.m[url]
 	if p == nil {
-		p = &picture{}
+		select {
+		case im.slots <- struct{}{}:
+		default:
+			return nil // the next redraw retries visible pictures; no unbounded map or queue
+		}
+		p = &picture{loading: true, used: im.frame}
 		im.m[url] = p
+		go im.load(url, p, maxEdge)
+		return nil
 	}
 	p.used = im.frame
 	if p.bmp == nil && !p.loading && !p.failed {
 		select {
 		case im.slots <- struct{}{}:
 		default:
-			return nil // the next redraw retries visible pictures; no unbounded queue
+			return nil
 		}
 		p.loading = true
-		go func() {
-			b, err := im.fetch(url)
-			var bmp *ui.Bitmap
-			if err == nil {
-				im.decoding <- struct{}{}
-				bmp, err = decodePicture(b)
-				<-im.decoding
-			}
-			<-im.slots
-			im.post(func() {
-				p.loading, p.bmp, p.failed = false, bmp, err != nil
-				if bmp != nil {
-					w, h := bmp.Size()
-					p.bytes = w * h * 4
-					im.bytes += p.bytes
-				}
-			})
-		}()
+		go im.load(url, p, maxEdge)
+		return nil
+	}
+	if p.bmp != nil && p.drawn == 0 {
+		p.drawn = im.frame + 1
 	}
 	return p.bmp
 }
 
-// sweep ends a frame: past keepPictures, those it did not show go.
+func (im *images) load(url string, p *picture, maxEdge int) {
+	b, err := im.fetch(url)
+	var bmp *ui.Bitmap
+	if err == nil {
+		im.decoding <- struct{}{}
+		bmp, err = decodePictureEdge(b, maxEdge)
+		<-im.decoding
+	}
+	<-im.slots
+	im.post(func() {
+		p.loading, p.bmp, p.failed = false, bmp, err != nil
+		if bmp != nil {
+			w, h := bmp.Size()
+			p.bytes = w * h * 4
+			im.bytes += p.bytes
+		}
+	})
+}
+
+// sweep ends a frame: releases CPU pixels of bitmaps already uploaded to the
+// GPU, and past keepPictures or pictureBudget evicts pictures not shown this frame.
 func (im *images) sweep() {
 	if im == nil {
 		return
+	}
+	if im.releasePixels {
+		for _, p := range im.m {
+			if p.bmp != nil && !p.released && p.drawn > 0 && im.frame >= p.drawn {
+				p.bmp.ReleasePixels()
+				p.released = true
+			}
+		}
 	}
 	if len(im.m) > keepPictures || im.bytes > pictureBudget {
 		for url, p := range im.m {
@@ -96,22 +140,49 @@ func (im *images) sweep() {
 }
 
 func decodePicture(data []byte) (*ui.Bitmap, error) {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	return decodePictureEdge(data, pictureEdge)
+}
+
+func decodePictureEdge(data []byte, maxEdge int) (*ui.Bitmap, error) {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > 16<<20 {
 		return nil, fmt.Errorf("cover dimensions exceed limit: %dx%d", cfg.Width, cfg.Height)
 	}
-	if max(cfg.Width, cfg.Height) <= pictureEdge {
+	if max(cfg.Width, cfg.Height) <= maxEdge {
 		return ui.DecodeBitmap(data)
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
-	w, h := max(1, cfg.Width*pictureEdge/max(cfg.Width, cfg.Height)), max(1, cfg.Height*pictureEdge/max(cfg.Width, cfg.Height))
+	w, h := max(1, cfg.Width*maxEdge/max(cfg.Width, cfg.Height)), max(1, cfg.Height*maxEdge/max(cfg.Width, cfg.Height))
 	small := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.ApproxBiLinear.Scale(small, small.Bounds(), img, img.Bounds(), draw.Src, nil)
+	// Re-encode the downscaled image so ui.DecodeBitmap keeps only compact
+	// compressed bytes and ReleasePixels can drop 100% of CPU RGBA pixels.
+	var buf bytes.Buffer
+	if format == "jpeg" || isOpaqueRGBA(small) {
+		err = jpeg.Encode(&buf, small, &jpeg.Options{Quality: 82})
+	} else {
+		err = png.Encode(&buf, small)
+	}
+	if err == nil {
+		if bmp, derr := ui.DecodeBitmap(buf.Bytes()); derr == nil {
+			return bmp, nil
+		}
+	}
 	return ui.NewBitmap(small), nil
+}
+
+func isOpaqueRGBA(img *image.RGBA) bool {
+	pix := img.Pix
+	for i := 3; i < len(pix); i += 4 {
+		if pix[i] != 0xff {
+			return false
+		}
+	}
+	return true
 }

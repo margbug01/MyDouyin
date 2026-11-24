@@ -5,6 +5,7 @@ import (
 	"math"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,12 +54,16 @@ var appFont = func() string {
 	return "MiSans, system-ui, Microsoft YaHei UI"
 }()
 
-var white = ui.RGB(255, 255, 255)
+var (
+	white      = ui.RGB(255, 255, 255)
+	baseDark   = *ui.DarkTheme()
+	baseLight  = *ui.LightTheme()
+)
 
 func (a *app) view(c *ui.Context) {
 	p := a.cur()
 	pal = onOff(a.orbitIsDark(), darkPal, lightPal)
-	t := *onOff(pal.dark, ui.DarkTheme(), ui.LightTheme())
+	t := onOff(pal.dark, baseDark, baseLight)
 	t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
 	if a.win != nil && a.winBg != pal.bgHex { // what shows as the window resizes, before a frame
 		a.winBg = pal.bgHex
@@ -67,6 +72,7 @@ func (a *app) view(c *ui.Context) {
 	a.syncLiveRoom(p)
 	giftOpen := a.liveChat != nil && a.liveChat.gifts.open
 	a.mainVideo.begin(a.win)
+	defer a.mainVideo.end()
 	a.mainVideo.off = giftOpen || a.group.open || a.loginOpen && a.login.verify && a.web.v != nil
 	t.Accent, t.AccentText = pal.accent, white
 	t.Inverse, t.InverseText = onOff(pal.dark, white, ui.Hex("#11141e")), onOff(pal.dark, ui.Hex("#11141e"), white) // toasts': by default the text is the Background, clear here
@@ -93,18 +99,18 @@ func (a *app) view(c *ui.Context) {
 	}
 	root.Children(func() {
 		if chat := a.liveChat; chat != nil && chat.view != nil {
-			ui.WebView(c, chat.view).Absolute().Top(0).Left(0).Size(4, 4).ZIndex(-3)
+			ui.WebView(c.Key("live-web"), chat.view).Absolute().Top(0).Left(0).Size(4, 4).ZIndex(-3)
 		}
 		if a.web.v != nil && a.web.layout && !a.loginOpen { // the login lays it out itself
 			// Laid out for a script, under the app: the rows paint over it.
-			ui.WebView(c, a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-2)
+			ui.WebView(c.Key("bg-web"), a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-2)
 		}
 		a.mainVideo.background(c, pal.bg)
 		if a.theater && p.plays() { // 网页全屏: the video filling the window, its comments beside it once opened
-			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+			ui.Row(c.Key("theater-row")).Fill().AlignItems(ui.Stretch).Children(func() {
 				a.stage(c, p)
 				if a.sheet != nil {
-					ui.Row(c).Padding(16, 16, 16, 0).AlignItems(ui.Stretch).Children(func() { a.commentPanel(c, a.sheet) })
+					ui.Row(c.Key("theater-comments")).Padding(16, 16, 16, 0).AlignItems(ui.Stretch).Children(func() { a.commentPanel(c, a.sheet) })
 				}
 			})
 			return
@@ -114,7 +120,7 @@ func (a *app) view(c *ui.Context) {
 			a.orbitView(c)
 			return
 		}
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+		ui.Row(c.Key("main-row")).Fill().AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c.Key("main")).Grow(1).PaddingStart(contentLeft).Children(func() {
 				a.topBar(c, p)
 				if !p.plays() {
@@ -338,7 +344,7 @@ func (a *app) profileHeader(c *ui.Context, me dy.User) {
 func (a *app) avatar(c *ui.Context, p palette, url, name string, size float32) {
 	box := ui.Box(c).Size(size, size).Radius(size / 2).Clip().Background(p.press).Center()
 	box.Children(func() {
-		if bmp := a.img.get(url); bmp != nil {
+		if bmp := a.img.getSized(url, avatarEdge); bmp != nil {
 			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 			return
 		}
@@ -433,57 +439,99 @@ func (a *app) tabsRow(c *ui.Context) {
 }
 
 // grid is p's covers, as many columns as fit, loading more near its end. 精选's
-// first video is a big card that plays, silent, as Douyin's does.
+// first video is a big card that plays, silent, as Douyin's does. Virtualized
+// via ui.List so off-screen covers are not built or retained in memory.
 func (a *app) grid(c *ui.Context, p *page) {
-	w, h := c.Size()
+	w, _ := c.Size()
 	inner := w - contentLeft - 24 - barGutter - 16 // the grid's padding, the row's
 	if a.notes != nil || a.dms != nil {
 		inner -= 360 + 16
 	}
 	cols := max(2, int((inner+16)/(260+16)))
 	colW := (inner - 16*float32(cols-1)) / float32(cols)
-	viewport := ui.Scroll(c.Key("grid:"+p.title)).TrackScroll(&p.scroll).Grow(1).Padding(4, barGutter, 32, 24)
-	viewport.Children(func() {
-		ui.Grid(c).Columns(cols).GapX(16).GapY(26).Children(func() {
-			for i, s := range p.list {
-				if i == 0 && p == a.picks && cols >= 3 {
-					// As tall as two cards beside it: their covers and some 63 points of text each (measured).
-					a.bigCard(c.Key("0"), p, s, cols-1, 2*(colW*9/16+63)+26, viewport)
-					continue
-				}
-				a.card(c.Key(fmt.Sprint(i)), p, i, s) // by place: a feed can bring a video twice
-			}
-		})
-		// Near the end once it has scrolled into view: the next page.
-		if end := ui.Box(c.Key("end")).Height(1).Bounds(); end.W > 0 && end.Y < h+800 {
+	hasBig := p == a.picks && cols >= 3 && len(p.list) > 0
+	nCardRows := 0
+	if hasBig {
+		nCardRows = 1
+		if rem := len(p.list) - 3; rem > 0 {
+			nCardRows += (rem + cols - 1) / cols
+		}
+	} else if len(p.list) > 0 {
+		nCardRows = (len(p.list) + cols - 1) / cols
+	}
+	totalRows := nCardRows + 1 // trailing status/footer row
+	p.gridList.Key = func(row int) any {
+		if row == nCardRows {
+			return "foot"
+		}
+		if hasBig && row == 0 {
+			return "big"
+		}
+		return row
+	}
+	var viewport ui.Element
+	viewport = ui.List(c.Key("grid:"+p.title), &p.gridList, totalRows, func(row int) {
+		if row >= nCardRows-2 && !p.done {
 			a.more(p)
 		}
-		text := ""
-		switch {
-		case p.msg != "":
-			text = p.msg
-		case p.fetching:
-			text = "载入中…"
-		case p.done && len(p.list) == 0:
-			text = "没有结果"
-		case p.done:
-			text = "没有更多了"
+		if row == nCardRows {
+			text := ""
+			switch {
+			case p.msg != "":
+				text = p.msg
+			case p.fetching:
+				text = "载入中…"
+			case p.done && len(p.list) == 0:
+				text = "没有结果"
+			case p.done:
+				text = "没有更多了"
+			}
+			ui.Row(c.Key("grid-foot")).Padding(24, 0, 32, 0).Justify(ui.Center).Children(func() {
+				ui.Text(c, text).FontSize(12.5).TextColor(pal.faint)
+			})
+			return
 		}
-		ui.Row(c).Padding(24, 0).Justify(ui.Center).Children(func() {
-			ui.Text(c, text).FontSize(12.5).TextColor(pal.faint)
+		if hasBig && row == 0 {
+			bigH := 2*(colW*9/16+63) + 26
+			ui.Row(c).Padding(0, barGutter, 26, 24).Gap(16).AlignItems(ui.Stretch).Children(func() {
+				a.bigCard(c.Key("0"), p, p.list[0], float32(cols-1), bigH, viewport)
+				ui.Column(c.Key("side")).Grow(1).Basis(0).MinWidth(0).Gap(26).Children(func() {
+					if len(p.list) > 1 {
+						a.card(c.Key("1"), p, 1, p.list[1])
+					}
+					if len(p.list) > 2 {
+						a.card(c.Key("2"), p, 2, p.list[2])
+					}
+				})
+			})
+			return
+		}
+		start := row * cols
+		if hasBig {
+			start = 3 + (row-1)*cols
+		}
+		ui.Row(c).Padding(0, barGutter, 26, 24).Gap(16).AlignItems(ui.Start).Children(func() {
+			for j := range cols {
+				idx := start + j
+				if idx < len(p.list) {
+					a.card(c.Key(fmt.Sprint(idx)), p, idx, p.list[idx]).Grow(1).Basis(0).MinWidth(0)
+				} else {
+					ui.Box(c).Grow(1).Basis(0).MinWidth(0)
+				}
+			}
 		})
-	})
+	}).Grow(1).Padding(4, 0, 0, 0)
 }
 
 // card is a video in the grid: its cover with its likes and length, its text
 // in two lines, and its author and day.
-func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
+func (a *app) card(c *ui.Context, p *page, i int, s *slot) ui.Element {
 	v := s.v
 	b := ui.ButtonBase(c).Column().AlignItems(ui.Stretch).Justify(ui.Start).Gap(8).FocusRing(false).Label(v.Desc)
 	b.Children(func() {
 		cover := ui.Box(c).AspectRatio(16.0 / 9).Radius(10).Clip().Background(pal.well)
 		cover.Children(func() {
-			if bmp := a.img.get(v.Cover); bmp != nil {
+			if bmp := a.img.getSized(v.Cover, coverEdge); bmp != nil {
 				ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover).Transition(coverFade)
 			}
 			if b.Hovered() {
@@ -516,13 +564,14 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) {
 	if b.Clicked() {
 		a.play(p, i)
 	}
+	return b
 }
 
 // bigCard is 精选's first video across span columns and two rows, playing
 // silent once loaded, its cover until then, with its author and text over it.
-func (a *app) bigCard(c *ui.Context, p *page, s *slot, span int, height float32, viewport ui.Element) {
+func (a *app) bigCard(c *ui.Context, p *page, s *slot, grow float32, height float32, viewport ui.Element) {
 	v := s.v
-	b := ui.ButtonBase(c).ColumnSpan(span).RowSpan(2).Height(height).Radius(12).Clip().Background(ui.RGB(0, 0, 0)).FocusRing(false).Label(v.Desc)
+	b := ui.ButtonBase(c).Grow(grow).Basis(0).MinWidth(0).Height(height).Radius(12).Clip().Background(ui.RGB(0, 0, 0)).FocusRing(false).Label(v.Desc)
 	if nativePlayer(s.vp) {
 		b.Background(ui.Color{})
 	}
@@ -655,7 +704,15 @@ func (a *app) stage(c *ui.Context, p *page) {
 		if s.v.Live != nil && a.liveChat != nil {
 			danmakuAt = time.Since(a.liveChat.started)
 		}
-		if !a.clear && (s.v.Live == nil || !a.paused) && a.danmakuLayer(c, s, box.Bounds().W, danmakuAt) && !a.paused {
+		danmakuShown := false
+		if !a.clear && (s.v.Live == nil || !a.paused) {
+			// Isolate dynamic danmaku children inside a keyed pass-through layer so
+			// arriving/leaving bullets never shift the positional IDs of caption, rail, or controls.
+			ui.Box(c.Key("danmaku-layer")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Children(func() {
+				danmakuShown = a.danmakuLayer(c, s, box.Bounds().W, danmakuAt)
+			})
+		}
+		if danmakuShown && !a.paused {
 			c.AnimationFrame() // they fly
 		} else if s.vp != nil && !a.paused {
 			c.After(500 * time.Millisecond) // the time moves on
@@ -767,7 +824,7 @@ type laneTail struct {
 }
 
 func (s *slot) clearDanmaku() {
-	s.danmaku, s.dmLane, s.dmTail = nil, nil, [dmLanes]laneTail{}
+	s.danmaku, s.dmLane, s.dmWidth, s.dmTail = nil, nil, nil, [dmLanes]laneTail{}
 }
 
 // place gives a comment setting off at at, tw wide, the topmost lane where it
@@ -814,14 +871,20 @@ func (s *slot) place(d dy.Danmaku, tw, w float32) int {
 // w wide, each from its time on, in the lane it got when it set off. It
 // reports whether any shows.
 func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) bool {
-	if a.dmOff || w <= 0 {
+	if a.dmOff || w <= 0 || len(s.danmaku) == 0 {
 		return false
 	}
 	const lane, size = 30, 17
 	shown := false
-	for _, d := range s.danmaku {
+	// s.danmaku is time-ordered: jump straight to the first bullet still in flight.
+	start := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At > at-flight })
+	for i := start; i < len(s.danmaku); i++ {
+		d := s.danmaku[i]
 		age := at - d.At
-		if age < 0 || age >= flight {
+		if age < 0 {
+			break
+		}
+		if age >= flight {
 			continue
 		}
 		l, ok := s.dmLane[d]
@@ -829,7 +892,14 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 			continue
 		}
 		spans, pics := a.emojiSpans(d.Text, size, 600)
-		tw, _ := c.MeasureText(0, spans...)
+		tw, hasW := s.dmWidth[d]
+		if !hasW {
+			tw, _ = c.MeasureText(0, spans...)
+			if s.dmWidth == nil {
+				s.dmWidth = map[dy.Danmaku]float32{}
+			}
+			s.dmWidth[d] = tw
+		}
 		if !ok {
 			l = s.place(d, tw, w)
 		}
@@ -837,8 +907,13 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 			continue
 		}
 		x := w - float32(age)/float32(flight)*(w+tw)
-		ui.RichText(c, spans...).Absolute().Top(float32(14+l*lane)).Left(x).FontSize(size).FontWeight(600).Label(d.Text).
-			TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine().DrawObjects(pics.draw)
+		if len(pics) == 0 {
+			ui.Text(c.Key(d), d.Text).Absolute().Top(float32(14+l*lane)).Left(0).Translate(x, 0).FontSize(size).FontWeight(600).Label(d.Text).
+				TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine()
+		} else {
+			ui.RichText(c.Key(d), spans...).Absolute().Top(float32(14+l*lane)).Left(0).Translate(x, 0).FontSize(size).FontWeight(600).Label(d.Text).
+				TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine().DrawObjects(pics.draw)
+		}
 		shown = true
 	}
 	return shown
@@ -847,7 +922,7 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 // caption is the author, the day and the text, over the foot of the video;
 // the fade keeps it readable over a bright frame.
 func (a *app) caption(c *ui.Context, p *page, s *slot) {
-	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Padding(64, 96, 44+18+6, 18).Gap(6). // clear of the bar and its progress
+	ui.Column(c.Key("caption")).Absolute().Left(0).Right(0).Bottom(0).Padding(64, 96, 44+18+6, 18).Gap(6). // clear of the bar and its progress
 												Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			name := "@" + s.v.Author
@@ -906,7 +981,7 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w float32) {
 	if of <= 0 {
 		of = s.v.Duration
 	}
-	ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.5), 180).Children(func() {
+	ui.Column(c.Key("controls")).Absolute().Left(0).Right(0).Bottom(0).Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.5), 180).Children(func() {
 		if !live {
 			a.progress(c, s, at, of)
 		}
@@ -1037,7 +1112,7 @@ func barFit(w float32, live bool) (show [barItems]bool) {
 // danmakuInput is where a bullet comment is written, as Douyin's: Enter or
 // 发送 posts it where the video plays, for everyone watching to see.
 func (a *app) danmakuInput(c *ui.Context, s *slot) {
-	field := ui.Row(c).Width(260).Height(30).Radius(8).PaddingStart(10).Gap(4).AlignItems(ui.Center).Background(ui.RGBA(255, 255, 255, 0.12)).Margin(0, 0, 0, 4)
+	field := ui.Row(c.Key("dm-bar")).Width(260).Height(30).Radius(8).PaddingStart(10).Gap(4).AlignItems(ui.Center).Background(ui.RGBA(255, 255, 255, 0.12)).Margin(0, 0, 0, 4)
 	field.Children(func() {
 		in := ui.TextInputBase(c.Key("dm-input"), &a.dmText).Bind(&a.dmBox).Grow(1).Placeholder("发一条友好的弹幕吧").PlaceholderColor(vid.faint).TextColor(vid.text).FontSize(12.5).Label("弹幕内容")
 		if in.Submitted() {
@@ -1064,6 +1139,7 @@ func (a *app) pipView(c *ui.Context) {
 	t.Font = appFont
 	c.SetTheme(&t)
 	a.pipVideo.begin(a.pip)
+	defer a.pipVideo.end()
 	box := ui.Box(c).Fill().DragWindow()
 	box.Children(func() {
 		a.pipVideo.background(c, ui.RGB(0, 0, 0))
@@ -1332,7 +1408,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 		icon, gap = 28, 8
 	}
 	shadow := ui.RGBA(0, 0, 0, 0.45)
-	ui.Column(c).Absolute().Right(14).Bottom(64).Gap(gap).AlignItems(ui.Center).Children(func() {
+	ui.Column(c.Key("rail")).Absolute().Right(14).Bottom(64).Gap(gap).AlignItems(ui.Center).Children(func() {
 		ab := ui.ButtonBase(c.Key("avatar")).FocusRing(false).Label("作者主页").Margin(0, 0, 4, 0).
 			Radius(999).Border(2, white)
 		ab.Children(func() { a.avatar(c, vid, s.v.Avatar, s.v.Author, icon+16) })
@@ -1611,33 +1687,99 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 			a.relatedList(c, sh)
 			return
 		}
-		ui.Scroll(c.Key("comment-list")).Grow(1).Padding(0, 0, listFade, 0).Children(func() {
-			for i, cm := range sh.items {
-				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
+		sh.rows = sh.rows[:0]
+		for i, cm := range sh.items {
+			sh.rows = append(sh.rows, commentRow{kind: rowComment, ci: i})
+			if cm.Replies > 0 {
+				if th := sh.threads[cm.ID]; th != nil && th.open {
+					for j := range th.items {
+						sh.rows = append(sh.rows, commentRow{kind: rowReply, ci: i, ri: j})
+					}
+				}
+				sh.rows = append(sh.rows, commentRow{kind: rowReplyActions, ci: i})
+			}
+		}
+		sh.rows = append(sh.rows, commentRow{kind: rowFooter})
+		if sh.list.Key == nil {
+			sh.list.Key = func(i int) any {
+				r := sh.rows[i]
+				switch r.kind {
+				case rowComment:
+					if id := sh.items[r.ci].ID; id != "" {
+						return "c:" + id
+					}
+					return r.ci
+				case rowReply:
+					cm := sh.items[r.ci]
+					th := sh.threads[cm.ID]
+					if id := th.items[r.ri].ID; id != "" {
+						return "r:" + id
+					}
+					return fmt.Sprintf("r:%d:%d", r.ci, r.ri)
+				case rowReplyActions:
+					if id := sh.items[r.ci].ID; id != "" {
+						return "a:" + id
+					}
+					return fmt.Sprintf("a:%d", r.ci)
+				default:
+					return "foot"
+				}
+			}
+		}
+		ui.List(c.Key("comment-list"), &sh.list, len(sh.rows), func(i int) {
+			r := sh.rows[i]
+			switch r.kind {
+			case rowComment:
+				cm := sh.items[r.ci]
+				padBottom := float32(10)
+				if cm.Replies > 0 {
+					padBottom = 2
+				}
+				ui.Row(c).Padding(10, 16, padBottom, 16).Gap(10).AlignItems(ui.Start).Children(func() {
 					a.avatar(c, pal, cm.Avatar, cm.Author, 30)
 					ui.Column(c).Gap(4).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 						a.commentText(c, sh, cm, 14, false)
-						if cm.Replies > 0 {
-							a.replyThread(c, sh, cm)
-						}
 					})
 				})
-			}
-			ui.Row(c).Padding(12, 16).Justify(ui.Center).Children(func() {
-				switch {
-				case sh.fetching:
-					ui.Text(c, "载入中…").FontSize(12).TextColor(pal.faint)
-				case sh.msg != "":
-					ui.Text(c, sh.msg).FontSize(12).TextColor(pal.faint)
-				case !sh.done:
-					if ui.Button(c.Key("more"), "更多评论").Clicked() {
-						a.moreComments(sh)
+			case rowReply:
+				cm := sh.items[r.ci]
+				th := sh.threads[cm.ID]
+				rep := th.items[r.ri]
+				ui.Row(c).Padding(6, 16, 0, 56).Gap(8).AlignItems(ui.Start).Children(func() {
+					a.avatar(c, pal, rep.Avatar, rep.Author, 22)
+					ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+						a.commentText(c, sh, rep, 13, true)
+					})
+				})
+			case rowReplyActions:
+				cm := sh.items[r.ci]
+				ui.Column(c).Padding(2, 16, 10, 56).Gap(2).Children(func() {
+					a.replyThreadActions(c, sh, cm)
+				})
+			case rowFooter:
+				ui.Row(c.Key("comment-foot")).Padding(12, 16, 12+listFade, 16).Justify(ui.Center).Children(func() {
+					switch {
+					case sh.fetching:
+						ui.Text(c, "载入中…").FontSize(12).TextColor(pal.faint)
+					case sh.msg != "":
+						ui.Column(c).Gap(6).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, sh.msg).FontSize(12).TextColor(pal.faint)
+							if !sh.done {
+								if ui.Button(c.Key("retry"), "重试").Clicked() {
+									a.moreComments(sh)
+								}
+							}
+						})
+					case !sh.done:
+						if ui.Button(c.Key("more"), "更多评论").Clicked() {
+							a.moreComments(sh)
+						}
+					case len(sh.items) == 0:
+						ui.Text(c, "还没有评论").FontSize(12).TextColor(pal.faint)
 					}
-				case len(sh.items) == 0:
-					ui.Text(c, "还没有评论").FontSize(12).TextColor(pal.faint)
-				}
-			})
-		})
+				})
+			}
+		}).Grow(1)
 	})
 }
 
@@ -1655,9 +1797,9 @@ func (a *app) commentText(c *ui.Context, sh *sheet, cm dy.Comment, size float32,
 	if cm.Place != "" {
 		meta += " · " + cm.Place
 	}
-	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("meta")).Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, meta).FontSize(11).TextColor(pal.faint).Grow(1)
-		b := ui.ButtonBase(c.Key("like:" + cm.ID)).Row().Gap(4).PaddingX(4).Height(20).Radius(6).AlignItems(ui.Center).FocusRing(false).
+		b := ui.ButtonBase(c.Key("like:" + cm.ID)).Row().Gap(4).PaddingX(6).Height(24).Radius(6).AlignItems(ui.Center).FocusRing(false).
 			Label(onOff(cm.Liked, "取消赞评论", "赞评论"))
 		color := onOff(cm.Liked, pal.accent, onOff(b.Hovered(), pal.text, pal.faint))
 		b.Children(func() {
@@ -1680,6 +1822,22 @@ type emojiPics map[int]*ui.Bitmap
 
 func (e emojiPics) draw(p *ui.Painter, at int, r ui.Rect) { p.Image(e[at], r, ui.Contain) }
 
+type emojiKey struct {
+	text   string
+	size   float32
+	weight int
+}
+
+type emojiRef struct {
+	runePos int
+	url     string
+}
+
+type emojiCached struct {
+	spans []ui.Span
+	refs  []emojiRef
+}
+
 // emojiSpans are text in size and weight, the emoji it names objects in it,
 // as Douyin draws them, whose pictures pics draws (Element.DrawObjects). A
 // name not among a.emoji stays text; a.emoji loads once first asked for.
@@ -1693,30 +1851,49 @@ func (a *app) emojiSpans(text string, size float32, weight int) ([]ui.Span, emoj
 					a.emoji = nil
 				} else {
 					a.emoji = m
+					a.emojiCache = nil // re-parse cached texts once emoji map arrives
 				}
 			})
 		}()
 	}
-	var spans []ui.Span
-	var pics emojiPics
-	runes, last := 0, 0
-	for _, m := range emojiName.FindAllStringIndex(text, -1) {
-		u := a.emoji[text[m[0]:m[1]]]
-		if u == "" {
-			continue
+	key := emojiKey{text: text, size: size, weight: weight}
+	entry, ok := a.emojiCache[key]
+	if !ok {
+		var spans []ui.Span
+		var refs []emojiRef
+		if len(a.emoji) > 0 && strings.ContainsRune(text, '[') {
+			runes, last := 0, 0
+			for _, m := range emojiName.FindAllStringIndex(text, -1) {
+				u := a.emoji[text[m[0]:m[1]]]
+				if u == "" {
+					continue
+				}
+				before := text[last:m[0]]
+				spans = append(spans, ui.Span{Text: before, Size: size, Weight: weight},
+					ui.Span{Text: "\uFFFC", ObjectWidth: size * 1.3, ObjectHeight: size * 1.1, ObjectDescent: size * 0.2})
+				runes += utf8.RuneCountInString(before)
+				refs = append(refs, emojiRef{runePos: runes, url: u})
+				runes++
+				last = m[1]
+			}
+			spans = append(spans, ui.Span{Text: text[last:], Size: size, Weight: weight})
+		} else {
+			spans = []ui.Span{{Text: text, Size: size, Weight: weight}}
 		}
-		before := text[last:m[0]]
-		spans = append(spans, ui.Span{Text: before, Size: size, Weight: weight},
-			ui.Span{Text: "\uFFFC", ObjectWidth: size * 1.3, ObjectHeight: size * 1.1, ObjectDescent: size * 0.2})
-		runes += utf8.RuneCountInString(before)
-		if pics == nil {
-			pics = emojiPics{}
+		entry = emojiCached{spans: spans, refs: refs}
+		if a.emojiCache == nil || len(a.emojiCache) >= 512 {
+			a.emojiCache = map[emojiKey]emojiCached{}
 		}
-		pics[runes] = a.img.get(u)
-		runes++
-		last = m[1]
+		a.emojiCache[key] = entry
 	}
-	return append(spans, ui.Span{Text: text[last:], Size: size, Weight: weight}), pics
+	if len(entry.refs) == 0 {
+		return entry.spans, nil
+	}
+	pics := make(emojiPics, len(entry.refs))
+	for _, ref := range entry.refs {
+		pics[ref.runePos] = a.img.getSized(ref.url, emojiEdge)
+	}
+	return entry.spans, pics
 }
 
 // commentBody is a comment's text, with the emoji it names drawn in it, as
@@ -1726,11 +1903,15 @@ func (a *app) commentBody(c *ui.Context, sh *sheet, cm dy.Comment, size float32)
 		a.commentRichText(c, sh, cm, size)
 	} else if cm.Text != "" {
 		spans, pics := a.emojiSpans(cm.Text, size, 0)
-		ui.RichText(c, spans...).FontSize(size).TextColor(pal.text).Label(cm.Text).DrawObjects(pics.draw)
+		if len(pics) == 0 {
+			ui.Text(c, cm.Text).FontSize(size).TextColor(pal.text)
+		} else {
+			ui.RichText(c, spans...).FontSize(size).TextColor(pal.text).Label(cm.Text).DrawObjects(pics.draw)
+		}
 	}
 	for i, u := range cm.Pics {
 		const edge = 120
-		bmp := a.img.get(u)
+		bmp := a.img.getSized(u, commentPicEdge)
 		w, h := float32(edge), float32(edge)
 		if bmp != nil {
 			bw, bh := bmp.Size()
@@ -1745,30 +1926,21 @@ func (a *app) commentBody(c *ui.Context, sh *sheet, cm dy.Comment, size float32)
 	}
 }
 
-// replyThread is under a comment with replies, as Douyin's: the replies once
-// opened, smaller, then 展开 N 条回复 to open them, 展开更多 for more, 收起.
-func (a *app) replyThread(c *ui.Context, sh *sheet, cm dy.Comment) {
+// replyThreadActions renders the reply thread status and 展开 / 展开更多 / 收起 controls.
+func (a *app) replyThreadActions(c *ui.Context, sh *sheet, cm dy.Comment) {
 	th := sh.threads[cm.ID]
 	open := th != nil && th.open
-	if open {
-		for j, r := range th.items {
-			ui.Row(c.Key("r"+fmt.Sprint(j))).Gap(8).Margin(6, 0, 0, 0).AlignItems(ui.Start).Children(func() {
-				a.avatar(c, pal, r.Avatar, r.Author, 22)
-				ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() { a.commentText(c, sh, r, 13, true) })
-			})
-		}
-		if th.msg != "" {
-			ui.Text(c, th.msg).FontSize(11.5).TextColor(pal.faint)
-		}
+	if open && th.msg != "" {
+		ui.Text(c, th.msg).FontSize(11.5).TextColor(pal.faint)
 	}
 	link := func(key, label string) bool {
-		b := ui.ButtonBase(c.Key(key)).FocusRing(false).Label(label)
+		b := ui.ButtonBase(c.Key(key)).Padding(4, 6).Margin(0, 0, 0, -6).Radius(6).FocusRing(false).Label(label)
 		b.Children(func() {
 			ui.Text(c, label).FontSize(11.5).FontWeight(600).TextColor(onOff(b.Hovered(), pal.text, pal.muted))
 		})
 		return b.Clicked()
 	}
-	ui.Row(c).Gap(16).Margin(2, 0, 0, 0).Children(func() {
+	ui.Row(c.Key("reply-actions")).Gap(16).AlignItems(ui.Center).Children(func() {
 		switch {
 		case !open:
 			if link("open", fmt.Sprintf("展开 %d 条回复", cm.Replies)) {
@@ -1779,7 +1951,11 @@ func (a *app) replyThread(c *ui.Context, sh *sheet, cm dy.Comment) {
 			ui.Text(c, "载入中…").FontSize(11.5).TextColor(pal.faint)
 			return
 		case !th.done && len(th.items) < cm.Replies:
-			if link("more", "展开更多") {
+			label := "展开更多"
+			if th.msg != "" {
+				label = "重试"
+			}
+			if link("more", label) {
 				a.moreReplies(th)
 			}
 		}
@@ -1800,7 +1976,7 @@ func (a *app) relatedList(c *ui.Context, sh *sheet) {
 			}
 			b.Children(func() {
 				ui.Box(c).Width(128).AspectRatio(16.0 / 9).Radius(8).Clip().Background(pal.press).Children(func() {
-					if bmp := a.img.get(v.Cover); bmp != nil {
+					if bmp := a.img.getSized(v.Cover, thumbEdge); bmp != nil {
 						ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 					}
 					ui.Text(c, clock(v.Duration)).Absolute().Right(5).Bottom(4).FontSize(10.5).FontWeight(600).TextColor(white).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.6))

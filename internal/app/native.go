@@ -11,6 +11,8 @@ import (
 type nativeSurface struct {
 	window            *mygo.Window
 	player            *streamPlayer
+	prevWindow        *mygo.Window
+	prevPlayer        *streamPlayer
 	element, viewport ui.Element
 	cover             bool
 	// off keeps the picture out of this frame: it sits above the window's
@@ -25,11 +27,29 @@ func (s *nativeSurface) hide() {
 	if s.window != nil && s.player != nil && s.player.layer != nil {
 		s.player.layer.Hide(s.window.NativeHandle())
 	}
+	if s.prevWindow != nil && s.prevPlayer != nil && s.prevPlayer.layer != nil {
+		s.prevPlayer.layer.Hide(s.prevWindow.NativeHandle())
+	}
+	s.prevWindow, s.prevPlayer = nil, nil
 }
 
 func (s *nativeSurface) begin(w *mygo.Window) {
-	s.hide()
+	if s.player != nil {
+		s.prevWindow, s.prevPlayer = s.window, s.player
+	}
 	s.window, s.player, s.element, s.viewport = w, nil, ui.Element{}, ui.Element{}
+}
+
+// end hides the previous frame's video layer only if this frame did not
+// keep presenting the same player in the same window, avoiding per-frame
+// hide/unhide churn on AVPlayerLayer.
+func (s *nativeSurface) end() {
+	if s.prevWindow != nil && s.prevPlayer != nil && s.prevPlayer.layer != nil {
+		if s.player != s.prevPlayer || s.window != s.prevWindow || s.off {
+			s.prevPlayer.layer.Hide(s.prevWindow.NativeHandle())
+		}
+	}
+	s.prevWindow, s.prevPlayer = nil, nil
 }
 
 func nativePlayer(p videoPlayer) bool {
@@ -105,7 +125,7 @@ func (s *nativeSurface) bounds() (ui.Rect, ui.Rect) {
 // the video stays opaque, including rounded corners: login/write pages cannot
 // show through a transparent parent, and scroll clipping stays aligned on resize.
 func (s *nativeSurface) background(c *ui.Context, color ui.Color) {
-	ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-1).HandleInput(func(ev ui.InputEvent) bool {
+	ui.Box(c.Key("video-bg")).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-1).HandleInput(func(ev ui.InputEvent) bool {
 		return ev.Kind == ui.InputPointerDown || ev.Kind == ui.InputPointerUp || ev.Kind == ui.InputScroll
 	}).Draw(func(p *ui.Painter, r ui.Rect) {
 		s.root = r

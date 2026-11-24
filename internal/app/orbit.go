@@ -628,7 +628,7 @@ func (a *app) orbitCards(c *ui.Context, w, h float32) {
 
 		small := r.w < 200 // a little card, its text smaller
 		b.Children(func() {
-			if bmp := a.img.get(v.Cover); bmp != nil {
+			if bmp := a.img.getSized(v.Cover, coverEdge); bmp != nil {
 				ui.Image(c.Key("cover"), bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover).Transition(coverFade)
 			}
 			if v.Live != nil {
@@ -667,7 +667,7 @@ func (a *app) orbitCards(c *ui.Context, w, h float32) {
 	// The next ring's covers load now, so 换一批 shows them at once.
 	if n > orbitRing {
 		for i := range orbitRing {
-			a.img.get(src.list[(start+orbitRing+i)%n].v.Cover)
+			a.img.getSized(src.list[(start+orbitRing+i)%n].v.Cover, coverEdge)
 		}
 	}
 }

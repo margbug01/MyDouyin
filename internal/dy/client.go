@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,8 +30,10 @@ const baseQuery = "device_platform=webapp&aid=6383&channel=channel_pc_web&pc_cli
 type Client struct {
 	http    *http.Client
 	signer  *sign.Signer
-	login   atomic.Pointer[login] // the cookies, which the app's page renews as it writes
-	web     Web                   // the app's Douyin page, which writes go through (write.go)
+	login          atomic.Pointer[login] // the cookies, which the app's page renews as it writes
+	cookieSaveMu   sync.Mutex
+	savedCookies   []byte // last JSON written to cookies.json, to skip unchanged writes
+	web            Web    // the app's Douyin page, which writes go through (write.go)
 	imSeq   atomic.Int32          // the IM requests' sequence
 	refresh atomic.Int32          // the feed's page, which two lists of it share
 	// replyPageUntil holds a UnixNano deadline while Replies routes through
@@ -54,6 +57,12 @@ func (c *Client) cooldown() time.Duration {
 		return c.replyCooldown
 	}
 	return replyPageCooldown
+}
+
+// KeepReplyPage routes Replies through pageGet for the cooldown window, e.g.
+// after Douyin held back direct Go requests or after completing page verification.
+func (c *Client) KeepReplyPage() {
+	c.replyPageUntil.Store(c.now().Add(c.cooldown()).UnixNano())
 }
 
 // ResetReplyPage lets the next Replies call try the direct Go client again.
@@ -871,6 +880,7 @@ func (c *Client) Emojis() (map[string]string, error) {
 
 // Comments pages through a video's comments, as Douyin orders them.
 func (c *Client) Comments(videoID string) Pager[Comment] {
+	const path = "/aweme/v1/web/comment/list/"
 	cursor := 0
 	return pager(func() ([]Comment, bool, error) {
 		var r struct {
@@ -880,8 +890,21 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 			HasMore int       `json:"has_more"`
 		}
 		q := fmt.Sprintf("aweme_id=%s&cursor=%d&count=20&item_type=0&insert_ids=&whale_cut_token=&cut_version=1&rcFT=", videoID, cursor)
-		if err := c.getJSON("/aweme/v1/web/comment/list/", q, &r); err != nil {
+		b, err := c.call("GET", path, q, "")
+		if (errors.Is(err, ErrVerify) || (err == nil && len(b) == 0)) && c.web != nil {
+			b, err = c.pageGet(path, q)
+		}
+		if err != nil {
 			return nil, false, err
+		}
+		if len(b) == 0 {
+			return nil, false, fmt.Errorf("dy: %s: empty reply (signature or login refused)", path)
+		}
+		if err := json.Unmarshal(b, &r); err != nil {
+			return nil, false, fmt.Errorf("dy: %s: %w", path, err)
+		}
+		if r.Code != 0 {
+			return nil, false, fmt.Errorf("dy: %s: status %d", path, r.Code)
 		}
 		out := make([]Comment, len(r.List))
 		for i, x := range r.List {
@@ -896,7 +919,8 @@ func (c *Client) Comments(videoID string) Pager[Comment] {
 // Replies pages through the replies to a comment of a video. Their endpoint
 // wants the ticket guard's headers (guard.go): without the material, or
 // with it gone stale (an empty answer), the app's page gives it again and
-// the endpoint is asked once more.
+// the endpoint is asked once more; if direct requests are still held back or
+// return empty, it falls back to pageGet in the WebView.
 func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
 	const path = "/aweme/v1/web/comment/list/reply/"
 	cursor := 0
@@ -915,7 +939,7 @@ func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
 			if err == nil {
 				b, err = c.call("GET", path, q, "", h)
 				if errors.Is(err, ErrVerify) {
-					c.replyPageUntil.Store(c.now().Add(c.cooldown()).UnixNano())
+					c.KeepReplyPage()
 					try-- // the same try, from the page
 					continue
 				}
@@ -927,8 +951,22 @@ func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
 			}
 			if len(b) == 0 && try == 0 {
 				if err := c.RefreshGuard(); err != nil {
+					if c.web != nil {
+						c.KeepReplyPage()
+						if b, err = c.pageGet(path, q); err != nil {
+							return nil, false, err
+						}
+						break
+					}
 					return nil, false, err
 				}
+			}
+		}
+		if len(b) == 0 && c.web != nil {
+			c.KeepReplyPage()
+			var err error
+			if b, err = c.pageGet(path, q); err != nil {
+				return nil, false, err
 			}
 		}
 		if len(b) == 0 {

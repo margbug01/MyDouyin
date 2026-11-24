@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -129,5 +130,11 @@ func TestSignPageStateResetOnDestroy(t *testing.T) {
 	w.destroy()
 	if w.signOnly {
 		t.Fatal("destroy left signOnly set")
+	}
+}
+
+func TestFullPageCheckRejectsSignPage(t *testing.T) {
+	if !strings.Contains(fullPageCheckJS, `if (window.__mdSignPage) return "wait"`) {
+		t.Fatalf("fullPageCheckJS must wait while signPage is still mounted: %s", fullPageCheckJS)
 	}
 }
