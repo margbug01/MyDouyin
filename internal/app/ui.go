@@ -661,7 +661,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 			a.caption(c, p, s)
 			a.rail(c, p, s, box.Bounds().H)
 		}
-		a.controls(c, s, at)
+		a.controls(c, s, at, box.Bounds().W)
 	})
 }
 
@@ -893,8 +893,9 @@ func (a *app) caption(c *ui.Context, p *page, s *slot) {
 // bullet comments on the left; 连播 and 清屏, the definition, the speed, the
 // volume, filling the window and the screen on the right; above it the
 // progress, which a press or a drag moves the video to.
-func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
+func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w float32) {
 	live := s.v.Live != nil
+	show := barFit(w, live)
 	var of time.Duration
 	if s.ap != nil {
 		of = s.ap.Duration()
@@ -935,26 +936,30 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 				if a.dragging {
 					shown = time.Duration(float64(of) * float64(a.dragAt))
 				}
-				ui.Text(c, clock(shown)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.85)).Margin(0, 6, 0, 2)
-				if chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
+				ui.Text(c, clock(shown)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.85)).Margin(0, 6, 0, 2).SingleLine()
+				if show[barDanmaku] && chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
 					a.dmOff = !a.dmOff
 				}
-				a.danmakuInput(c, s)
+				if show[barInput] {
+					a.danmakuInput(c, s)
+				}
 			}
 			ui.Box(c).Grow(1)
-			if !live {
+			if !live && show[barNext] {
 				if toggleChip(c.Key("next"), "连播", a.autoNext).Clicked() {
 					a.autoNext = !a.autoNext
 				}
 			}
-			if toggleChip(c.Key("clear"), "清屏", a.clear).Clicked() {
+			if show[barClear] && toggleChip(c.Key("clear"), "清屏", a.clear).Clicked() {
 				a.clear = !a.clear
 			}
-			if !live {
+			if !live && show[barQuality] {
 				a.qualityMenu(c, s)
+			}
+			if !live && show[barSpeed] {
 				a.speedMenu(c)
 			}
-			if !live {
+			if !live && show[barLater] {
 				on := a.later[s.v.ID]
 				b := iconButton(c.Key("later"), onOff(on, iconLaterOn, iconLater), 17, onOff(on, vid.accent, white), onOff(on, "移出稍后再看", "稍后再看"))
 				if a.laterBusy[s.v.ID] {
@@ -963,7 +968,7 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 					a.toggleLater(s.v)
 				}
 			}
-			if iconButton(c.Key("pip"), iconPip, 17, onOff(a.pipOn, vid.accent, white), onOff(a.pipOn, "关闭小窗", "小窗")).Clicked() {
+			if show[barPip] && iconButton(c.Key("pip"), iconPip, 17, onOff(a.pipOn, vid.accent, white), onOff(a.pipOn, "关闭小窗", "小窗")).Clicked() {
 				a.setPip(!a.pipOn)
 			}
 			a.volumeButton(c)
@@ -981,13 +986,54 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration) {
 	})
 }
 
+// barItem is a control of the bar that gives way when the video is too
+// narrow for all of them, in this order, the first kept longest. Play, the
+// time, the volume, 网页全屏 and 全屏 always show.
+type barItem int
+
+const (
+	barSpeed barItem = iota
+	barQuality
+	barDanmaku
+	barClear
+	barNext
+	barPip
+	barLater
+	barInput
+	barItems
+)
+
+// barWidth is how much of the bar each takes with the gap before it, as laid
+// out (measured 2026-11-24, the definition's widest, 1080P).
+var barWidth = [barItems]float32{51, 72, 51, 75, 75, 39, 39, 270}
+
+// barFit is which items a bar w wide shows: as many as fit, in barItem's
+// order, so that a narrower video, as with the comments open beside it,
+// drops the least needed first rather than pushing 全屏 out of sight. A
+// live stream's bar has its own few, and none of the rest; before the bar
+// is laid out (w 0) all show.
+func barFit(w float32, live bool) (show [barItems]bool) {
+	base := float32(20 + 32 + 88 + 33 + 32 + 32 + 4*6 + 24) // padding, play, time, volume, the two fills, gaps, the least room between
+	if live {
+		base = 20 + 32 + 180 + 51 + 51 + 33 + 32 + 32 + 6*6 + 24 // play, the live line, its 弹幕 and 互动
+	}
+	room := w - base
+	for it := range barItems {
+		if live && it != barClear && it != barPip {
+			continue
+		}
+		if w > 0 && room < barWidth[it] {
+			break
+		}
+		room -= barWidth[it]
+		show[it] = true
+	}
+	return show
+}
+
 // danmakuInput is where a bullet comment is written, as Douyin's: Enter or
 // 发送 posts it where the video plays, for everyone watching to see.
 func (a *app) danmakuInput(c *ui.Context, s *slot) {
-	w, _ := c.Size()
-	if w < 1180 { // a narrow window keeps the bar's other buttons
-		return
-	}
 	field := ui.Row(c).Width(260).Height(30).Radius(8).PaddingStart(10).Gap(4).AlignItems(ui.Center).Background(ui.RGBA(255, 255, 255, 0.12)).Margin(0, 0, 0, 4)
 	field.Children(func() {
 		in := ui.TextInputBase(c.Key("dm-input"), &a.dmText).Bind(&a.dmBox).Grow(1).Placeholder("发一条友好的弹幕吧").PlaceholderColor(vid.faint).TextColor(vid.text).FontSize(12.5).Label("弹幕内容")

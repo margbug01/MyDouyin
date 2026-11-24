@@ -1107,6 +1107,43 @@ func TestProgressDrag(t *testing.T) {
 	}
 }
 
+// However narrow the video, as with the comments open beside it in a small
+// window, the bar's controls stay within it: those it has no room for give
+// way, 全屏 and 网页全屏 never, and the time keeps to one line.
+func TestBarFitsNarrowVideo(t *testing.T) {
+	p := stub("推荐", 1)
+	p.list[0].v.Duration = 260 * time.Second
+	a := withRoots(&app{pages: []*page{p}})
+	tt := newTester(a)
+	for _, size := range [][2]int{{960, 620}, {1100, 760}, {1280, 820}, {1600, 900}} {
+		for _, comments := range []bool{false, true} {
+			a.sheet = nil
+			if comments {
+				a.sheet = &sheet{done: true}
+			}
+			tt.SetSize(size[0], size[1])
+			tt.Frame()
+			tt.Frame() // the bar sized to the video laid out
+			bar, ok := tt.Find("进度")
+			if !ok {
+				t.Fatalf("%v comments %v: no progress", size, comments)
+			}
+			left, right := bar.X-12, bar.X+bar.W+12 // the progress is inset 12 from the video's edges
+			for _, l := range []string{"暂停", "00:00 / 04:20", "弹幕", "弹幕内容", "发送弹幕", "连播", "清屏", "清晰度：智能", "倍速：倍速", "稍后再看", "小窗", "音量", "网页全屏", "全屏"} {
+				r, ok := tt.Find(l)
+				switch {
+				case !ok && (l == "全屏" || l == "网页全屏" || l == "暂停" || l == "00:00 / 04:20"):
+					t.Fatalf("%v comments %v: %s gone", size, comments, l)
+				case ok && (r.X < left || r.X+r.W > right):
+					t.Fatalf("%v comments %v: %s at %.0f–%.0f, out of the video %.0f–%.0f", size, comments, l, r.X, r.X+r.W, left, right)
+				case ok && l == "00:00 / 04:20" && r.H > 20:
+					t.Fatalf("%v comments %v: the time wraps, %.0f tall", size, comments, r.H)
+				}
+			}
+		}
+	}
+}
+
 // The time over the progress follows the pointer as it slides along, each
 // move, not only when the playing clock next redraws.
 func TestProgressHoverFollows(t *testing.T) {
