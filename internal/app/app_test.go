@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1620,6 +1621,90 @@ func TestWatchedBatches(t *testing.T) {
 	a.watch(&slot{v: dy.Video{ID: "x"}}, time.Minute)
 	if len(a.watched) != 0 {
 		t.Fatal("queued while logged out")
+	}
+}
+
+// 观看历史 shown from elsewhere loads anew from Douyin, after what was
+// watched here and not yet told is told, so it is there.
+func TestHistoryLoadsAnew(t *testing.T) {
+	var did []string
+	loads := 0
+	from := func() dy.Pager[dy.Video] {
+		loads++
+		n := loads
+		return func() ([]dy.Video, error) {
+			did = append(did, fmt.Sprint("load ", n))
+			return []dy.Video{{ID: fmt.Sprint("h", n)}}, nil
+		}
+	}
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, me: dy.User{ID: "me"}, signedIn: true, posted: make(chan func(), 64)})
+	a.sendWatched = func(id, uid string) error { did = append(did, "told "+id); return nil }
+	a.mine = map[string]*page{}
+	for _, n := range mineTabs {
+		a.mine[n] = stub(n, 1)
+		a.mine[n].grid = true
+	}
+	h := &page{title: "观看历史", grid: true, next: from(), restart: from}
+	a.mine["观看历史"] = h
+	settle := func() {
+		t.Helper()
+		for h.fetching || a.watchSending {
+			select {
+			case fn := <-a.posted:
+				fn()
+			case <-time.After(2 * time.Second):
+				t.Fatal("观看历史 never loaded")
+			}
+		}
+	}
+	first := func() string { return h.list[0].v.ID }
+
+	a.showMine("观看历史")
+	settle()
+	shown := first()
+	a.showMine("作品")
+	a.markWatched(dy.Video{ID: "v1", AuthorUID: "u"})
+	did = nil
+	a.showMine("观看历史")
+	settle()
+	if fmt.Sprint(did) != fmt.Sprintf("[told v1 load %d]", loads) || first() == shown {
+		t.Fatalf("shown again: %q, %s first (was %s)", did, first(), shown)
+	}
+}
+
+// What waits to be told when the app quits is told after the next launch,
+// once the account it was watched on is back; not to another account.
+func TestWatchedKeptOverQuit(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "settings.json")
+	launch := func(account string) *app {
+		a := &app{signedIn: true, me: dy.User{ID: account}, settingsFile: file, posted: make(chan func(), 64)}
+		a.sendWatched = func(id, uid string) error { return nil }
+		return a
+	}
+	a := launch("me")
+	a.markWatched(dy.Video{ID: "v1", AuthorUID: "u1"})
+	a.markWatched(dy.Video{ID: "v2", AuthorUID: "u2"})
+	a.watchTimer.Stop()
+	a.keepWatched()
+
+	b := launch("me")
+	b.resumeWatched("me")
+	if b.watchTimer != nil {
+		b.watchTimer.Stop()
+	}
+	if got := fmt.Sprint(b.watched); !strings.Contains(got, "v1") || !strings.Contains(got, "u2") || len(b.watched) != 2 {
+		t.Fatalf("queued after relaunch: %d", len(b.watched))
+	}
+
+	a.keepWatched()
+	c := launch("other")
+	c.resumeWatched("other")
+	if len(c.watched) != 0 {
+		t.Fatal("told to another account")
+	}
+	c.resumeWatched("me")
+	if len(c.watched) != 0 {
+		t.Fatal("kept after another account came")
 	}
 }
 
