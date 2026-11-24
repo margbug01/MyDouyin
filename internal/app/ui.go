@@ -60,9 +60,17 @@ var appFont = func() string {
 var white = ui.RGB(255, 255, 255)
 
 func (a *app) view(c *ui.Context) {
-	t := *ui.DarkTheme()
-	t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
 	p := a.cur()
+	homeLight := a.isHome(p) && !a.orbitIsDark()
+	var t ui.Theme
+	if homeLight {
+		op := orbitLightPal
+		t = *ui.LightTheme()
+		t.Background, t.Text, t.TextMuted = ui.Color{}, op.text, op.muted
+	} else {
+		t = *ui.DarkTheme()
+		t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
+	}
 	a.syncLiveRoom(p)
 	giftOpen := a.liveChat != nil && a.liveChat.gifts.open
 	a.mainVideo.begin(a.win)
@@ -108,6 +116,10 @@ func (a *app) view(c *ui.Context) {
 			})
 			return
 		}
+		if a.isHome(p) {
+			a.orbitView(c)
+			return
+		}
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
 			ui.Column(c.Key("main")).Grow(1).Children(func() {
@@ -146,7 +158,7 @@ func (a *app) view(c *ui.Context) {
 			})
 		})
 	})
-	if c.Focused(a.searchBox) {
+	if c.Focused(a.searchBox) && !a.isHome(p) {
 		a.searchList(c)
 	}
 	a.settingsDialog(c)
@@ -246,6 +258,9 @@ func (a *app) sidebar(c *ui.Context) {
 		root := a.pages[0]
 		nav := func(icon *ui.SVG, label string, r *page, on bool) bool {
 			return r != nil && a.navItem(c, icon, label, on).Clicked()
+		}
+		if nav(iconOrbit, "引力场", a.home, root == a.home) {
+			a.root(a.home)
 		}
 		if nav(iconCompass, "精选", a.picks, root == a.picks) {
 			a.root(a.picks)

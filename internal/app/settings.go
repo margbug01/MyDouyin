@@ -21,6 +21,7 @@ type settings struct {
 	Volume     float64 `json:"volume"`
 	Muted      bool    `json:"muted"`
 	AutoUpdate bool    `json:"autoUpdate"`
+	Theme      string  `json:"theme,omitempty"` // "", "light", or "dark"
 }
 
 // defaultSettings are a first launch's.
@@ -47,13 +48,15 @@ func (a *app) loadSettings(file string) {
 	}
 	a.settingsFile, a.saved = file, s
 	a.autoNext, a.dmOff, a.quality, a.upd.auto = s.AutoNext, !s.Danmaku, s.Quality, s.AutoUpdate
+	a.orbit.theme = s.Theme
+	a.applyThemeSource()
 	a.setVolume(s.Volume, s.Muted)
 }
 
 // current is the settings as they are now.
 func (a *app) current() settings {
 	return settings{AutoNext: a.autoNext, Danmaku: !a.dmOff, Quality: a.quality,
-		Volume: a.volume, Muted: a.muted, AutoUpdate: a.upd.auto}
+		Volume: a.volume, Muted: a.muted, AutoUpdate: a.upd.auto, Theme: a.orbit.theme}
 }
 
 // saveSettings writes the settings once they changed, as each frame ends.

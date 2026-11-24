@@ -189,6 +189,8 @@ type app struct {
 	followMsg string    // why they did not load
 
 	picks, feed *page             // the roots: 精选's covers, 推荐's videos one by one
+	home        *page             // 引力场: centered search with orbiting covers
+	orbit       orbitState        // 引力场 state (orbit.go)
 	img         *images           // covers and avatars
 	emoji       map[string]string // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
 
@@ -920,6 +922,10 @@ func (a *app) escape() {
 		a.sheet, a.notes, a.dms = nil, nil, nil
 		return
 	}
+	if a.isHome(a.cur()) && a.orbit.hotOpen {
+		a.orbit.hotOpen = false
+		return
+	}
 	a.back()
 }
 
@@ -979,6 +985,11 @@ func (a *app) fill() {
 	p := a.cur()
 	defer a.preloadNextVideo(p)
 	if !p.plays() { // covers, the grid asking for more as it scrolls; only 精选's first plays
+		if a.isHome(p) {
+			a.ensureOrbitLoaded()
+			a.sync()
+			return
+		}
 		for i, s := range p.list {
 			if i == 0 && p == a.picks {
 				a.prepare(s)
@@ -1134,6 +1145,12 @@ func (a *app) loadAccount() {
 					"稍后再看": list("稍后再看", a.c.WatchLater),
 				}
 				a.mineTab = "作品"
+			}
+			if me.ID != "" && !a.orbit.userPicked {
+				a.orbit.source = orbitFollow
+				if a.isHome(a.cur()) {
+					a.ensureOrbitLoaded()
+				}
 			}
 			if err != nil {
 				a.followMsg = "关注列表没载入：" + err.Error()
@@ -1566,11 +1583,13 @@ func Run() error {
 		feed: &page{title: "推荐", next: c.Feed}, tabPages: map[int]*page{}}
 	a.picks = picksPage(c, "精选", 0)
 	a.tabPages[0] = a.picks
+	a.home = &page{title: "引力场", grid: true}
+	a.orbit = orbitState{source: orbitPicks, hovered: -1}
 	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true, restart: c.FollowFeed}
 	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true, restart: c.FriendFeed}
 	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true, restart: c.LiveRooms}
 	a.drama = picksPage(c, "短剧", 300214) // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
-	a.pages = []*page{a.picks}
+	a.pages = []*page{a.home}
 	a.img = newImages(c.Image, a.post)
 	a.setLiked, a.setSaved, a.likeComment = c.SetLiked, c.SetSaved, c.SetCommentLiked
 	a.replies = c.Replies
@@ -1604,7 +1623,7 @@ func Run() error {
 			TitleBarStyle:        mygo.TitleBarHidden,
 			TitleBarHeight:       topBarHeight,
 			TrafficLightPosition: &mygo.Point{X: 18, Y: 18},
-			BackgroundColor:      bgHex, // dark always, as Douyin's
+			BackgroundColor:      bgHex,
 			Content:              ui.View(a.view),
 		})
 		a.win.OnClosed(func() {
@@ -1625,6 +1644,7 @@ func Run() error {
 		})
 		a.startLogin()
 		a.watchUpdates()
+		mygo.Theme.OnUpdated(func() { a.post(func() {}) })
 		go func() {
 			if hot, err := c.HotSearch(); err == nil {
 				a.post(func() { a.hot = hot })
