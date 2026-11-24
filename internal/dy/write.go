@@ -229,7 +229,10 @@ return { http: r.status, code, text: t.slice(0, 300) };`
 // Because pageGet runs in the hidden WebView, verifyCenter can intercept fetch
 // and mount an invisible captcha modal that holds fetch pending; polling for
 // captcha DOM changes and bounding the wait returns ErrVerify promptly instead
-// of stalling writeGate for 30s.
+// of stalling writeGate for 30s. Douyin's pages always hold a hidden
+// iframe#nocaptcha-container (src …/rc-verifycenter/rmc-nocaptcha/…), which is
+// no captcha: only the captcha's own iframe (…/verifycenter/captcha/v2) or its
+// frameless wrapper counts (2026-11-24, measured on www.douyin.com and signPage).
 func (c *Client) pageGet(path, query string) ([]byte, error) {
 	writeGate.lock(true)
 	defer writeGate.unlock()
@@ -251,7 +254,7 @@ const hasCaptcha = () => {
       if (tag !== "SCRIPT" && tag !== "STYLE" && tag !== "LINK") return true;
     }
   }
-  return !!document.querySelector(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='captcha'], iframe[src*='verifycenter']");
+  return !!document.querySelector(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper");
 };
 return await new Promise((resolve, reject) => {
   let done = false;
