@@ -630,6 +630,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					a.playbackCover(c, s.v.Cover, ui.Contain)
 				}
 			}
+			a.slideIn(c, s, box.Bounds().H)
 			if a.paused && s.vp != nil {
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Children(func() {
 					ui.Icon(c, iconPlay).Size(60, 60).TextColor(white).Opacity(0.85)
@@ -669,6 +670,54 @@ func (a *app) playbackCover(c *ui.Context, url string, fit ui.Fit) {
 	ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGB(0, 0, 0)).PassThrough().Children(func() {
 		if bmp := a.img.get(url); bmp != nil {
 			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(fit).PassThrough()
+		}
+	})
+}
+
+// slide is a step from one video to the next (dir 1) or the last (-1): the
+// one left, by its cover, goes off the way the wheel went as the one
+// stepped to comes in behind it, as Douyin's do.
+type slide struct {
+	n    int    // which step, keying its element
+	from string // the cover of the video left
+	to   *slot  // the one stepped to: another showing, the slide is stale
+	dir  int
+}
+
+const slideTime = 320 * time.Millisecond
+
+// slideIn draws the step to the video shown, by covers, over the picture
+// (whose native layer cannot move) and h tall, until it is over; then the
+// picture shows as it is.
+func (a *app) slideIn(c *ui.Context, s *slot, h float32) {
+	sl := a.slide
+	if sl == nil || h <= 0 {
+		return
+	}
+	if sl.to != s {
+		a.slide = nil
+		return
+	}
+	box := ui.Box(c.Key(fmt.Sprint("slide", sl.n))).Absolute().Top(0).Left(0).Right(0).Bottom(0).Clip().PassThrough()
+	if started := ui.Local(box, "started", func() bool { return false }); !*started {
+		box.Jump("t", 0)
+		*started = true
+	}
+	t := box.AnimateTo("t", 1, ui.Animation{Duration: slideTime, Ease: func(x float32) float32 { return 1 - (1-x)*(1-x)*(1-x) }})
+	if t >= 0.999 {
+		a.slide = nil
+		return
+	}
+	off := h * float32(sl.dir)
+	box.Background(ui.RGB(0, 0, 0)).Children(func() {
+		for _, it := range []struct {
+			url string
+			y   float32
+		}{{sl.from, -off * t}, {s.v.Cover, off * (1 - t)}} {
+			page := ui.Box(c).Absolute().Left(0).Right(0).Top(it.y).Height(h)
+			if bmp := a.img.get(it.url); bmp != nil {
+				page.Children(func() { ui.Image(c, bmp).Fill().Fit(ui.Contain) })
+			}
 		}
 	})
 }

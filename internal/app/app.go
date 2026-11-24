@@ -177,6 +177,8 @@ type app struct {
 	held                *slot // at most one paused video behind a grid or child page
 	preload             nextVideo
 	lastNav             time.Time
+	slide               *slide    // the step to the video shown, sliding in over the last, or nil
+	slides              int       // steps so far, each slide's own
 	swipeAt             time.Time // the last trackpad scroll of the swipe on the stage
 	sheet               *sheet    // the comments open beside the video, or nil
 	group               groupPreview
@@ -1439,6 +1441,10 @@ func (a *app) step(d int) {
 		return
 	}
 	a.lastNav = now
+	if p.idx < len(p.list) { // past the end, 载入中… shows: nothing slides away
+		a.slides++
+		a.slide = &slide{n: a.slides, from: p.list[p.idx].v.Cover, to: p.list[i], dir: d}
+	}
 	p.idx, a.paused = i, false
 	a.sheet = nil // the comments were the last video's
 	a.fill()
