@@ -88,3 +88,27 @@ func TestImagesSizedAndReleasePixels(t *testing.T) {
 		t.Fatal("did not release CPU pixels after GPU upload frame")
 	}
 }
+
+func TestImagesFullUsesHigherResolutionThanThumbnail(t *testing.T) {
+	var buf bytes.Buffer
+	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 1200, 900)))
+	done := make(chan func(), 4)
+	im := newImages(func(string) ([]byte, error) { return buf.Bytes(), nil }, func(fn func()) { done <- fn })
+
+	im.getSized("same", commentPicEdge)
+	(<-done)()
+	thumb := im.getSized("same", commentPicEdge)
+	if w, _ := thumb.Size(); w != commentPicEdge {
+		t.Fatalf("thumb width %d, want %d", w, commentPicEdge)
+	}
+
+	im.getFull("same")
+	(<-done)()
+	full := im.getFull("same")
+	if full == nil {
+		t.Fatal("missing full image")
+	}
+	if w, h := full.Size(); w != 1200 || h != 900 {
+		t.Fatalf("full size %dx%d, want 1200x900", w, h)
+	}
+}

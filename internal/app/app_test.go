@@ -1471,7 +1471,7 @@ func TestCommentEmojiAndPics(t *testing.T) {
 	asked := make(chan string, 8)
 	a.img = newImages(func(u string) ([]byte, error) { asked <- u; return nil, errors.New("offline") }, func(func()) {})
 	a.emoji = map[string]string{"[赞]": "emoji:赞"}
-	a.sheet = &sheet{total: 1, done: true, items: []dy.Comment{{ID: "c1", Author: "甲", Text: "好[赞]看[不认识]", Pics: []string{"pic:1"}}}}
+	a.sheet = &sheet{total: 1, done: true, items: []dy.Comment{{ID: "c1", Author: "甲", Text: "好[赞]看[不认识]", Pics: []dy.CommentPic{{Thumb: "pic:1", Origin: "pic:1:full"}}}}}
 	tt := newTester(a)
 	tt.Frame()
 	got := map[string]bool{}

@@ -190,6 +190,7 @@ type app struct {
 	swipeAt             time.Time // the last trackpad scroll of the swipe on the stage
 	sheet               *sheet    // the comments open beside the video, or nil
 	group               groupPreview
+	picViewer           picViewer
 	liveChat            *liveRoomView
 
 	searchBox ui.Handle
@@ -203,8 +204,10 @@ type app struct {
 	orbit       orbitState        // 引力场 state (orbit.go)
 	winBg       string            // the window's background color, as last set (view)
 	img        *images                   // covers and avatars
-	emoji      map[string]string         // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
-	emojiCache map[emojiKey]emojiCached  // parsed emoji spans, bounded and cleared when emoji loads
+	emoji        map[string]string        // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
+	emojiList    []dy.Emoji               // Douyin's emojis in official order for the picker
+	emojiLoading bool                     // emoji list request in flight
+	emojiCache   map[emojiKey]emojiCached // parsed emoji spans, bounded and cleared when emoji loads
 
 	// The dock's other roots, each a grid; nil where there is no client.
 	follow, friends, live, drama *page
@@ -262,6 +265,10 @@ type app struct {
 	setLiked, setSaved func(id string, on bool) error
 	// likeComment likes a comment or a reply of a video, or takes it back; a test puts its own.
 	likeComment func(videoID, cid string, reply, on bool) error
+	// publishComment posts a comment or reply; a test puts its own.
+	publishComment func(req dy.PublishCommentReq) (dy.Comment, error)
+	// uploadCommentImage uploads a comment image to ImageX; a test puts its own.
+	uploadCommentImage func(data []byte, fileName, userID string, measured dy.CommentImage) (dy.CommentImage, error)
 	// replies pages through a comment's replies; a test puts its own.
 	replies  func(videoID, commentID string) dy.Pager[dy.Comment]
 	listen   bool    // 听抖音: the cover in the picture's place, the sound on
@@ -777,6 +784,7 @@ type sheet struct {
 
 	threads map[string]*thread // the replies of comments, by comment ID, once asked for
 	liking  map[string]bool    // the comments, by ID, whose like is on its way
+	draft   commentDraft       // the comment being composed at the bottom of the panel
 
 	related bool // the 相关推荐 tab shown rather than the comments
 	v       dy.Video
@@ -952,12 +960,20 @@ func (a *app) moreComments(sh *sheet) {
 // escape leaves a chat for the inbox, closes what is open beside the page,
 // or else the page on top.
 func (a *app) escape() {
+	if a.picViewer.open {
+		a.picViewer.open = false
+		return
+	}
 	if chat := a.liveChat; chat != nil && chat.gifts.open {
 		chat.gifts.open = false
 		return
 	}
 	if a.group.open {
 		a.group.open = false
+		return
+	}
+	if a.sheet != nil && a.sheet.draft.emojiOpen {
+		a.sheet.draft.emojiOpen = false
 		return
 	}
 	if a.theater { // out of 网页全屏 or full screen first
@@ -1725,6 +1741,7 @@ func Run() error {
 	a.img = newImages(c.Image, a.post)
 	a.img.releasePixels = true
 	a.setLiked, a.setSaved, a.likeComment = c.SetLiked, c.SetSaved, c.SetCommentLiked
+	a.publishComment, a.uploadCommentImage = c.PublishComment, c.UploadCommentImage
 	a.replies = c.Replies
 	a.sendShare = func(id, name string) error { return c.ShareTo(id, name, false) }
 	a.setLater = c.SetWatchLater

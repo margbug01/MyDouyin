@@ -491,12 +491,17 @@ func TestLiveReplies(t *testing.T) {
 // A comment's images and sticker, as the lists give them, are its pictures.
 func TestCommentPics(t *testing.T) {
 	var x comment
-	err := json.Unmarshal([]byte(`{"cid":"1","text":"好[赞]","image_list":[{"medium_url":{"url_list":["i1","i2"]}},{"medium_url":{"url_list":[]}}],
+	err := json.Unmarshal([]byte(`{"cid":"1","text":"好[赞]","image_list":[{"medium_url":{"url_list":["i1","i2"]},"origin_url":{"url_list":["o1"]}},{"medium_url":{"url_list":["i3"]}},{"medium_url":{"url_list":[]}}],
 		"sticker":{"static_url":{"url_list":["s1"]},"animate_url":{"url_list":["a1"]}}}`), &x)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cm := x.comment(); cm.Text != "好[赞]" || !slices.Equal(cm.Pics, []string{"i1", "s1"}) {
+	want := []CommentPic{
+		{Thumb: "i1", Origin: "o1"},
+		{Thumb: "i3", Origin: "i3"},
+		{Thumb: "s1", Origin: "a1", Sticker: true},
+	}
+	if cm := x.comment(); cm.Text != "好[赞]" || !slices.Equal(cm.Pics, want) {
 		t.Fatalf("comment: %+v", cm)
 	}
 	if err := json.Unmarshal([]byte(`{"cid":"2","text":"t","sticker":null,"image_list":null}`), &x); err != nil || x.comment().Pics != nil {

@@ -807,6 +807,21 @@ func (c *Client) Following(secUID string) Pager[User] {
 	})
 }
 
+// CommentPic is a picture or sticker carried by a comment.
+type CommentPic struct {
+	Thumb   string // medium or thumbnail URL for the comment list
+	Origin  string // full-resolution (or animated) URL for viewing
+	Sticker bool
+}
+
+// Full returns Origin if present, otherwise Thumb.
+func (p CommentPic) Full() string {
+	if p.Origin != "" {
+		return p.Origin
+	}
+	return p.Thumb
+}
+
 // Comment is a comment on a video, or a reply to one.
 type Comment struct {
 	ID, Author, Text, Place string // Place is the region Douyin shows, as 广东
@@ -814,8 +829,8 @@ type Comment struct {
 	ReplyTo                 string // in a reply to a reply, whom it answers
 	Likes, Replies          int
 	Time                    time.Time
-	Liked                   bool     // the user logged in has liked it
-	Pics                    []string // pictures it carries, its images then its sticker; Text has its [表情] (Emojis)
+	Liked                   bool         // the user logged in has liked it
+	Pics                    []CommentPic // pictures it carries, its images then its sticker; Text has its [表情] (Emojis)
 	Links                   []CommentLink
 }
 
@@ -836,9 +851,12 @@ type comment struct {
 	Digged  int    `json:"user_digged"`
 	Images  []struct {
 		Medium addr `json:"medium_url"`
+		Thumb  addr `json:"thumb_url"`
+		Origin addr `json:"origin_url"`
 	} `json:"image_list"`
 	Sticker *struct {
-		Static addr `json:"static_url"` // a GIF, animated or not
+		Static  addr `json:"static_url"` // a GIF, animated or not
+		Animate addr `json:"animate_url"`
 	}
 }
 
@@ -846,19 +864,39 @@ func (x comment) comment() Comment {
 	cm := Comment{ID: x.CID, Author: x.User.Nickname, Avatar: x.User.Avatar.first(), Text: x.Text, Place: x.Place, ReplyTo: x.ReplyTo,
 		Likes: x.Likes, Replies: x.Replies, Time: time.Unix(x.Time, 0), Liked: x.Digged != 0, Links: x.links()}
 	for _, im := range x.Images {
-		if u := im.Medium.first(); u != "" {
-			cm.Pics = append(cm.Pics, u)
+		thumb := firstNonEmpty(im.Medium.first(), im.Thumb.first(), im.Origin.first())
+		origin := firstNonEmpty(im.Origin.first(), thumb)
+		if thumb != "" {
+			cm.Pics = append(cm.Pics, CommentPic{Thumb: thumb, Origin: origin})
 		}
 	}
-	if x.Sticker != nil && x.Sticker.Static.first() != "" {
-		cm.Pics = append(cm.Pics, x.Sticker.Static.first())
+	if x.Sticker != nil {
+		thumb := firstNonEmpty(x.Sticker.Static.first(), x.Sticker.Animate.first())
+		origin := firstNonEmpty(x.Sticker.Animate.first(), thumb)
+		if thumb != "" {
+			cm.Pics = append(cm.Pics, CommentPic{Thumb: thumb, Origin: origin, Sticker: true})
+		}
 	}
 	return cm
 }
 
-// Emojis are Douyin's emoji, the pictures of the names comments write them
-// with, as [微笑].
-func (c *Client) Emojis() (map[string]string, error) {
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Emoji is a Douyin inline text emoji, as [微笑], in official display order.
+type Emoji struct {
+	Name string
+	URL  string
+}
+
+// EmojiList returns Douyin's emojis in official order.
+func (c *Client) EmojiList() ([]Emoji, error) {
 	var r struct {
 		status
 		List []struct {
@@ -869,11 +907,27 @@ func (c *Client) Emojis() (map[string]string, error) {
 	if err := c.getJSON("/aweme/v1/web/emoji/list", "", &r); err != nil {
 		return nil, err
 	}
-	m := make(map[string]string, len(r.List))
+	out := make([]Emoji, 0, len(r.List))
+	seen := make(map[string]bool, len(r.List))
 	for _, e := range r.List {
-		if u := e.URL.first(); e.Name != "" && u != "" {
-			m[e.Name] = u
+		if u := e.URL.first(); e.Name != "" && u != "" && !seen[e.Name] {
+			seen[e.Name] = true
+			out = append(out, Emoji{Name: e.Name, URL: u})
 		}
+	}
+	return out, nil
+}
+
+// Emojis are Douyin's emoji, the pictures of the names comments write them
+// with, as [微笑].
+func (c *Client) Emojis() (map[string]string, error) {
+	list, err := c.EmojiList()
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(list))
+	for _, e := range list {
+		m[e.Name] = e.URL
 	}
 	return m, nil
 }

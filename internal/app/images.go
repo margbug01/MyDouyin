@@ -36,14 +36,15 @@ type picture struct {
 }
 
 const (
-	keepPictures   = 48
-	pictureBudget  = 12 << 20 // decoded pixels; GPU textures may hold another copy
-	pictureEdge    = 720
-	coverEdge      = 540
-	thumbEdge      = 320
-	commentPicEdge = 256
-	avatarEdge     = 160
-	emojiEdge      = 64
+	keepPictures    = 48
+	pictureBudget   = 12 << 20 // decoded pixels; GPU textures may hold another copy
+	commentFullEdge = 1600
+	pictureEdge     = 720
+	coverEdge       = 540
+	thumbEdge       = 320
+	commentPicEdge  = 256
+	avatarEdge      = 160
+	emojiEdge       = 64
 )
 
 func newImages(fetch func(string) ([]byte, error), post func(func())) *images {
@@ -60,13 +61,26 @@ func (im *images) get(url string) *ui.Bitmap {
 // getSized returns the picture at url scaled to fit within maxEdge pixels on
 // its longest side, keeping memory proportional to the display size.
 func (im *images) getSized(url string, maxEdge int) *ui.Bitmap {
+	return im.getKeyed(url, url, maxEdge)
+}
+
+// getFull returns the picture at url decoded up to commentFullEdge under a
+// distinct cache key so a lightbox never reuses a 256px comment thumbnail.
+func (im *images) getFull(url string) *ui.Bitmap {
+	if url == "" {
+		return nil
+	}
+	return im.getKeyed("@full:"+url, url, commentFullEdge)
+}
+
+func (im *images) getKeyed(key, url string, maxEdge int) *ui.Bitmap {
 	if im == nil || url == "" {
 		return nil
 	}
 	if maxEdge <= 0 {
 		maxEdge = pictureEdge
 	}
-	p := im.m[url]
+	p := im.m[key]
 	if p == nil {
 		select {
 		case im.slots <- struct{}{}:
@@ -74,7 +88,7 @@ func (im *images) getSized(url string, maxEdge int) *ui.Bitmap {
 			return nil // the next redraw retries visible pictures; no unbounded map or queue
 		}
 		p = &picture{loading: true, used: im.frame}
-		im.m[url] = p
+		im.m[key] = p
 		go im.load(url, p, maxEdge)
 		return nil
 	}
