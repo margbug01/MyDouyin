@@ -573,3 +573,124 @@ func testGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type funcRT func(*http.Request) (*http.Response, error)
+
+func (f funcRT) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestCheckLogin(t *testing.T) {
+	var gotQuery, gotCookie, gotUIFID string
+	var body string
+	var status int
+	var verifyHeader string
+	c := &Client{
+		http: &http.Client{Transport: funcRT(func(r *http.Request) (*http.Response, error) {
+			gotQuery = r.URL.RawQuery
+			gotCookie = r.Header.Get("Cookie")
+			gotUIFID = r.Header.Get("uifid")
+			h := http.Header{}
+			if verifyHeader != "" {
+				h.Set("X-Vc-Bdturing-Parameters", verifyHeader)
+			}
+			return &http.Response{StatusCode: status, Status: fmt.Sprintf("%d", status), Header: h, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})},
+		signer: sign.New(ua),
+	}
+	cs := []Cookie{
+		{Name: "sessionid", Value: "s1"},
+		{Name: "UIFID", Value: "u1"},
+		{Name: "msToken", Value: "real_ms_token_123"},
+		{Name: "s_v_web_id", Value: "verify_real_fp"},
+	}
+
+	status, body, verifyHeader = 200, `{"status_code":0,"user":{"sec_uid":"MS4wLjAB"}}`, ""
+	ok, err := c.CheckLogin(cs)
+	if err != nil || !ok {
+		t.Fatalf("valid login: ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(gotQuery, "msToken=real_ms_token_123") || !strings.Contains(gotQuery, "verifyFp=verify_real_fp") {
+		t.Fatalf("expected cookie tokens in query, got %q", gotQuery)
+	}
+	if gotUIFID != "u1" || !strings.Contains(gotCookie, "sessionid=s1") {
+		t.Fatalf("headers: uifid=%q cookie=%q", gotUIFID, gotCookie)
+	}
+	if c.cookies().cookie != "" {
+		t.Fatalf("CheckLogin mutated client cookies: %q", c.cookies().cookie)
+	}
+
+	for _, loggedOut := range []string{`{"status_code":8}`, `{"status_code":0,"user":null}`, `{"status_code":0,"user":{"sec_uid":""}}`} {
+		body = loggedOut
+		ok, err = c.CheckLogin(cs)
+		if err != nil || ok {
+			t.Fatalf("logged out %s: ok=%v err=%v", loggedOut, ok, err)
+		}
+	}
+
+	status, body, verifyHeader = 200, "", "eyJ0eXBlIjoidmVyaWZ5In0="
+	if ok, err := c.CheckLogin(cs); err == nil || ok {
+		t.Fatalf("verify challenge: ok=%v err=%v", ok, err)
+	}
+	status, body, verifyHeader = 500, "err", ""
+	if ok, err := c.CheckLogin(cs); err == nil || ok {
+		t.Fatalf("server error: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestRepliesRecoverAfterCooldownAndReset(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	now := time.Unix(1_700_000_000, 0)
+	directCalls := 0
+	holdBack := true
+	c := &Client{
+		http: &http.Client{Transport: funcRT(func(r *http.Request) (*http.Response, error) {
+			directCalls++
+			if holdBack {
+				h := http.Header{"X-Vc-Bdturing-Parameters": {"eyJ0eXBlIjoidmVyaWZ5In0="}}
+				return &http.Response{StatusCode: 200, Status: "200 OK", Header: h, Body: io.NopCloser(strings.NewReader(""))}, nil
+			}
+			return &http.Response{StatusCode: 200, Status: "200 OK", Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"status_code":0,"comments":[{"cid":"r2","text":"直连回复"}],"cursor":1,"has_more":0}`))}, nil
+		})},
+		signer:        sign.New(ua),
+		replyCooldown: 5 * time.Minute,
+		nowFunc:       func() time.Time { return now },
+	}
+	c.login.Store(&login{cookie: "sessionid=s"})
+	testGuard(t)
+	w := &fakeWeb{
+		replies: []string{reply(`{"status_code":0,"comments":[{"cid":"r1","text":"网页回复"}],"cursor":1,"has_more":0}`)},
+		cookies: []Cookie{{Name: "sessionid", Value: "s"}, {Name: "msToken", Value: "fresh_token"}},
+	}
+	c.SetWeb(w)
+
+	rs, err := c.Replies("1", "2")()
+	if err != nil || len(rs) != 1 || rs[0].Text != "网页回复" || directCalls != 1 || len(w.scripts) != 1 {
+		t.Fatalf("first fallback: rs=%+v err=%v direct=%d scripts=%d", rs, err, directCalls, len(w.scripts))
+	}
+	if c.cookies().msToken != "fresh_token" {
+		t.Fatalf("pageGet did not sync renewed cookies: %+v", c.cookies())
+	}
+
+	rs, err = c.Replies("1", "2")()
+	if err != nil || len(rs) != 1 || directCalls != 1 || len(w.scripts) != 2 {
+		t.Fatalf("during cooldown: rs=%+v err=%v direct=%d scripts=%d", rs, err, directCalls, len(w.scripts))
+	}
+
+	holdBack = false
+	now = now.Add(6 * time.Minute)
+	rs, err = c.Replies("1", "2")()
+	if err != nil || len(rs) != 1 || rs[0].Text != "直连回复" || directCalls != 2 || len(w.scripts) != 2 {
+		t.Fatalf("after cooldown: rs=%+v err=%v direct=%d scripts=%d", rs, err, directCalls, len(w.scripts))
+	}
+
+	holdBack = true
+	if _, err := c.Replies("1", "2")(); err != nil {
+		t.Fatalf("re-enter cooldown: %v", err)
+	}
+	holdBack = false
+	c.ResetReplyPage()
+	scriptsBefore := len(w.scripts)
+	rs, err = c.Replies("1", "2")()
+	if err != nil || len(rs) != 1 || rs[0].Text != "直连回复" || len(w.scripts) != scriptsBefore {
+		t.Fatalf("after reset: rs=%+v err=%v scripts=%d->%d", rs, err, scriptsBefore, len(w.scripts))
+	}
+}

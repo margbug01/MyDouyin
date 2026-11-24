@@ -15,8 +15,8 @@ import (
 // (web.go), so they are told in batches, the page open seconds at a time.
 const (
 	watchedAfter = 2 * time.Second // played this far, a video counts as watched
-	watchBatch   = 10              // told once this many are waiting
-	watchWait    = 2 * time.Minute // or once the first has waited this long
+	watchBatch   = 20              // told once this many are waiting
+	watchWait    = 8 * time.Minute // or once the first has waited this long
 )
 
 // markWatched queues v to tell Douyin it was watched, while logged in.
@@ -28,9 +28,18 @@ func (a *app) markWatched(v dy.Video) {
 	switch {
 	case len(a.watched) >= watchBatch:
 		a.sendWatchedNow()
+	case a.web.warmIdle():
+		a.sendWatchedNow()
 	case len(a.watched) == 1:
 		a.sendWatchedLater()
 	}
+}
+
+func (a *app) flushWatchedIfWarm() {
+	if a.watchSending || len(a.watched) == 0 || !a.signedIn || !a.web.warmIdle() {
+		return
+	}
+	a.sendWatchedNow()
 }
 
 // watchedCheck, with DY_WATCHED_CHECK naming a video not among the first
@@ -72,13 +81,20 @@ func (a *app) watchedCheck(id string) {
 }
 
 func (a *app) sendWatchedLater() {
-	time.AfterFunc(watchWait, func() { a.post(a.sendWatchedNow) })
+	if a.watchTimer != nil {
+		a.watchTimer.Stop()
+	}
+	a.watchTimer = time.AfterFunc(watchWait, func() { a.post(a.sendWatchedNow) })
 }
 
 // sendWatchedNow tells Douyin of the videos waiting, one batch at a time.
 // shortcut: those waiting when the app quits are not told (the page goes
 // with the window); keep them on disk if that loses too many.
 func (a *app) sendWatchedNow() {
+	if a.watchTimer != nil {
+		a.watchTimer.Stop()
+		a.watchTimer = nil
+	}
 	if a.watchSending || len(a.watched) == 0 {
 		return
 	}

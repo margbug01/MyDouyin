@@ -259,6 +259,7 @@ type app struct {
 	sendWatched  func(id, authorUID string) error
 	watched      []dy.Video // watched, not yet told
 	watchSending bool
+	watchTimer   *time.Timer
 
 	settingsOpen bool     // the settings dialog (settings.go)
 	settingsFile string   // where the settings are kept, "" not to keep them
@@ -1587,9 +1588,13 @@ func Run() error {
 	a.setSpeed(1)
 	a.loadSettings(settingsFile())
 	os.RemoveAll(a.dir) // leftovers of a crashed run
+	if os.Getenv("DY_LIVE_WRITE") != "" {
+		mygo.App.SetActivationPolicy(mygo.ActivationPolicyProhibited)
+	}
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "MyDouyin",
+			Hidden:    os.Getenv("DY_LIVE_WRITE") != "",
 			Width:     1280,
 			Height:    820,
 			MinWidth:  960,
@@ -1605,6 +1610,10 @@ func Run() error {
 		a.win.OnClosed(func() {
 			a.preload.close()
 			a.closeLiveRoom()
+			if a.watchTimer != nil {
+				a.watchTimer.Stop()
+				a.watchTimer = nil
+			}
 			a.web.closed = true
 			a.web.destroy()
 			for _, p := range a.pages {

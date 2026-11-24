@@ -19,26 +19,22 @@ import (
 
 // web is the app's Douyin page (dy.Web), in WebKit: the user logs in there
 // by scanning its code, and writes go from it, signed and bound to this
-// device by Douyin's own scripts. It is made when first wanted, hidden,
-// and let go after webIdle without use, unless it shows. Its fields belong
-// to the UI goroutine; its dy.Web methods are for the others.
-//
-// It must be Douyin's real page, whose 141 scripts hold its process at
-// 340–520 MB. A page of only the security scripts (c50de03, 59 MB) signs,
-// but a like from it got 用户未登录 and lost the login, twice, the second
-// time with no other copy of the app running (2026-11-16 23:01). Blocking
-// its images, media and fonts saves under 10 MB; blocking its other
-// scripts keeps the security SDK, which they load, from loading. Lighter
-// logged out, /downloadpage/pc peaked as high logged in (434–448 MB against
-// 359–423), though every write held from it (2026-11-16 23:13).
+// device by Douyin's own scripts. Writes and pageGet start on signPage
+// (signpage.go, ~60-85 MB) with Douyin's official bdms, ucSecureConsumerSDK,
+// and DTraitSDK, and fall back to the full douyinHome page if local signing
+// material is missing or the signer does not reach ready. Login, captcha, and
+// ShareTo load the real Douyin page directly. It is let go after webIdle
+// without use, unless it shows. Its fields belong to the UI goroutine; its
+// dy.Web methods are for the others.
 type web struct {
-	a       *app
-	v       *mygo.WebView
-	layout  bool // laid out under the app, for a script that finds things by their place
-	idle    *time.Timer
-	idleGen int
-	busy    int // scripts or navigation still using the page
-	closed  bool
+	a        *app
+	v        *mygo.WebView
+	signOnly bool // loaded signPage rather than a full Douyin page
+	layout   bool // laid out under the app, for a script that finds things by their place
+	idle     *time.Timer
+	idleGen  int
+	busy     int // scripts or navigation still using the page
+	closed   bool
 }
 
 const (
@@ -65,6 +61,7 @@ func (w *web) open(url string) error {
 	defer w.touch()
 	if w.v != nil {
 		if url != "" {
+			w.signOnly = false
 			return w.v.Page().LoadURL(url)
 		}
 		return nil
@@ -78,6 +75,7 @@ func (w *web) open(url string) error {
 	}
 	v.Page().SetAudioMuted(true)
 	w.v = v
+	w.signOnly = false
 	return nil
 }
 
@@ -114,23 +112,54 @@ func (w *web) destroy() {
 		w.v.Destroy()
 		w.v = nil
 	}
+	w.signOnly = false
 	w.touch()
+}
+
+func (w *web) warmIdle() bool {
+	return w.v != nil && !w.closed && w.busy == 0 && !w.layout && (w.a == nil || !w.a.loginOpen)
 }
 
 // use pins the page until an evaluation or navigation finishes, even past webIdle.
 func (w *web) use() func() {
 	w.a.call(func() { w.busy++; w.touch() })
-	return func() { w.a.call(func() { w.busy--; w.touch() }) }
+	return func() {
+		w.a.call(func() {
+			w.busy--
+			w.touch()
+			w.a.flushWatchedIfWarm()
+		})
+	}
 }
 
-// page is the page, made at douyinHome if there is none, once its
-// scripts are up: Douyin's security SDK (bdms), which signs what it sends.
+const signPageCheckJS = `
+if (!location.hostname.endsWith("douyin.com") || document.readyState !== "complete") return "wait";
+if (!window.__mdSignPage) return typeof window.bdms === "object" ? "ready" : "wait";
+if (typeof window.bdms !== "object" || window.__mdSignReady !== true) return "wait";
+if (typeof window.ucSecureConsumerSDK !== "object" || typeof window.DTraitSDK === "undefined") return "fallback";
+const st = window.ucSecureConsumerSDK.getStatus && window.ucSecureConsumerSDK.getStatus();
+if (!st) return "fallback";
+if (st.state === "ready") return "ready";
+if (st.state === "starting") return "wait";
+return "fallback";
+`
+
+const signPageTimeout = 6 * time.Second
+
+// page returns the signing page once its security SDKs are ready. When no page
+// exists yet it loads signPage first, falling back to full douyinHome if the
+// lightweight host cannot initialize ticket-guard signing.
 func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 	var p *mygo.Page
 	var err error
+	var startedSign bool
 	w.a.call(func() {
 		if w.v == nil {
-			err = w.open(douyinHome)
+			if err = w.open(""); err == nil {
+				w.signOnly = true
+				startedSign = true
+				w.v.Page().LoadHTML(signPage, douyinHome)
+			}
 		}
 		if err == nil {
 			w.touch()
@@ -140,15 +169,28 @@ func (w *web) page(ctx context.Context) (*mygo.Page, error) {
 	if err != nil {
 		return nil, err
 	}
+	fallbackAt := time.Now().Add(signPageTimeout)
 	for {
-		up, err := p.EvalContext(ctx, `return document.readyState === "complete" && typeof window.bdms === "object" && location.hostname.endsWith("douyin.com")`)
-		if err == nil && up == true {
-			return p, nil
+		state, err := p.EvalContext(ctx, signPageCheckJS)
+		if err == nil {
+			switch state {
+			case "ready":
+				return p, nil
+			case "fallback":
+				if startedSign {
+					startedSign = false
+					w.a.call(func() { _ = w.open(douyinHome) })
+				}
+			}
+		}
+		if startedSign && time.Now().After(fallbackAt) {
+			startedSign = false
+			w.a.call(func() { _ = w.open(douyinHome) })
 		}
 		select {
 		case <-ctx.Done():
 			return nil, errors.New("抖音页面没载入")
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(150 * time.Millisecond):
 		}
 	}
 }
@@ -202,10 +244,14 @@ func (a *app) startLogin() {
 	go func() {
 		cs, err := a.web.Cookies()
 		in := err == nil && dy.LoggedIn(cs)
-		if in { // a session cookie Douyin may have let go since: ask it
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			in = a.web.pageSignedIn(ctx)
-			cancel()
+		if in { // a session cookie Douyin may have let go since: ask over HTTP first
+			if ok, cerr := a.c.CheckLogin(cs); cerr == nil {
+				in = ok
+			} else {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				in = a.web.pageSignedIn(ctx)
+				cancel()
+			}
 		}
 		if in {
 			err = a.c.SaveCookies(cs)
@@ -490,7 +536,7 @@ func (a *app) verify(path string, retry func()) {
 		return
 	}
 	u := ""
-	if a.web.v == nil {
+	if a.web.v == nil || a.web.signOnly {
 		u = douyinHome
 	}
 	if err := a.web.open(u); err != nil {
@@ -508,6 +554,11 @@ func (a *app) verify(path string, retry func()) {
 		b, err := a.web.Eval(ctx, "const r = await fetch("+string(path)+`, { credentials: "include" });
 return r.status === 200 && (await r.text()).length > 0;`)
 		passed := err == nil && string(b) == "true"
+		if passed && a.c != nil {
+			a.c.SyncCookies()
+			_ = a.c.RefreshGuard()
+			a.c.ResetReplyPage()
+		}
 		a.post(func() {
 			if a.loginGen != gen { // closed already
 				return
@@ -572,6 +623,17 @@ func (a *app) liveWriteCheck(id string) {
 			fail("%s: %v", s.name, err)
 		}
 		took := time.Since(start)
+		if s.name == "like" {
+			var signOnly bool
+			var pid int
+			a.call(func() {
+				signOnly = a.web.signOnly
+				if a.web.v != nil {
+					pid = a.web.v.Page().ProcessID()
+				}
+			})
+			log.Printf("live write: web signOnly=%v pid=%d", signOnly, pid)
+		}
 		var v dy.Video
 		for range 10 { // what Douyin says of the video catches up in a few seconds
 			time.Sleep(time.Second)

@@ -33,10 +33,31 @@ type Client struct {
 	web     Web                   // the app's Douyin page, which writes go through (write.go)
 	imSeq   atomic.Int32          // the IM requests' sequence
 	refresh atomic.Int32          // the feed's page, which two lists of it share
-	// replyPage: Douyin held replies back for its verification, which only the
-	// page passes; they are read from the page from then on (pageGet).
-	replyPage atomic.Bool
+	// replyPageUntil holds a UnixNano deadline while Replies routes through
+	// pageGet after Douyin held direct Go requests back for verification.
+	replyPageUntil atomic.Int64
+	replyCooldown  time.Duration
+	nowFunc        func() time.Time
 }
+
+const replyPageCooldown = 10 * time.Minute
+
+func (c *Client) now() time.Time {
+	if c.nowFunc != nil {
+		return c.nowFunc()
+	}
+	return time.Now()
+}
+
+func (c *Client) cooldown() time.Duration {
+	if c.replyCooldown > 0 {
+		return c.replyCooldown
+	}
+	return replyPageCooldown
+}
+
+// ResetReplyPage lets the next Replies call try the direct Go client again.
+func (c *Client) ResetReplyPage() { c.replyPageUntil.Store(0) }
 
 // Video is one entry of the recommend feed that has a playable video.
 type Video struct {
@@ -68,9 +89,26 @@ type Quality struct {
 	Size int64
 }
 
-// login is the cookies a request carries, and the UIFID among them, which a
-// request sends again as a header.
-type login struct{ cookie, uifid string }
+// login holds the formatted cookie header and tokens extracted from cookies.json.
+type login struct{ cookie, uifid, msToken, verifyFp string }
+
+func loginFromCookies(cs []Cookie) login {
+	var l login
+	parts := make([]string, len(cs))
+	for i, ck := range cs {
+		parts[i] = ck.Name + "=" + ck.Value
+		switch ck.Name {
+		case "UIFID":
+			l.uifid = ck.Value
+		case "msToken":
+			l.msToken = ck.Value
+		case "s_v_web_id":
+			l.verifyFp = ck.Value
+		}
+	}
+	l.cookie = strings.Join(parts, "; ")
+	return l
+}
 
 func (c *Client) cookies() login {
 	if l := c.login.Load(); l != nil {
@@ -201,19 +239,11 @@ func (c *Client) ReloadCookies() error {
 	if err != nil {
 		return err
 	}
-	var cookies []struct{ Name, Value string }
+	var cookies []Cookie
 	if err := json.Unmarshal(raw, &cookies); err != nil {
 		return err
 	}
-	var l login
-	parts := make([]string, len(cookies))
-	for i, ck := range cookies {
-		parts[i] = ck.Name + "=" + ck.Value
-		if ck.Name == "UIFID" {
-			l.uifid = ck.Value
-		}
-	}
-	l.cookie = strings.Join(parts, "; ")
+	l := loginFromCookies(cookies)
 	c.login.Store(&l)
 	return nil
 }
@@ -258,16 +288,27 @@ func (c *Client) Get(path, extra string) ([]byte, error) {
 // call is Get with any method and a form body, which a_bogus signs too, and
 // any headers more.
 func (c *Client) call(method, path, extra, body string, more ...http.Header) ([]byte, error) {
+	return c.callWithLogin(c.cookies(), method, path, extra, body, more...)
+}
+
+func (c *Client) callWithLogin(l login, method, path, extra, body string, more ...http.Header) ([]byte, error) {
 	q := baseQuery
 	if len(more) == 0 {
 		// A request signed with the ticket guard (guard.go) comes back empty with a made-up verifyFp.
-		fp := "verify_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + randString(8, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(12, alnum)
-		q += "&verifyFp=" + fp + "&fp=" + fp
+		fp := l.verifyFp
+		if fp == "" {
+			fp = "verify_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + randString(8, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(4, alnum) + "_" + randString(12, alnum)
+		}
+		q += "&verifyFp=" + url.QueryEscape(fp) + "&fp=" + url.QueryEscape(fp)
 	}
 	if extra != "" {
 		q += "&" + extra
 	}
-	q += "&msToken=" + randString(107, token)
+	ms := l.msToken
+	if ms == "" {
+		ms = randString(107, token)
+	}
+	q += "&msToken=" + url.QueryEscape(ms)
 	q += "&a_bogus=" + url.QueryEscape(c.signer.Sign(q, body))
 	req, err := http.NewRequest(method, "https://www.douyin.com"+path+"?"+q, strings.NewReader(body))
 	if err != nil {
@@ -278,7 +319,6 @@ func (c *Client) call(method, path, extra, body string, more ...http.Header) ([]
 	}
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Referer", "https://www.douyin.com/")
-	l := c.cookies()
 	req.Header.Set("Cookie", l.cookie)
 	if l.uifid != "" {
 		// Douyin's gateway (ArgusSecurityPlugin) refuses a user's posts with 403
@@ -307,6 +347,38 @@ func (c *Client) call(method, path, extra, body string, more ...http.Header) ([]
 		err = ErrVerify
 	}
 	return b, err
+}
+
+// CheckLogin asks Douyin over HTTP whether cs holds a live login, without
+// opening a browser page. A non-nil error means the check was inconclusive.
+func (c *Client) CheckLogin(cs []Cookie) (bool, error) {
+	b, err := c.callWithLogin(loginFromCookies(cs), "GET", "/aweme/v1/web/user/profile/self/", "", "")
+	if err != nil {
+		return false, err
+	}
+	if len(b) == 0 {
+		return false, errors.New("dy: empty login check reply")
+	}
+	var r struct {
+		Code *int `json:"status_code"`
+		User *struct {
+			SecUID string `json:"sec_uid"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return false, err
+	}
+	if r.Code == nil {
+		return false, errors.New("dy: login check missing status_code")
+	}
+	switch {
+	case *r.Code == 0 && r.User != nil && r.User.SecUID != "":
+		return true, nil
+	case *r.Code == 8 || (*r.Code == 0 && (r.User == nil || r.User.SecUID == "")):
+		return false, nil
+	default:
+		return false, fmt.Errorf("dy: login check status %d", *r.Code)
+	}
 }
 
 // ErrVerify is an answer held back until the device passes Douyin's
@@ -692,6 +764,9 @@ func (c *Client) Self() (User, error) {
 		return User{}, err
 	}
 	u := r.User
+	if u.SecUID == "" {
+		return User{}, ErrNeedLogin
+	}
 	return User{ID: u.SecUID, Name: u.Nickname, Signature: u.Signature, Avatar: u.Avatar.first(),
 		Following: u.Following, Followers: u.Followers, Liked: u.Liked, UID: u.UID}, nil
 }
@@ -829,18 +904,18 @@ func (c *Client) Replies(videoID, commentID string) Pager[Comment] {
 		q := fmt.Sprintf("item_id=%s&comment_id=%s&cut_version=1&cursor=%d&count=20&item_type=0", videoID, commentID, cursor)
 		var b []byte
 		for try := 0; try < 2 && len(b) == 0; try++ {
-			if c.replyPage.Load() {
+			if c.now().UnixNano() < c.replyPageUntil.Load() {
 				var err error
 				if b, err = c.pageGet(path, q); err != nil {
 					return nil, false, err
 				}
 				break
 			}
-			h, err := guardHeaders(path, time.Now())
+			h, err := guardHeaders(path, c.now())
 			if err == nil {
 				b, err = c.call("GET", path, q, "", h)
 				if errors.Is(err, ErrVerify) {
-					c.replyPage.Store(true)
+					c.replyPageUntil.Store(c.now().Add(c.cooldown()).UnixNano())
 					try-- // the same try, from the page
 					continue
 				}

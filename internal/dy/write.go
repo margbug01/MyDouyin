@@ -198,7 +198,15 @@ return { http: r.status, text: await r.text() };`)
 	case r.Text == "":
 		return nil, ErrVerify // the page is held back too: it has to pass first
 	}
+	c.syncCookies()
 	return []byte(r.Text), nil
+}
+
+// SyncCookies saves the page's current douyin.com cookies when they hold a login.
+func (c *Client) SyncCookies() {
+	if c.web != nil {
+		c.syncCookies()
+	}
 }
 
 // syncCookies saves the page's cookies, which it renews as it goes, while
