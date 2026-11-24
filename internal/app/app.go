@@ -811,6 +811,9 @@ func (a *app) comments(s *slot) {
 	if len(a.sheet.items) == 0 { // not fetched ahead, or that failed: again
 		a.moreComments(a.sheet)
 	}
+	if a.signedIn {
+		a.web.warm() // for the replies, which Douyin gives only the page, and the likes
+	}
 }
 
 // prefetchComments fetches the first page of s's comments: Douyin takes some
@@ -1620,29 +1623,71 @@ func (a *app) openAuthor(p *page, name, id string) {
 }
 
 // selfCheck (DY_SHOT=dir) walks through what the last change touched, as
-// clicks would, saves a shot of each step and quits: now the comments'
-// emoji and pictures. It opens the comments of each video DY_SHOT_VIDEOS
-// names, comma separated, and saves them once loaded (1.png, 2.png…).
+// clicks would, saves a shot of each step and quits: now the replies, which
+// go through the page kept warm while the comments show. For each video
+// DY_SHOT_VIDEOS names, comma separated, it opens the comments, expands the
+// replies of the first comment that has some at once and of the second one
+// past webIdle, logs how long each took, and saves a shot after each
+// (1-1.png, 1-2.png…). A verification Douyin asks for waits for the user.
 func (a *app) selfCheck(dir string) {
 	time.Sleep(3 * time.Second) // the feed up
+	for in, start := false, time.Now(); !in && time.Since(start) < 30*time.Second; time.Sleep(200 * time.Millisecond) {
+		a.call(func() { in = a.signedIn }) // the page is warmed for a login only
+	}
 	for i, id := range strings.Split(os.Getenv("DY_SHOT_VIDEOS"), ",") {
 		v, err := a.c.Video(id)
 		if err != nil {
 			log.Println("video:", err)
 			os.Exit(1)
 		}
-		a.post(func() {
+		var sh *sheet
+		a.call(func() {
 			mygo.App.Focus() // a window under others is not drawn, nor its shot
 			s := &slot{v: v}
 			a.open(&page{title: "评论", done: true, list: []*slot{s}})
 			a.comments(s)
+			sh = a.sheet
 		})
-		time.Sleep(15 * time.Second) // the comments, the emoji and the pictures loaded
-		b, err := a.capture(a.win)
-		if err == nil {
-			err = os.WriteFile(filepath.Join(dir, fmt.Sprint(i+1, ".png")), b, 0o644)
+		var withReplies []dy.Comment
+		for start := time.Now(); len(withReplies) < 2 && time.Since(start) < 15*time.Second; time.Sleep(100 * time.Millisecond) {
+			a.call(func() {
+				withReplies = withReplies[:0]
+				for _, cm := range sh.items {
+					if cm.Replies > 0 {
+						withReplies = append(withReplies, cm)
+					}
+				}
+			})
 		}
-		log.Println("shot", i+1, id, err)
+		for j, wait := range []time.Duration{0, webIdle + 2*time.Second} {
+			if j >= len(withReplies) {
+				log.Printf("self check: %s: %d comments with replies, wanted %d", id, len(withReplies), j+1)
+				os.Exit(1)
+			}
+			time.Sleep(wait)
+			cm := withReplies[j]
+			var th *thread
+			var n int
+			var msg string
+			var asked, asking bool
+			start := time.Now()
+			a.call(func() { a.toggleReplies(cm); th = sh.threads[cm.ID] })
+			for time.Since(start) < 2*time.Minute {
+				a.call(func() { n, msg, asking = len(th.items), th.msg, a.loginOpen && a.login.verify })
+				asked = asked || asking
+				if n > 0 || msg != "" && !asking {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			log.Printf("self check: %s replies %d (waited %v): %d in %v, verification asked %v, msg %q",
+				id, j+1, wait, n, time.Since(start).Round(10*time.Millisecond), asked, msg)
+			b, err := a.capture(a.win)
+			if err == nil {
+				err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d-%d.png", i+1, j+1)), b, 0o644)
+			}
+			log.Println("shot", i+1, j+1, err)
+		}
 	}
 	os.Exit(0)
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func TestWebIdleKeepsPageInUse(t *testing.T) {
-	for _, held := range []string{"script", "login", "layout", "stale timer"} {
+	for _, held := range []string{"script", "login", "layout", "stale timer", "comments"} {
 		t.Run(held, func(t *testing.T) {
 			a := &app{}
 			w := &a.web
@@ -33,6 +33,8 @@ func TestWebIdleKeepsPageInUse(t *testing.T) {
 				w.layout = true
 			case "stale timer":
 				w.touch()
+			case "comments": // their replies go through the page
+				a.signedIn, a.sheet = true, &sheet{}
 			}
 			page := w.v
 			w.expire(gen)

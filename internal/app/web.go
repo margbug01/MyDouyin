@@ -106,11 +106,27 @@ func (w *web) expire(gen int) {
 	if gen != w.idleGen || w.v == nil {
 		return
 	}
-	if w.busy > 0 || w.a.loginOpen || w.layout {
+	// While the comments show, logged in, their replies and likes go through the page (warm).
+	if w.busy > 0 || w.a.loginOpen || w.layout || w.a.sheet != nil && w.a.signedIn {
 		w.touch()
 		return
 	}
 	w.destroy()
+}
+
+// warm makes the page before it is asked for, so that what goes through it
+// then takes a page read (0.3–0.4 s) rather than a page made anew first
+// (about 1 s more, or several when signPage falls back to the full page;
+// measured 2026-11-24).
+func (w *web) warm() {
+	if w.v != nil || w.closed || w.a == nil || w.a.win == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		w.page(ctx)
+	}()
 }
 
 func (w *web) destroy() {
