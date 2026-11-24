@@ -114,18 +114,11 @@ func TestWatchedPiggybacksOnWarmWeb(t *testing.T) {
 		t.Fatalf("flushed=%q waiting=%d", told, len(a.watched))
 	}
 
+	// Each send uses the page, which would keep it up as long as videos are
+	// watched: what comes after waits for the next batch.
 	a.markWatched(dy.Video{ID: "v2", AuthorUID: "u2"})
-	if !a.watchSending {
-		t.Fatal("warm idle page did not flush newly watched video")
-	}
-	select {
-	case fn := <-a.posted:
-		fn()
-	case <-time.After(2 * time.Second):
-		t.Fatal("second watched flush did not complete")
-	}
-	if len(told) != 2 || told[1] != "v2/u2" {
-		t.Fatalf("flushed=%q", told)
+	if a.watchSending || len(a.watched) != 1 || a.watchTimer == nil || len(told) != 1 {
+		t.Fatalf("watched while warm: sending=%v waiting=%d timer=%v told=%q", a.watchSending, len(a.watched), a.watchTimer != nil, told)
 	}
 }
 

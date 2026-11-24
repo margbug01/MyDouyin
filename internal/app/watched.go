@@ -28,8 +28,6 @@ func (a *app) markWatched(v dy.Video) {
 	switch {
 	case len(a.watched) >= watchBatch:
 		a.sendWatchedNow()
-	case a.web.warmIdle():
-		a.sendWatchedNow()
 	case len(a.watched) == 1:
 		a.sendWatchedLater()
 	}
