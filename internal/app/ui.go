@@ -722,6 +722,18 @@ func (a *app) slideIn(c *ui.Context, s *slot, h float32) {
 	})
 }
 
+// listFade is how tall the foot of a list in a panel fades, and the room
+// the list keeps at its end, so its last row scrolls clear of the fade.
+const listFade = 24
+
+// listFoot fades the foot of the list filling its parent into the panel's
+// color, rather than cutting the row there in a hard line at the panel's
+// edge. The scroll bar beside the list stays clear of it.
+func listFoot(c *ui.Context) {
+	ui.Box(c).Absolute().Left(0).Right(barGutter).Bottom(0).Height(listFade).ZIndex(1).
+		Gradient(pal.raised.Alpha(0), pal.raised, 180).PassThrough()
+}
+
 func (a *app) playbackStatus(c *ui.Context, s *slot) {
 	err := s.err
 	if s.vp != nil && s.vp.Err() != nil {
@@ -1514,7 +1526,8 @@ var copyText = func(text string) error { return mygo.Clipboard.Write(transfer.Te
 
 // commentPanel is the comments of the video beside it, loaded a page at a time.
 func (a *app) commentPanel(c *ui.Context, sh *sheet) {
-	ui.Column(c.Key("comments")).Width(360).Radius(12).Background(pal.raised).Children(func() {
+	ui.Column(c.Key("comments")).Width(360).Radius(12).Clip().Background(pal.raised).Children(func() {
+		listFoot(c) // under the list of either tab, the last flow child
 		ui.Row(c).Padding(10, 8, 6, 16).Gap(18).AlignItems(ui.Center).Children(func() {
 			tab := func(label string, on bool) bool {
 				b := ui.ButtonBase(c.Key(label)).Column().Gap(4).AlignItems(ui.Center).FocusRing(false).Label(label)
@@ -1549,7 +1562,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 			a.relatedList(c, sh)
 			return
 		}
-		ui.Scroll(c.Key("comment-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
+		ui.Scroll(c.Key("comment-list")).Grow(1).Padding(0, 0, listFade, 0).Children(func() {
 			for i, cm := range sh.items {
 				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
 					a.avatar(c, pal, cm.Avatar, cm.Author, 30)
@@ -1730,7 +1743,7 @@ func (a *app) replyThread(c *ui.Context, sh *sheet, cm dy.Comment) {
 // relatedList is the 相关推荐 tab: the videos Douyin relates to the one
 // playing, each a cover beside its text, which plays it.
 func (a *app) relatedList(c *ui.Context, sh *sheet) {
-	ui.Scroll(c.Key("related-list")).Grow(1).Padding(4, 12, 12, 12).Gap(6).Children(func() {
+	ui.Scroll(c.Key("related-list")).Grow(1).Padding(4, 12, listFade, 12).Gap(6).Children(func() {
 		for i, v := range sh.rel {
 			b := ui.ButtonBase(c.Key(fmt.Sprint(i))).Row().Padding(6).Gap(10).Radius(10).AlignItems(ui.Start).Justify(ui.Start).FocusRing(false).Label(v.Desc)
 			if b.Hovered() {
@@ -1813,14 +1826,15 @@ func chip(c *ui.Context, label string, on bool) ui.Element {
 // notePanel is the notifications beside the page, loaded a page at a time:
 // who, what they did, and what it was about.
 func (a *app) notePanel(c *ui.Context, n *notes) {
-	ui.Column(c.Key("notes")).Width(360).Radius(12).Background(pal.raised).Children(func() {
+	ui.Column(c.Key("notes")).Width(360).Radius(12).Clip().Background(pal.raised).Children(func() {
+		listFoot(c) // under the list, the last flow child
 		ui.Row(c).Padding(10, 8, 6, 16).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "通知").FontSize(14).FontWeight(600).TextColor(pal.text).Grow(1)
 			if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭通知").Clicked() {
 				a.notes = nil
 			}
 		})
-		ui.Scroll(c.Key("note-list")).Grow(1).Padding(0, 0, 12, 0).Children(func() {
+		ui.Scroll(c.Key("note-list")).Grow(1).Padding(0, 0, listFade, 0).Children(func() {
 			for i, it := range n.items {
 				ui.Row(c.Key(fmt.Sprint(i))).Padding(10, 16).Gap(10).AlignItems(ui.Start).Children(func() {
 					a.avatar(c, pal, it.User.Avatar, it.User.Name, 34)
@@ -1867,7 +1881,7 @@ func (a *app) notePanel(c *ui.Context, n *notes) {
 // message, and a chat's messages once one is clicked, the user's on the
 // right. It only reads: replies are for the Douyin app.
 func (a *app) dmPanel(c *ui.Context, d *dms) {
-	ui.Column(c.Key("dms")).Width(360).Radius(12).Background(pal.raised).Children(func() {
+	ui.Column(c.Key("dms")).Width(360).Radius(12).Clip().Background(pal.raised).Children(func() {
 		var open *dy.Chat
 		if d.open >= 0 && d.open < len(d.chats) {
 			open = &d.chats[d.open]
@@ -1885,45 +1899,48 @@ func (a *app) dmPanel(c *ui.Context, d *dms) {
 				a.dms = nil
 			}
 		})
-		if open != nil {
-			a.chatView(c, open)
-		} else {
-			ui.Scroll(c.Key("chat-list")).Grow(1).Padding(0, 0, 8, 0).Children(func() {
-				for i, ch := range d.chats {
-					b := ui.ButtonBase(c.Key(ch.ID)).Row().Padding(10, 16).Gap(10).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(ch.Peer.Name)
-					if b.Hovered() {
-						b.Background(pal.hover)
-					}
-					b.Children(func() {
-						a.avatar(c, pal, ch.Peer.Avatar, ch.Peer.Name, 40)
-						ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() {
-							var m dy.Message
-							if len(ch.Msgs) > 0 {
-								m = ch.Msgs[len(ch.Msgs)-1]
-							}
-							ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-								ui.Text(c, ch.Peer.Name).FontSize(13.5).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).Grow(1)
-								ui.Text(c, ago(m.Time, time.Now())).FontSize(11).TextColor(pal.faint)
+		ui.Column(c).Grow(1).MinHeight(0).Children(func() { // the list, above the note at the foot
+			listFoot(c)
+			if open != nil {
+				a.chatView(c, open)
+			} else {
+				ui.Scroll(c.Key("chat-list")).Grow(1).Padding(0, 0, listFade, 0).Children(func() {
+					for i, ch := range d.chats {
+						b := ui.ButtonBase(c.Key(ch.ID)).Row().Padding(10, 16).Gap(10).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(ch.Peer.Name)
+						if b.Hovered() {
+							b.Background(pal.hover)
+						}
+						b.Children(func() {
+							a.avatar(c, pal, ch.Peer.Avatar, ch.Peer.Name, 40)
+							ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+								var m dy.Message
+								if len(ch.Msgs) > 0 {
+									m = ch.Msgs[len(ch.Msgs)-1]
+								}
+								ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+									ui.Text(c, ch.Peer.Name).FontSize(13.5).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).Grow(1)
+									ui.Text(c, ago(m.Time, time.Now())).FontSize(11).TextColor(pal.faint)
+								})
+								ui.Text(c, m.Text).FontSize(12.5).TextColor(pal.muted).SingleLine()
 							})
-							ui.Text(c, m.Text).FontSize(12.5).TextColor(pal.muted).SingleLine()
 						})
+						if b.Clicked() {
+							d.open = i
+						}
+					}
+					ui.Row(c).Padding(12, 16).Justify(ui.Center).Children(func() {
+						switch {
+						case d.loading:
+							ui.Text(c, "载入中…").FontSize(12).TextColor(pal.faint)
+						case d.msg != "":
+							ui.Text(c, d.msg).FontSize(12).TextColor(pal.faint)
+						case len(d.chats) == 0:
+							ui.Text(c, "没有私信").FontSize(12).TextColor(pal.faint)
+						}
 					})
-					if b.Clicked() {
-						d.open = i
-					}
-				}
-				ui.Row(c).Padding(12, 16).Justify(ui.Center).Children(func() {
-					switch {
-					case d.loading:
-						ui.Text(c, "载入中…").FontSize(12).TextColor(pal.faint)
-					case d.msg != "":
-						ui.Text(c, d.msg).FontSize(12).TextColor(pal.faint)
-					case len(d.chats) == 0:
-						ui.Text(c, "没有私信").FontSize(12).TextColor(pal.faint)
-					}
 				})
-			})
-		}
+			}
+		})
 		ui.Text(c, "只读，不会标为已读；回复请用抖音 App").FontSize(11).TextColor(pal.faint).Margin(6, 16, 12, 16)
 	})
 }
@@ -1931,7 +1948,7 @@ func (a *app) dmPanel(c *ui.Context, d *dms) {
 // chatView is a chat's messages as bubbles, the user's on the right in the
 // accent, the peer's on the left, Douyin's tips small in the middle.
 func (a *app) chatView(c *ui.Context, ch *dy.Chat) {
-	ui.Scroll(c.Key("chat:"+ch.ID)).Grow(1).Padding(8, 14).Gap(10).Children(func() {
+	ui.Scroll(c.Key("chat:"+ch.ID)).Grow(1).Padding(8, 14, listFade, 14).Gap(10).Children(func() {
 		for i, m := range ch.Msgs {
 			if m.Tip {
 				ui.Text(c.Key(fmt.Sprint(i)), m.Text).FontSize(11).TextColor(pal.faint).TextAlign(ui.Center).Margin(4, 16)

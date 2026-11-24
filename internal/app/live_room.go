@@ -185,7 +185,7 @@ func (a *app) addLiveMessages(chat *liveRoomView, s *slot, messages []dy.LiveMes
 }
 
 func (a *app) liveMessagePanel(c *ui.Context, chat *liveRoomView) {
-	ui.Column(c.Key("live-messages:" + chat.room.WebRID)).Width(316).Radius(12).Background(pal.raised).Children(func() {
+	ui.Column(c.Key("live-messages:" + chat.room.WebRID)).Width(316).Radius(12).Clip().Background(pal.raised).Children(func() {
 		ui.Row(c).Padding(12, 14).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "直播互动").FontSize(14).FontWeight(700).Grow(1)
 			if !chat.signedIn {
@@ -208,10 +208,13 @@ func (a *app) liveMessagePanel(c *ui.Context, chat *liveRoomView) {
 		if chat.scroll.Y >= chat.scroll.MaxY-3 {
 			chat.scroll.Y = math.MaxFloat32
 		}
-		ui.Scroll(c.Key("messages")).Grow(1).Padding(0, 14, 10, 14).TrackScroll(&chat.scroll).Children(func() {
-			for _, m := range chat.messages {
-				a.liveMessageLine(c, m)
-			}
+		ui.Column(c).Grow(1).MinHeight(0).Children(func() { // the list, above the field to write in
+			listFoot(c)
+			ui.Scroll(c.Key("messages")).Grow(1).Padding(0, 14, listFade, 14).TrackScroll(&chat.scroll).Children(func() {
+				for _, m := range chat.messages {
+					a.liveMessageLine(c, m)
+				}
+			})
 		})
 		a.liveCommentInput(c, chat)
 	})
