@@ -110,6 +110,9 @@ func (a *app) setOrbitSource(src orbitSource) {
 	a.orbit.source = src
 	a.orbit.userPicked = true
 	a.orbit.offset = 0
+	if src == orbitHistory && a.mine != nil {
+		a.freshHistory()
+	}
 	a.ensureOrbitLoaded()
 }
 

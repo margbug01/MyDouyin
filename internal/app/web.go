@@ -451,6 +451,11 @@ func (a *app) logout() {
 		a.root(a.picks)
 	}
 	a.me, a.follows, a.mine, a.later, a.stacks = dy.User{}, nil, nil, nil, nil
+	a.watched = nil // the account's, not the next one's
+	if a.watchTimer != nil {
+		a.watchTimer.Stop()
+		a.watchTimer = nil
+	}
 	a.web.destroy()
 	go func() {
 		err := a.c.Logout()

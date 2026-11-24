@@ -1,8 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -30,6 +32,64 @@ func (a *app) markWatched(v dy.Video) {
 		a.sendWatchedNow()
 	case len(a.watched) == 1:
 		a.sendWatchedLater()
+	}
+}
+
+// freshHistory has 观看历史 load anew once it shows, after what was watched
+// here and not yet told is told, so it is there.
+func (a *app) freshHistory() {
+	h := a.mine["观看历史"]
+	a.empty(h)
+	if len(a.watched) > 0 || a.watchSending {
+		h.fetching, a.historyWait = true, h.gen
+		a.sendWatchedNow()
+	}
+}
+
+// pendingWatched is what waited to be told when the app quit, and the
+// account it was watched on.
+type pendingWatched struct {
+	Account string      `json:"account"`
+	Videos  [][2]string `json:"videos"` // ID, the author's numeric ID
+}
+
+func (a *app) watchedFile() string {
+	return filepath.Join(filepath.Dir(a.settingsFile), "watched.json")
+}
+
+// keepWatched writes what waits to be told as the window closes, the page
+// that tells it going with the window.
+func (a *app) keepWatched() {
+	if a.settingsFile == "" || a.me.ID == "" || len(a.watched) == 0 {
+		return
+	}
+	k := pendingWatched{Account: a.me.ID}
+	for _, v := range a.watched {
+		k.Videos = append(k.Videos, [2]string{v.ID, v.AuthorUID})
+	}
+	b, _ := json.Marshal(k)
+	if err := os.WriteFile(a.watchedFile(), b, 0o600); err != nil {
+		log.Printf("douyin: %d videos watched not kept: %v", len(k.Videos), err)
+	}
+}
+
+// resumeWatched queues what an earlier run kept, the account logged in
+// being the one it was watched on; another's is dropped.
+func (a *app) resumeWatched(account string) {
+	if a.settingsFile == "" {
+		return
+	}
+	b, err := os.ReadFile(a.watchedFile())
+	if err != nil {
+		return
+	}
+	os.Remove(a.watchedFile())
+	var k pendingWatched
+	if json.Unmarshal(b, &k) != nil || k.Account != account {
+		return
+	}
+	for _, v := range k.Videos {
+		a.markWatched(dy.Video{ID: v[0], AuthorUID: v[1]})
 	}
 }
 
@@ -86,8 +146,6 @@ func (a *app) sendWatchedLater() {
 }
 
 // sendWatchedNow tells Douyin of the videos waiting, one batch at a time.
-// shortcut: those waiting when the app quits are not told (the page goes
-// with the window); keep them on disk if that loses too many.
 func (a *app) sendWatchedNow() {
 	if a.watchTimer != nil {
 		a.watchTimer.Stop()
@@ -113,6 +171,16 @@ func (a *app) sendWatchedNow() {
 		a.post(func() {
 			a.watchSending = false
 			switch {
+			case a.historyWait != 0 && len(a.watched) > 0: // 观看历史 waits for these too
+				a.sendWatchedNow()
+			case a.historyWait != 0:
+				if h := a.mine["观看历史"]; h != nil && h.gen == a.historyWait {
+					h.fetching = false
+					if c := a.cur(); c == h || a.isHome(c) && a.orbit.source == orbitHistory {
+						a.fill()
+					}
+				}
+				a.historyWait = 0
 			case len(a.watched) >= watchBatch:
 				a.sendWatchedNow()
 			case len(a.watched) > 0:

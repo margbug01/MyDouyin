@@ -271,6 +271,7 @@ type app struct {
 	watched      []dy.Video // watched, not yet told
 	watchSending bool
 	watchTimer   *time.Timer
+	historyWait  int // 观看历史's gen while it waits for them to be told to load (freshHistory), 0 none
 
 	settingsOpen bool     // the settings dialog (settings.go)
 	settingsFile string   // where the settings are kept, "" not to keep them
@@ -357,10 +358,14 @@ func (a *app) isMine(p *page) bool {
 	return false
 }
 
-// showMine shows 我的, at its tab name, as it was left.
+// showMine shows 我的, at its tab name, as it was left; 观看历史 shown from
+// elsewhere loads anew.
 func (a *app) showMine(name string) {
 	if p := a.mine[name]; p != nil {
 		a.mineTab = name
+		if name == "观看历史" && a.pages[0] != p {
+			a.freshHistory()
+		}
 		a.root(p)
 	}
 }
@@ -1113,6 +1118,13 @@ func (a *app) root(r *page) {
 // what comes is new, as Douyin's lists are recommendations (2026-11-19,
 // 精选 and 关注 shared nothing with the page before).
 func (a *app) refresh(p *page) {
+	a.empty(p)
+	a.sheet, a.paused = nil, false
+	a.fill()
+}
+
+// empty drops p's list, which loads anew once p shows.
+func (a *app) empty(p *page) {
 	p.gen++
 	p.fetching = false
 	for _, s := range p.list {
@@ -1123,8 +1135,6 @@ func (a *app) refresh(p *page) {
 	}
 	p.list, p.idx, p.playing, p.done, p.msg, p.paused = nil, 0, false, false, "", false
 	p.scroll = ui.ScrollState{}
-	a.sheet, a.paused = nil, false
-	a.fill()
 }
 
 // play plays p's video i, from its covers.
@@ -1156,6 +1166,9 @@ func (a *app) loadAccount() {
 		}
 		a.post(func() {
 			a.me, a.follows, a.unread = me, us, unread
+			if me.ID != "" {
+				a.resumeWatched(me.ID)
+			}
 			if a.later == nil {
 				a.later, a.laterBusy = map[string]bool{}, map[string]bool{}
 			}
@@ -1662,6 +1675,7 @@ func Run() error {
 			Content:              ui.View(a.view),
 		})
 		a.win.OnClosed(func() {
+			a.keepWatched()
 			a.preload.close()
 			a.closeLiveRoom()
 			if a.watchTimer != nil {
