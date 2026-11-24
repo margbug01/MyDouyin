@@ -447,10 +447,10 @@ func (a *app) finishLogin(gen int) {
 // what the account showed.
 func (a *app) logout() {
 	a.signedIn = false
-	if a.isMine(a.cur()) {
+	if a.isMine(a.pages[0]) {
 		a.root(a.picks)
 	}
-	a.me, a.follows, a.mine, a.later = dy.User{}, nil, nil, nil
+	a.me, a.follows, a.mine, a.later, a.stacks = dy.User{}, nil, nil, nil, nil
 	a.web.destroy()
 	go func() {
 		err := a.c.Logout()

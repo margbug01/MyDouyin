@@ -161,6 +161,12 @@ type page struct {
 
 	restart func() dy.Pager[dy.Video] // a root's list from the top, as refresh takes it; nil goes on with next
 
+	// A video played from 引力场 plays over its source's list, which fetches
+	// for both (playFromOrbit); fromGen is the source's gen then: refreshed
+	// since, its list is another.
+	from    *page
+	fromGen int
+
 	user  *dy.User  // an author's page: their profile atop the videos, once loaded
 	users []dy.User // a search's: the accounts found, atop the videos
 }
@@ -171,8 +177,9 @@ type app struct {
 	mainVideo, pipVideo nativeSurface
 	c                   *dy.Client
 	dir                 string
-	pages               []*page // the window shows the last
-	query               string  // the search box
+	pages               []*page           // the window shows the last
+	stacks              map[*page][]*page // each root's pages, as they were when another root was shown, by root
+	query               string            // the search box
 	paused              bool
 	held                *slot // at most one paused video behind a grid or child page
 	preload             nextVideo
@@ -954,6 +961,9 @@ func (a *app) post(fn func()) {
 
 // more fetches the next page of p's list.
 func (a *app) more(p *page) {
+	if p.from != nil {
+		p = p.from
+	}
 	if p.fetching || p.done {
 		return
 	}
@@ -974,7 +984,7 @@ func (a *app) more(p *page) {
 			for _, v := range vs {
 				p.list = append(p.list, &slot{v: v})
 			}
-			if p == a.cur() { // a page opened over p while it loaded prepares nothing of p
+			if c := a.cur(); c == p || c.from == p { // a page opened over p while it loaded prepares nothing of p
 				a.fill()
 			}
 		})
@@ -985,6 +995,13 @@ func (a *app) more(p *page) {
 // without creating another decoder.
 func (a *app) fill() {
 	p := a.cur()
+	if f := p.from; f != nil {
+		if f.gen == p.fromGen {
+			p.list = append(p.list, f.list[len(p.list):]...)
+		} else {
+			p.from, p.done = nil, true
+		}
+	}
 	defer a.preloadNextVideo(p)
 	if !p.plays() { // covers, the grid asking for more as it scrolls; only 精选's first plays
 		if a.isHome(p) {
@@ -1059,8 +1076,9 @@ func picksPage(c *dy.Client, title string, id int) *page {
 	return &page{title: title, next: c.Picks(id), grid: true, restart: func() dy.Pager[dy.Video] { return c.Picks(id) }}
 }
 
-// root shows r, the picks or the feed, with nothing over it; r shown
-// already, it is refreshed, as Douyin's sidebar does pressed again; the dock does the same.
+// root shows r with the pages that were over it when another root was
+// shown; pressed with pages over it, r alone; r shown already, it is
+// refreshed, as Douyin's sidebar does pressed again; the dock does the same.
 func (a *app) root(r *page) {
 	if len(a.pages) == 1 && a.cur() == r {
 		if r.grid && r.playing {
@@ -1076,7 +1094,18 @@ func (a *app) root(r *page) {
 			a.release(s)
 		}
 	}
-	a.pages, a.sheet, a.paused = []*page{r}, nil, r.paused
+	pages := []*page{r}
+	if a.pages[0] != r {
+		if a.stacks == nil {
+			a.stacks = map[*page][]*page{}
+		}
+		a.stacks[a.pages[0]] = a.pages
+		if s := a.stacks[r]; s != nil {
+			pages = s
+		}
+	}
+	delete(a.stacks, r)
+	a.pages, a.sheet, a.paused = pages, nil, pages[len(pages)-1].paused
 	a.fill()
 }
 

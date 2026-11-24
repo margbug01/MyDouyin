@@ -589,11 +589,14 @@ func (a *app) stage(c *ui.Context, p *page) {
 			return false
 		})
 		if p.idx >= len(p.list) {
-			text := "载入中…"
+			f, text := p, "载入中…"
+			if p.from != nil { // its source fetches
+				f = p.from
+			}
 			switch {
-			case p.msg != "":
-				text = p.msg
-			case p.done:
+			case f.msg != "":
+				text = f.msg
+			case f.done:
 				text = "没有结果"
 			}
 			picture.Center().Children(func() {

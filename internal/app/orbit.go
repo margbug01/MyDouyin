@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -133,20 +134,14 @@ func (a *app) cycleOrbit() {
 	a.orbit.offset = nextOff
 }
 
-// playFromOrbit opens srcPage playing at idx on top of the Orbital Home so
-// Escape or Back returns straight to the orbital canvas.
+// playFromOrbit plays src's video idx on top of the Orbital Home so Escape
+// or Back returns straight to the orbital canvas. src fetches what comes
+// next, for both.
 func (a *app) playFromOrbit(src *page, idx int) {
 	if src == nil || idx < 0 || idx >= len(src.list) {
 		return
 	}
-	playPage := &page{
-		title: src.title,
-		next:  src.next,
-		list:  append([]*slot(nil), src.list...),
-		idx:   idx,
-		done:  src.done,
-	}
-	a.open(playPage)
+	a.open(&page{title: src.title, list: slices.Clone(src.list), idx: idx, from: src, fromGen: src.gen})
 }
 
 const (
