@@ -9,7 +9,7 @@ import (
 	"douyin/internal/dy"
 )
 
-// The settings start from the defaults, open from the sidebar, take a
+// The settings start from the defaults, open from the dock, take a
 // switch, and are written once changed, as the bar's changes are; the next
 // launch reads them back.
 func TestSettings(t *testing.T) {
@@ -44,14 +44,14 @@ func TestSettings(t *testing.T) {
 	}
 }
 
-// Logged out, the sidebar and the settings offer the login; logged in, the
-// settings name the account and offer to log out, and the sidebar does not.
+// Logged out, the dock and the settings offer the login; logged in, the
+// settings name the account and offer to log out, and the dock does not.
 func TestLoginEntries(t *testing.T) {
 	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, c: &dy.Client{}})
 	tt := newTester(a)
 	tt.Frame()
 	if !tt.HasText("登录") {
-		t.Fatalf("logged out sidebar: %q", tt.Texts())
+		t.Fatalf("logged out dock: %q", tt.Texts())
 	}
 	a.settingsOpen = true
 	tt.Frame()
@@ -61,7 +61,7 @@ func TestLoginEntries(t *testing.T) {
 	a.signedIn, a.me, a.settingsOpen = true, dy.User{Name: "小明"}, false
 	tt.Frame()
 	if tt.HasText("登录") {
-		t.Fatalf("logged in sidebar: %q", tt.Texts())
+		t.Fatalf("logged in dock: %q", tt.Texts())
 	}
 	a.settingsOpen = true
 	tt.Frame()

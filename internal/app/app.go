@@ -195,7 +195,7 @@ type app struct {
 	img         *images           // covers and avatars
 	emoji       map[string]string // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
 
-	// The sidebar's other roots, each a grid; nil where there is no client.
+	// The dock's other roots, each a grid; nil where there is no client.
 	follow, friends, live, drama *page
 	mine                         map[string]*page // 我的's tabs, by name, once the account is known
 	mineTab                      string
@@ -220,7 +220,7 @@ type app struct {
 	volume      float64 // 0 to 1
 	muted       bool
 	clear       bool // 清屏: the video alone, without its text, rail or bullet comments
-	theater     bool // 网页全屏: the video fills the window, the sidebar and bars away
+	theater     bool // 网页全屏: the video fills the window, the dock and bars away
 	qualityOpen bool // the bar's menus
 	speedOpen   bool
 	volumeOpen  bool
@@ -1059,7 +1059,7 @@ func picksPage(c *dy.Client, title string, id int) *page {
 }
 
 // root shows r, the picks or the feed, with nothing over it; r shown
-// already, it is refreshed, as Douyin's sidebar does pressed again.
+// already, it is refreshed, as Douyin's sidebar does pressed again; the dock does the same.
 func (a *app) root(r *page) {
 	if len(a.pages) == 1 && a.cur() == r {
 		if r.grid && r.playing {
@@ -1103,7 +1103,7 @@ func (a *app) play(p *page, i int) {
 	a.fill()
 }
 
-// loadAccount fetches the account logged in and all it follows, for the sidebar.
+// loadAccount fetches the account logged in and all it follows, for the dock and 关注.
 // shortcut: loads every account followed at once; page it on scroll if lists of thousands matter.
 func (a *app) loadAccount() {
 	go func() {
@@ -1620,7 +1620,7 @@ func Run() error {
 			MinWidth:  960,
 			MinHeight: 620,
 			StateKey:  "main",
-			// As MySpotify's: no title bar, the window buttons inset within the sidebar.
+			// As MySpotify's: no title bar, the window buttons inset at the top left.
 			TitleBarStyle:        mygo.TitleBarHidden,
 			TitleBarHeight:       topBarHeight,
 			TrafficLightPosition: &mygo.Point{X: 18, Y: 18},
