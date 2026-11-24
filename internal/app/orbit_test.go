@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +136,44 @@ func TestOrbitHomeInteractions(t *testing.T) {
 	tt.Frame()
 	if len(a.pages) != 1 || a.cur() != a.home {
 		t.Fatalf("after Escape from orbit playback: pages=%d cur=%v", len(a.pages), a.cur().title)
+	}
+}
+
+// A video played from 引力场 goes on into what its source fetches next, and
+// what it fetched is the source's too, each page fetched once: 换一批 goes on
+// after it rather than skipping it.
+func TestOrbitPlayFetchesThroughSource(t *testing.T) {
+	calls := 0
+	src := &page{title: "关注", grid: true, next: func() ([]dy.Video, error) {
+		calls++
+		return []dy.Video{{ID: fmt.Sprint("new", calls)}}, nil
+	}}
+	for i := range 3 {
+		src.list = append(src.list, &slot{v: dy.Video{ID: fmt.Sprint("v", i)}, loading: true})
+	}
+	home := &page{title: "引力场", grid: true}
+	a := &app{home: home, follow: src, signedIn: true, pages: []*page{home}, posted: make(chan func(), 64)}
+	a.orbit.source = orbitFollow
+	a.playFromOrbit(src, 2) // the end near: the next page is asked for
+	for src.fetching || a.cur().fetching {
+		select {
+		case fn := <-a.posted:
+			fn()
+		case <-time.After(2 * time.Second):
+			t.Fatal("the next page never came")
+		}
+	}
+	ids := func(p *page) (s []string) {
+		for _, x := range p.list {
+			s = append(s, x.v.ID)
+		}
+		return s
+	}
+	played := fmt.Sprint(ids(a.cur()))
+	if !strings.HasPrefix(played, "[v0 v1 v2 new1") {
+		t.Fatalf("played: %s", played)
+	}
+	if got := fmt.Sprint(ids(src)); got != played || calls != len(src.list)-3 {
+		t.Fatalf("source: %s after %d fetches, played %s", got, calls, played)
 	}
 }

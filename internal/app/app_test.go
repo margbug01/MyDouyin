@@ -884,6 +884,63 @@ func TestMine(t *testing.T) {
 	}
 }
 
+// Each root comes back as it was left: a video played from 引力场, a page
+// opened over 精选. Pressed with pages over it, a root shows itself.
+func TestRootsKeepWhatWasOpen(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}, me: dy.User{ID: "me", Name: "我自己"}})
+	for i, s := range a.picks.list {
+		s.v.ID, s.v.Desc = fmt.Sprint("p", i), fmt.Sprint("精选视频", i)
+	}
+	a.home = &page{title: "引力场", grid: true}
+	a.orbit.source = orbitPicks
+	a.pages = []*page{a.home}
+	a.mine = map[string]*page{}
+	for _, n := range mineTabs {
+		a.mine[n] = stub(n, 1)
+		a.mine[n].grid = true
+	}
+	a.mineTab = "作品"
+	tt := newTester(a)
+	click := func(label string) {
+		t.Helper()
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+	}
+	playing := func() string {
+		if p := a.cur(); p.plays() && p.idx < len(p.list) {
+			return p.list[p.idx].v.ID
+		}
+		return ""
+	}
+
+	click("精选视频2")
+	click("我的")
+	click("引力场")
+	if playing() != "p2" {
+		t.Fatalf("引力场 again: %q playing, %d pages", playing(), len(a.pages))
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.cur() != a.home {
+		t.Fatal("Escape did not go back to 引力场")
+	}
+
+	author := stub("作者", 1)
+	a.root(a.picks) // 引力场's own 精选 pill would take the click
+	a.open(author)
+	click("我的")
+	click("精选")
+	if a.cur() != author {
+		t.Fatalf("精选 again: %q on top", a.cur().title)
+	}
+	click("精选")
+	if a.cur() != a.picks || len(a.pages) != 1 {
+		t.Fatalf("精选 pressed over its pages: %q on top of %d", a.cur().title, len(a.pages))
+	}
+}
+
 // A live room shows as one: its badge and viewers on its card, and playing,
 // "直播中" with no time, speed or next, no counts or comments in the rail, a
 // share that copies the room's link, and nothing to download.
