@@ -12,7 +12,7 @@ import (
 //go:embed logo.png
 var logoPNG []byte
 
-// logo is the app's icon, at the top left beside its name.
+// logo is the app's icon, atop the sidebar beside its name.
 var logo = func() *ui.Bitmap {
 	b, err := ui.DecodeBitmap(logoPNG)
 	if err != nil {

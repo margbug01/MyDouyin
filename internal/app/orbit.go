@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"math"
 	"runtime"
 	"strings"
 	"time"
@@ -49,7 +48,7 @@ type orbitCardRect struct {
 }
 
 // orbitRing is how many covers ring the search hub at once.
-const orbitRing = 6
+const orbitRing = 8
 
 var (
 	iconOrbit   = strokeIcon(`<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>`)
@@ -150,89 +149,82 @@ func (a *app) playFromOrbit(src *page, idx int) {
 	a.open(playPage)
 }
 
-const (
-	dockLeft       = float32(16)
-	dockCollapsedW = float32(58)
-	dockExpandedW  = float32(124)
-	// contentLeft is where a page's content starts, right of the dock at rest;
-	// the dock, opened, goes over it.
-	contentLeft = dockLeft + dockCollapsedW + 14
-)
+// orbitFrame is the area 引力场's covers are drawn for: the window's right
+// of the sidebar at its usual size. A larger or smaller area scales it.
+const orbitFrameW, orbitFrameH = 1080, 820
+
+// orbitScatter is the covers around the search field, in orbitFrame: of
+// different sizes, some upright, set off from each other, so they read as
+// thrown around it rather than laid out in a grid. Clockwise from the top left.
+var orbitScatter = [orbitRing]orbitCardRect{
+	{36, 92, 288, 162},   // top left
+	{356, 70, 168, 224},  // top, upright
+	{556, 120, 252, 142}, // top right
+	{842, 210, 200, 266}, // right, upright
+	{668, 508, 300, 169}, // bottom right
+	{446, 496, 176, 234}, // bottom, upright
+	{152, 522, 262, 147}, // bottom left
+	{52, 286, 168, 210},  // left, upright
+}
+
+// orbitScale is how much orbitFrame grows or shrinks to fit w by h.
+func orbitScale(w, h float32) float32 {
+	return min(max(min(w/orbitFrameW, h/orbitFrameH), 0.6), 1.3)
+}
 
 // orbitHubRect returns the centered search hub rectangle that surrounding cards
 // must never overlap.
 func orbitHubRect(w, h float32) (x, y, rw, rh float32) {
-	rw = min(float32(480), max(float32(340), w-520))
+	rw = min(480, max(340, 480*orbitScale(w, h)))
 	rh = 96
-	x = (w - rw) / 2
-	y = (h - rh) / 2
-	return x, y, rw, rh
+	return (w - rw) / 2, (h - rh) / 2, rw, rh
 }
 
-// orbitLayout places orbitRing 16:9 cards around the search hub, clockwise
-// from the top left: three over it and three under, the middle ones set
-// farther out, so that together they ring it. They are as large as the room
-// above and below the hub allows, and the width between the dock at rest and
-// as far from the right edge.
+// orbitLayout is orbitScatter scaled to w by h and centered there.
 func orbitLayout(w, h float32) []orbitCardRect {
-	if w < 780 || h < 540 {
+	if w < 600 || h < 480 {
 		return nil
 	}
-	hx, hy, hw, hh := orbitHubRect(w, h)
-	const (
-		top, bottom = 62, 20
-		gap         = 20 // between cards side by side
-		clear       = 22 // between the hub and the cards nearest it
-		arc         = 28 // how much farther out the middle cards sit
-	)
-	band := min(hy-clear-top, h-bottom-(hy+hh+clear))
-	cw := min(420, (w-2*contentLeft-2*gap)/3, (band-arc)*16/9)
-	cw = float32(math.Floor(float64(cw)))
-	ch := float32(math.Round(float64(cw * 9 / 16)))
-	cx := hx + hw/2
-	xs := [3]float32{cx - cw*1.5 - gap, cx - cw/2, cx + cw/2 + gap}
-	upper, lower := hy-clear-ch, hy+hh+clear
-	return []orbitCardRect{
-		{xs[0], upper, cw, ch}, {xs[1], upper - arc, cw, ch}, {xs[2], upper, cw, ch},
-		{xs[2], lower, cw, ch}, {xs[1], lower + arc, cw, ch}, {xs[0], lower, cw, ch},
+	s := orbitScale(w, h)
+	ox, oy := (w-orbitFrameW*s)/2, (h-orbitFrameH*s)/2
+	rects := make([]orbitCardRect, 0, orbitRing)
+	for _, r := range orbitScatter {
+		rects = append(rects, orbitCardRect{ox + r.x*s, oy + r.y*s, r.w * s, r.h * s})
+	}
+	return rects
+}
+
+// orbitBackdrop is 引力场's backdrop, under the sidebar too: porcelain
+// brightening toward the covers' middle, or black with a faint sheen there.
+func (a *app) orbitBackdrop(c *ui.Context) {
+	if a.web.v != nil && a.web.layout {
+		return // the page laid out for a script shows through
+	}
+	w, h := c.Size()
+	center := ui.Point{X: (sidebarWidth + (w-sidebarWidth)/2) / w, Y: 0.48}
+	back := ui.Box(c.Key("orbit-backdrop")).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-1).PassThrough()
+	if pal.dark {
+		back.RadialGradient(ui.RadialGradient{Center: center, Radius: min(w-sidebarWidth, h) * 0.62, Oklab: true, Stops: pal.veil})
+	} else {
+		back.RadialGradient(ui.RadialGradient{Center: center, Oklab: true, Stops: pal.veil})
 	}
 }
 
-// orbitView renders the full-canvas Orbital Home (引力场). The dock and the
-// buttons at the top right are chrome's, over it as over every page.
+// orbitView is 引力场, right of the sidebar: the search field in the middle
+// and covers scattered around it.
 func (a *app) orbitView(c *ui.Context) {
 	w, h := c.Size()
-	canvas := ui.Box(c.Key("orbit-canvas")).Fill().DragWindow()
-	switch {
-	case a.web.v != nil && a.web.layout, pal.dark:
-		canvas.Background(pal.bg)
-	default:
-		canvas.RadialGradient(ui.RadialGradient{Center: ui.Point{X: 0.5, Y: 0.46}, Oklab: true, Stops: pal.veil})
-	}
-	canvas.Children(func() {
-		if pal.dark && !(a.web.v != nil && a.web.layout) {
-			// A faint sheen ringing the black center.
-			ui.Box(c.Key("orbit-singularity")).Absolute().Top(0).Left(0).Right(0).Bottom(0).
-				RadialGradient(ui.RadialGradient{Center: ui.Point{X: 0.5, Y: 0.5}, Radius: min(w, h) * 0.62, Oklab: true, Stops: pal.veil}).
-				HitTest(func(float32, float32, ui.Rect) bool { return false })
-		}
+	w -= sidebarWidth
+	ui.Box(c.Key("orbit-canvas")).Grow(1).DragWindow().Children(func() {
 		if !a.orbit.hidden {
 			a.orbitCards(c, w, h)
 		}
-		brandLeft := float32(94)
-		if runtime.GOOS == "windows" {
-			brandLeft = 20
-		}
-		ui.Row(c.Key("orbit-brand")).Absolute().Top(15).Left(brandLeft).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Image(c, logo).Size(22, 22)
-			ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
-		})
 		a.orbitCenterHub(c, w, h)
 		if a.notes != nil || a.dms != nil {
-			ui.Box(c.Key("orbit-side-panel")).Absolute().Top(60).Right(18).Bottom(18).ZIndex(40).Children(func() {
+			ui.Box(c.Key("orbit-side-panel")).Absolute().Top(56).Right(16).Bottom(16).ZIndex(40).Children(func() {
 				if a.notes != nil {
 					a.notePanel(c, a.notes)
-				} else if a.dms != nil {
+				} else {
 					a.dmPanel(c, a.dms)
 				}
 			})
@@ -240,31 +232,20 @@ func (a *app) orbitView(c *ui.Context) {
 	})
 }
 
-// chrome is what every page shares, over it: the dock down the left, the
-// buttons at the top right, and the update offer at the bottom left.
-func (a *app) chrome(c *ui.Context, p *page) {
-	_, h := c.Size()
-	a.dock(c, h)
-	a.topRight(c)
-	if a.upd.found != nil {
-		ui.Column(c.Key("update-wrap")).Absolute().Left(dockLeft - 2).Bottom(12).Width(200).ZIndex(36).Children(func() {
-			a.updateBanner(c)
-		})
-	}
-}
-
+// topRight is the buttons at the top right of every page: the theme, 私信
+// and 通知.
 func (a *app) topRight(c *ui.Context) {
-	right := float32(18)
+	right := float32(16)
 	if runtime.GOOS == "windows" {
 		right += 138 // three native caption buttons, 46 DIPs each
 	}
-	ui.Row(c.Key("top-right")).Absolute().Top(11).Right(right).Gap(6).AlignItems(ui.Center).ZIndex(30).Children(func() {
+	ui.Row(c.Key("top-right")).Absolute().Top(8).Right(right).Gap(4).AlignItems(ui.Center).ZIndex(30).Children(func() {
 		themeIcon := onOff(pal.dark, iconSun, iconMoon)
 		themeLabel := onOff(pal.dark, "切换浅色主题", "切换深色主题")
-		if iconButton(c.Key("theme"), themeIcon, 16, pal.muted, themeLabel).Clicked() {
+		if iconButton(c.Key("theme"), themeIcon, 18, pal.muted, themeLabel).Clicked() {
 			a.toggleOrbitTheme()
 		}
-		if iconButton(c.Key("dm"), iconChat, 16, onOff(a.dms != nil, pal.strong, pal.muted), onOff(a.dms != nil, "收起私信", "私信")).Clicked() {
+		if iconButton(c.Key("dm"), iconChat, 20, onOff(a.dms != nil, pal.strong, pal.muted), onOff(a.dms != nil, "收起私信", "私信")).Clicked() {
 			if a.dms != nil {
 				a.dms = nil
 			} else {
@@ -272,7 +253,7 @@ func (a *app) topRight(c *ui.Context) {
 			}
 		}
 		ui.Box(c.Key("bell-wrap")).Children(func() {
-			if iconButton(c.Key("bell"), iconBell, 16, onOff(a.notes != nil, pal.strong, pal.muted), onOff(a.notes != nil, "收起通知", "通知")).Clicked() {
+			if iconButton(c.Key("bell"), iconBell, 20, onOff(a.notes != nil, pal.strong, pal.muted), onOff(a.notes != nil, "收起通知", "通知")).Clicked() {
 				if a.notes != nil {
 					a.notes = nil
 				} else {
@@ -280,136 +261,14 @@ func (a *app) topRight(c *ui.Context) {
 				}
 			}
 			if a.unread > 0 {
-				ui.Box(c).Absolute().Top(3).Right(2).MinWidth(15).Height(15).PaddingX(4).Radius(8).
+				ui.Box(c).Absolute().Top(4).Right(2).MinWidth(16).Height(16).PaddingX(4).Radius(8).
 					Background(pal.accent).Center().
 					HitTest(func(float32, float32, ui.Rect) bool { return false }). // the bell under it takes the click
 					Children(func() {
-						ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(9.5).FontWeight(700).TextColor(white)
+						ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(10).FontWeight(700).TextColor(white)
 					})
 			}
 		})
-		switch {
-		case a.signedIn || a.me.Name != "":
-			mine := a.mine[a.mineTab]
-			on := a.isMine(a.pages[0])
-			b := ui.ButtonBase(c.Key("account")).Height(32).Padding(0, 11, 0, 5).Gap(7).Radius(16).
-				AlignItems(ui.Center).FocusRing(false).Label(onOff(mine != nil, "我的", a.me.Name)) // 我的 once it can open
-			b.Background(onOff(on || b.Hovered(), pal.pillHoverBg, pal.pillBg)).Border(1, onOff(on, pal.tabActiveBd, pal.pillBorder)).Children(func() {
-				a.avatar(c, pal, a.me.Avatar, a.me.Name, 22)
-				ui.Text(c, a.me.Name).FontSize(12.5).FontWeight(onOff(on, 600, 500)).TextColor(pal.text).SingleLine().MaxWidth(100)
-			})
-			if b.Clicked() && mine != nil {
-				a.showMine(a.mineTab)
-			}
-		case a.c != nil:
-			b := ui.ButtonBase(c.Key("login")).Height(32).PaddingX(12).Gap(6).Radius(16).
-				AlignItems(ui.Center).FocusRing(false).Label("登录")
-			b.Background(onOff(b.Hovered(), pal.pillHoverBg, pal.pillBg)).Border(1, pal.pillBorder).Children(func() {
-				ui.Icon(c, iconUser).Size(14, 14).TextColor(pal.text)
-				ui.Text(c, "登录").FontSize(12.5).FontWeight(500).TextColor(pal.text)
-			})
-			if b.Clicked() {
-				a.openLogin()
-			}
-		}
-		if iconButton(c.Key("settings"), iconSettings, 16, onOff(a.settingsOpen, pal.strong, pal.muted), "设置").Clicked() {
-			a.settingsOpen = true
-		}
-	})
-}
-
-// dock is the navigation down the left of every page: icons at rest, their
-// names as the pointer comes over it. The root shown is marked; pressed
-// again it is refreshed, 引力场 bringing the next ring of covers.
-func (a *app) dock(c *ui.Context, h float32) {
-	type dockItem struct {
-		key   string
-		icon  *ui.SVG
-		label string
-		page  *page
-		div   bool
-	}
-	items := []dockItem{{key: "home", icon: iconOrbit, label: "引力场", page: a.home}}
-	if a.picks != nil {
-		items = append(items, dockItem{key: "picks", icon: iconCompass, label: "精选", page: a.picks})
-	}
-	if a.feed != nil {
-		items = append(items, dockItem{key: "feed", icon: iconSpark, label: "推荐", page: a.feed})
-	}
-	if a.follow != nil || a.friends != nil {
-		items = append(items, dockItem{key: "div0", div: true})
-	}
-	if a.follow != nil {
-		items = append(items, dockItem{key: "follow", icon: iconFollow, label: "关注", page: a.follow})
-	}
-	if a.friends != nil {
-		items = append(items, dockItem{key: "friends", icon: iconFriends, label: "朋友", page: a.friends})
-	}
-	if a.live != nil || a.drama != nil {
-		items = append(items, dockItem{key: "div1", div: true})
-	}
-	if a.live != nil {
-		items = append(items, dockItem{key: "live", icon: iconLive, label: "直播", page: a.live})
-	}
-	if a.drama != nil {
-		items = append(items, dockItem{key: "drama", icon: iconDrama, label: "短剧", page: a.drama})
-	}
-
-	const dockItemH = float32(42)
-	estH := float32(16)
-	for _, it := range items {
-		estH += onOff(it.div, float32(9), dockItemH+5)
-	}
-	root := a.pages[0]
-	dock := ui.Column(c.Key("dock")).Absolute().Left(dockLeft).Top(max(66, (h-estH)/2)).
-		Padding(8, 7).Gap(5).Radius(22).Clip().AlignItems(ui.Stretch).
-		Background(pal.dockTint).Border(1, pal.dockBorder).
-		InsetShadow(0, 1, 0, 0, pal.dockInset).Shadow(0, 16, 38, -8, pal.dockShadow).ZIndex(35)
-	progress := dock.AnimateTo("expand", onOff(dock.Hovered(), float32(1), 0), ui.Snappy)
-	progress = min(max(progress, 0), 1)
-	labelAlpha := min(max((progress-0.2)/0.8, 0), 1)
-	dock.Width(dockCollapsedW + (dockExpandedW-dockCollapsedW)*progress)
-
-	dock.Children(func() {
-		for _, it := range items {
-			if it.div {
-				ui.Box(c.Key(it.key)).Height(1).Margin(2, 10).Background(pal.hairline)
-				continue
-			}
-			on := it.page == root
-			b := ui.ButtonBase(c.Key("dock:" + it.key)).Row().Height(dockItemH).PaddingX(11).
-				Gap(10).Radius(14).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(it.label)
-			bg, color := ui.Transparent, pal.muted
-			switch {
-			case on:
-				bg, color = pal.dockActiveBg, pal.strong
-			case b.Hovered():
-				bg, color = pal.dockHoverBg, pal.text
-			}
-			b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 140 * time.Millisecond, Oklab: true}))
-			iconScale := float32(1)
-			switch {
-			case b.Pressed():
-				iconScale = 0.9
-			case b.Hovered():
-				iconScale = 1.1
-			}
-			b.Children(func() {
-				ui.Icon(c, it.icon).Size(22, 22).TextColor(color).AnimatePose(ui.Pose{Scale: iconScale}, ui.Snappy)
-				if labelAlpha > 0.01 {
-					ui.Text(c, it.label).FontSize(13.5).FontWeight(onOff(on, 600, 500)).
-						TextColor(color).SingleLine().Opacity(labelAlpha).
-						AnimatePose(ui.Pose{X: (1 - labelAlpha) * -6}, ui.Snappy)
-				}
-			})
-			if b.Clicked() && it.page != nil {
-				if it.page == a.home && a.isHome(a.cur()) {
-					a.cycleOrbit()
-				} else {
-					a.root(it.page)
-				}
-			}
-		}
 	})
 }
 
@@ -622,6 +481,7 @@ func (a *app) orbitCards(c *ui.Context, w, h float32) {
 		}
 		b.Border(1, bd).ZIndex(z).Shadow(0, 18, 40, -12, pal.cardShadow).AnimatePose(pose, ui.Smooth)
 
+		small := r.w < 200 // a little card, its text smaller
 		b.Children(func() {
 			if bmp := a.img.get(v.Cover); bmp != nil {
 				ui.Image(c.Key("cover"), bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover).Transition(coverFade)
@@ -639,18 +499,18 @@ func (a *app) orbitCards(c *ui.Context, w, h float32) {
 				AnimatePose(ui.Pose{Scale: onOff(hovered, float32(1), 0.6), Fade: onOff(hovered, float32(0), 1)}, ui.Snappy).
 				Children(func() { ui.Icon(c, iconPlay).Size(11, 11).TextColor(white) })
 			ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).
-				Padding(40, 14, 12, 14).Gap(4).
+				Padding(onOff(small, float32(28), 40), onOff(small, float32(10), 14), onOff(small, float32(9), 12), onOff(small, float32(10), 14)).Gap(3).
 				Gradient(ui.RGBA(8, 10, 16, 0), ui.RGBA(8, 10, 16, 0.86), 180).
 				Children(func() {
 					title := strings.TrimSpace(v.Desc)
 					if title == "" {
 						title = "@" + v.Author
 					}
-					ui.Text(c, title).FontSize(13.5).FontWeight(600).TextColor(ui.RGBA(255, 255, 255, 0.96)).MaxLines(2)
+					ui.Text(c, title).FontSize(onOff(small, float32(12), 13.5)).FontWeight(600).TextColor(ui.RGBA(255, 255, 255, 0.96)).MaxLines(2)
 					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "@"+v.Author).FontSize(11.5).TextColor(ui.RGBA(255, 255, 255, 0.74)).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+						ui.Text(c, "@"+v.Author).FontSize(onOff(small, float32(10.5), 11.5)).TextColor(ui.RGBA(255, 255, 255, 0.74)).SingleLine().Grow(1).Shrink(1).MinWidth(0)
 						if when := ago(v.Created, time.Now()); when != "" {
-							ui.Text(c, when).FontSize(11.5).TextColor(ui.RGBA(255, 255, 255, 0.56)).SingleLine()
+							ui.Text(c, when).FontSize(onOff(small, float32(10.5), 11.5)).TextColor(ui.RGBA(255, 255, 255, 0.56)).SingleLine()
 						}
 					})
 				})

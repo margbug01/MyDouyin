@@ -17,12 +17,13 @@ import (
 	"douyin/internal/dy"
 )
 
-// The window is laid out as Douyin's own, with less in it: a floating dock
-// down the left (引力场, 精选, 推荐, 关注…), the search field centered along
-// the top, and under it a grid of covers or the video playing. The components
+// The window is laid out as Douyin's own, with less in it: a narrow sidebar
+// (精选, 推荐, the accounts followed), the search field centered along the
+// top, and under it a grid of covers or the video playing. The components
 // are MySpotify's: its buttons, its rows, its type sizes.
 
 const (
+	sidebarWidth = 200
 	// barGutter is the room a scroll keeps clear for its bar, which MyGo
 	// draws over the content 3 to 9 DIPs in from the edge: a list whose rows
 	// keep this much clear themselves needs none.
@@ -109,13 +110,17 @@ func (a *app) view(c *ui.Context) {
 			})
 			return
 		}
-		a.chrome(c, p) // first: the focus comes to the dock first; it is drawn over the page
+		defer a.topRight(c)
 		if a.isHome(p) {
-			a.orbitView(c)
-			return
+			a.orbitBackdrop(c)
 		}
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-			ui.Column(c.Key("main")).Grow(1).PaddingStart(contentLeft).Children(func() {
+			ui.Column(c).Width(sidebarWidth).Children(func() { a.sidebar(c) })
+			if a.isHome(p) {
+				a.orbitView(c)
+				return
+			}
+			ui.Column(c.Key("main")).Grow(1).Children(func() {
 				a.topBar(c, p)
 				if !p.plays() {
 					switch {
@@ -170,11 +175,11 @@ func (a *app) view(c *ui.Context) {
 }
 
 // searchField is where the search field sits in the window: its left edge
-// and width, centered over the content, clear of the buttons at the right.
+// and width, centered over the content.
 func searchField(c *ui.Context) (left, width float32) {
 	w, _ := c.Size()
-	width = min(460, w-contentLeft-2*290)
-	return contentLeft + (w-contentLeft-width)/2, width
+	width = min(460, w-sidebarWidth-2*260)
+	return sidebarWidth + (w-sidebarWidth-width)/2, width
 }
 
 // searchList drops from the focused search field: the hot search list's
@@ -333,6 +338,118 @@ func (a *app) profileHeader(c *ui.Context, me dy.User) {
 	})
 }
 
+// sidebar is Douyin's: 精选 and 推荐; the user's 关注, 朋友 and 我的; then
+// 直播 and 短剧, under 引力场. A root not there (no client, or the account not
+// yet known) leaves its row out.
+func (a *app) sidebar(c *ui.Context) {
+	// Below the window buttons, which sit over it.
+	ui.Column(c).Fill().Padding(48, 12, 14, 12).Gap(4).DragWindow().Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(0, 10, 14, 10).Children(func() {
+			ui.Image(c, logo).Size(26, 26)
+			ui.Text(c, "MyDouyin").FontSize(20).FontWeight(800).TextColor(pal.strong)
+		})
+		root := a.pages[0]
+		nav := func(icon *ui.SVG, label string, r *page, on bool) bool {
+			return r != nil && a.navItem(c, icon, label, on).Clicked()
+		}
+		if nav(iconOrbit, "引力场", a.home, root == a.home) {
+			if a.isHome(a.cur()) {
+				a.cycleOrbit() // pressed again: the next covers
+			} else {
+				a.root(a.home)
+			}
+		}
+		if nav(iconCompass, "精选", a.picks, root == a.picks) {
+			a.root(a.picks)
+		}
+		if nav(iconSpark, "推荐", a.feed, root == a.feed) {
+			a.root(a.feed)
+		}
+		divider := func() { ui.Box(c).Height(1).Background(pal.hairline).Margin(8, 10) }
+		divider()
+		if nav(iconFollow, "关注", a.follow, root == a.follow) {
+			a.root(a.follow)
+		}
+		if nav(iconFriends, "朋友", a.friends, root == a.friends) {
+			a.root(a.friends)
+		}
+		divider()
+		if a.live != nil {
+			b := a.listItem(c.Key("直播"), root == a.live, "直播")
+			color := onOff(root == a.live, pal.strong, pal.muted)
+			b.Children(func() {
+				ui.Icon(c, iconLive).Size(18, 18).TextColor(color)
+				ui.Text(c, "直播").FontSize(14.5).FontWeight(600).TextColor(color).Grow(1)
+				ui.Text(c, "LIVE").FontSize(9.5).FontWeight(800).TextColor(pal.accent).PaddingX(5).Height(16).Radius(4).
+					Background(ui.RGBA(254, 44, 85, 0.16)).Center()
+			})
+			if b.Clicked() {
+				a.root(a.live)
+			}
+		}
+		if nav(iconDrama, "短剧", a.drama, root == a.drama) {
+			a.root(a.drama)
+		}
+		ui.Box(c).Grow(1)
+		a.updateBanner(c)
+		a.accountRow(c, root)
+	})
+}
+
+// accountRow ends the sidebar: the account, which opens 我的, or 登录 while
+// logged out; beside it the settings.
+func (a *app) accountRow(c *ui.Context, root *page) {
+	ui.Row(c).AlignSelf(ui.Stretch).Gap(4).AlignItems(ui.Center).Children(func() {
+		switch {
+		case a.signedIn || a.me.Name != "":
+			mine := a.mine[a.mineTab]
+			label := a.me.Name
+			if mine != nil {
+				label = "我的"
+			}
+			b := a.listItem(c.Key("account"), a.isMine(root), label).Grow(1).Shrink(1).MinWidth(0)
+			b.Children(func() {
+				a.avatar(c, pal, a.me.Avatar, a.me.Name, 24)
+				ui.Text(c, a.me.Name).FontSize(14).FontWeight(600).TextColor(onOff(a.isMine(root), pal.strong, pal.text)).SingleLine().Shrink(1)
+			})
+			if b.Clicked() && mine != nil {
+				a.showMine(a.mineTab)
+			}
+		case a.c != nil:
+			if a.navItem(c, iconUser, "登录", a.loginOpen).Grow(1).Clicked() {
+				a.openLogin()
+			}
+		default:
+			ui.Box(c).Grow(1)
+		}
+		if iconButton(c.Key("settings"), iconSettings, 18, onOff(a.settingsOpen, pal.strong, pal.muted), "设置").Clicked() {
+			a.settingsOpen = true
+		}
+	})
+}
+
+// listItem is a row of the sidebar: highlighted under the pointer, and
+// marked when it is the page shown.
+func (a *app) listItem(c *ui.Context, selected bool, label string) ui.Element {
+	b := ui.ButtonBase(c).Height(38).PaddingX(10).Gap(10).Radius(10).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(label)
+	bg := ui.Transparent
+	switch {
+	case selected:
+		bg = pal.press
+	case b.Hovered():
+		bg = pal.hover
+	}
+	return b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
+}
+
+func (a *app) navItem(c *ui.Context, icon *ui.SVG, label string, selected bool) ui.Element {
+	color := onOff(selected, pal.strong, pal.muted)
+	return a.listItem(c.Key(label), selected, label).Children(func() {
+		ui.Icon(c, icon).Size(18, 18).TextColor(color)
+		ui.Text(c, label).FontSize(14.5).FontWeight(600).TextColor(color)
+	})
+}
+
 // avatar is an account's picture in a circle, or its name's first character
 // while it loads, in p's colors: vid's over a video.
 func (a *app) avatar(c *ui.Context, p palette, url, name string, size float32) {
@@ -351,24 +468,19 @@ func (a *app) avatar(c *ui.Context, p palette, url, name string, size float32) {
 }
 
 // topBar holds the way back with the page's name, and the search field in
-// the middle; it drags the window. The buttons at its right are chrome's.
+// the middle; it drags the window. The buttons at its right are topRight's.
 func (a *app) topBar(c *ui.Context, p *page) {
-	ui.Row(c).Height(topBarHeight).PaddingX(8).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
+	ui.Row(c).Height(topBarHeight).PaddingX(16).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
 		if len(a.pages) > 1 || p.grid && p.playing {
 			if iconButton(c.Key("back"), iconBack, 18, pal.muted, "返回").Clicked() {
 				a.back()
 			}
-		}
-		if a.pages[0] != p || p.grid && p.playing {
-			ui.Text(c, p.title).FontSize(15).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).MaxWidth(220)
-		} else { // a root, which the dock names: the mark, where 引力场 has it
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Image(c, logo).Size(22, 22)
-				ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
-			})
+			if a.pages[0] != p { // the roots are named in the sidebar
+				ui.Text(c, p.title).FontSize(15).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).MaxWidth(220)
+			}
 		}
 		left, fieldW := searchField(c)
-		left -= contentLeft // the bar starts beside the dock
+		left -= sidebarWidth // the bar starts beside the sidebar
 		field := ui.Row(c).Absolute().Top(10).Left(left).Width(fieldW).Height(36).Radius(12).PaddingStart(14).
 			AlignItems(ui.Center).Background(pal.searchTint).Shadow(0, 6, 18, -8, pal.searchShadow)
 		if c.Focused(a.searchBox) {
@@ -436,7 +548,7 @@ func (a *app) tabsRow(c *ui.Context) {
 // first video is a big card that plays, silent, as Douyin's does.
 func (a *app) grid(c *ui.Context, p *page) {
 	w, h := c.Size()
-	inner := w - contentLeft - 24 - barGutter - 16 // the grid's padding, the row's
+	inner := w - sidebarWidth - 24 - barGutter - 16 // the grid's padding, the row's
 	if a.notes != nil || a.dms != nil {
 		inner -= 360 + 16
 	}

@@ -6,7 +6,7 @@ import (
 )
 
 // palette is one appearance's colors, for the whole window: its surfaces and
-// ink, and the glass of 引力场's search field, the dock, pills and cards.
+// ink, and the glass of 引力场's search field, pills and cards.
 type palette struct {
 	dark                bool
 	bgHex               string // the window's, shown as it resizes
@@ -20,8 +20,7 @@ type palette struct {
 	veil                []ui.GradientStop // 引力场's backdrop
 
 	searchTint, searchFocus, searchBorder, focusBorder, searchInset, searchShadow ui.Color
-	dockTint, dockBorder, dockInset, dockShadow, dockActiveBg, dockHoverBg        ui.Color
-	pillBg, pillHoverBg, pillBorder                                               ui.Color
+	pillBg, pillBorder                                                            ui.Color
 	tabActiveBg, tabActiveBd, tabHoverBg                                          ui.Color
 	cardBorder, cardHoverBd, cardShadow                                           ui.Color
 	popoverBd, popoverHover                                                       ui.Color
@@ -55,14 +54,7 @@ var (
 		focusBorder:  ui.RGBA(15, 23, 42, 0.24),
 		searchInset:  ui.RGBA(255, 255, 255, 1),
 		searchShadow: ui.RGBA(15, 23, 42, 0.09),
-		dockTint:     ui.RGBA(255, 255, 255, 0.92),
-		dockBorder:   ui.RGBA(15, 23, 42, 0.08),
-		dockInset:    ui.RGBA(255, 255, 255, 1),
-		dockShadow:   ui.RGBA(15, 23, 42, 0.08),
-		dockActiveBg: ui.RGBA(15, 23, 42, 0.08),
-		dockHoverBg:  ui.RGBA(15, 23, 42, 0.05),
 		pillBg:       ui.RGBA(255, 255, 255, 0.88),
-		pillHoverBg:  ui.Hex("#ffffff"),
 		pillBorder:   ui.RGBA(15, 23, 42, 0.08),
 		tabActiveBg:  ui.Hex("#ffffff"),
 		tabActiveBd:  ui.RGBA(15, 23, 42, 0.09),
@@ -104,14 +96,7 @@ var (
 		focusBorder:  ui.RGBA(255, 255, 255, 0.40),
 		searchInset:  ui.RGBA(255, 255, 255, 0.10),
 		searchShadow: ui.RGBA(135, 165, 240, 0.14),
-		dockTint:     ui.RGBA(18, 19, 25, 0.92),
-		dockBorder:   ui.RGBA(255, 255, 255, 0.09),
-		dockInset:    ui.RGBA(255, 255, 255, 0.08),
-		dockShadow:   ui.RGBA(0, 0, 0, 0.85),
-		dockActiveBg: ui.RGBA(255, 255, 255, 0.12),
-		dockHoverBg:  ui.RGBA(255, 255, 255, 0.07),
 		pillBg:       ui.RGBA(255, 255, 255, 0.05),
-		pillHoverBg:  ui.RGBA(255, 255, 255, 0.11),
 		pillBorder:   ui.RGBA(255, 255, 255, 0.10),
 		tabActiveBg:  ui.RGBA(255, 255, 255, 0.11),
 		tabActiveBd:  ui.RGBA(255, 255, 255, 0.20),

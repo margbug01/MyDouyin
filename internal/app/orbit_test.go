@@ -19,20 +19,16 @@ func TestOrbitLayoutNoOverlap(t *testing.T) {
 		{1680, 1050},
 	}
 	for _, sz := range sizes {
-		w, h := sz[0], sz[1]
+		w, h := sz[0]-sidebarWidth, sz[1] // the window's, right of the sidebar
 		rects := orbitLayout(w, h)
 		if len(rects) != orbitRing {
 			t.Fatalf("%gx%g: expected %d cards, got %d", w, h, orbitRing, len(rects))
 		}
-		// Large enough to see what plays: the old ring's covers were 182 to 212 wide.
-		if minW := min(240, w/4); rects[0].w < minW {
-			t.Fatalf("%gx%g: cards %gx%g, want at least %g wide", w, h, rects[0].w, rects[0].h, minW)
-		}
 		hx, hy, hw, hh := orbitHubRect(w, h)
 		hub := orbitCardRect{x: hx, y: hy, w: hw, h: hh}
 		for i, r := range rects {
-			if r.x < contentLeft || r.y < 62 || r.x+r.w > w-contentLeft || r.y+r.h > h-18 {
-				t.Fatalf("%gx%g card %d out of bounds (must stay clear of the dock at rest, %.0f): %+v", w, h, i, contentLeft, r)
+			if r.x < 16 || r.y < 56 || r.x+r.w > w-16 || r.y+r.h > h-16 {
+				t.Fatalf("%gx%g card %d out of bounds: %+v", w, h, i, r)
 			}
 			if r.x < hub.x+hub.w && r.x+r.w > hub.x && r.y < hub.y+hub.h && r.y+r.h > hub.y {
 				t.Fatalf("%gx%g card %d overlaps hub: card=%+v hub=%+v", w, h, i, r, hub)
