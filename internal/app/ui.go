@@ -1086,12 +1086,9 @@ func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
 		case ev.Kind == ui.InputPointerDown && ev.Button == 0 && of > 0 && (s.dec != nil || s.live != nil && s.v.Live == nil):
 			a.dragging, a.dragAt = true, frac(ev.X)
 			return true
-		case ev.Kind == ui.InputPointerMove:
-			a.hoverAt = frac(ev.X)
-			if a.dragging {
-				a.dragAt = a.hoverAt
-			}
-			return a.dragging
+		case ev.Kind == ui.InputPointerMove && a.dragging:
+			a.dragAt = frac(ev.X)
+			return true
 		case ev.Kind == ui.InputPointerUp && a.dragging:
 			a.dragging = false
 			if !ev.Canceled {
@@ -1108,8 +1105,11 @@ func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
 	if a.dragging {
 		f = a.dragAt
 	}
-	hot := bar.Hovered() || a.dragging
-	pointer := a.hoverAt
+	// Asked for as it is built, the pointer brings a frame each time it moves
+	// over the bar: the time above it follows it, not the clock's redraws.
+	px, _, over := bar.PointerPosition()
+	hot := over || a.dragging
+	pointer := frac(px)
 	if a.dragging {
 		pointer = a.dragAt
 	}

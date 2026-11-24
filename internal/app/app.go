@@ -237,7 +237,6 @@ type app struct {
 	setLater    func(id string, on bool) error
 	dragging    bool    // the progress pressed, being dragged
 	dragAt      float32 // where along it, 0 to 1
-	hoverAt     float32 // where along it the pointer rests, 0 to 1
 
 	posted chan func() // what post runs, in a test without a window
 

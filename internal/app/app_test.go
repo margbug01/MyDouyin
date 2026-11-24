@@ -1107,6 +1107,29 @@ func TestProgressDrag(t *testing.T) {
 	}
 }
 
+// The time over the progress follows the pointer as it slides along, each
+// move, not only when the playing clock next redraws.
+func TestProgressHoverFollows(t *testing.T) {
+	p := stub("推荐", 1)
+	p.list[0].v.Duration = 100 * time.Second
+	a := withRoots(&app{pages: []*page{p}})
+	tt := newTester(a)
+	r, ok := tt.Find("进度")
+	if !ok {
+		t.Fatalf("no progress: %q", tt.Texts())
+	}
+	y := r.Y + r.H/2
+	for _, at := range []struct {
+		f    float32
+		want string
+	}{{0.2, "00:20"}, {0.6, "01:00"}, {0.61, "01:01"}, {0.35, "00:35"}} {
+		tt.Move(r.X+r.W*at.f+0.5, y) // no Frame: the move alone must bring one
+		if !tt.HasText(at.want) {
+			t.Fatalf("pointer at %.0f%%: the time shows %q, want %s", at.f*100, tt.Texts(), at.want)
+		}
+	}
+}
+
 // The bar puts the video in 稍后再看 and takes it out, dimmed while it goes;
 // a bullet comment typed, spaces and all without pausing, flies at once on
 // Enter and goes back off if Douyin refuses it; 小窗 takes the video out of
