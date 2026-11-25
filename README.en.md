@@ -1,9 +1,9 @@
 <div align="center">
 
 <p>
-  <img src="docs/icon.png" width="92" alt="MyDouyin native desktop client icon">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/hongguo-icon.png" width="92" alt="MyHongguo short drama mode icon">
+  <img src="docs/icon.png" width="80" alt="MyDouyin native desktop client icon">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/hongguo-icon.png" width="80" alt="MyHongguo short drama mode icon">
 </p>
 
 # MyDouyin · MyHongguo

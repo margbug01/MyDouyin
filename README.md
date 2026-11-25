@@ -1,9 +1,9 @@
 <div align="center">
 
 <p>
-  <img src="docs/icon.png" width="92" alt="MyDouyin 抖音原生桌面客户端图标">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/hongguo-icon.png" width="92" alt="MyHongguo 红果短剧桌面模式图标">
+  <img src="docs/icon.png" width="80" alt="MyDouyin 抖音原生桌面客户端图标">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/hongguo-icon.png" width="80" alt="MyHongguo 红果短剧桌面模式图标">
 </p>
 
 # MyDouyin · MyHongguo
