@@ -731,6 +731,31 @@ func TestBigCard(t *testing.T) {
 	}
 }
 
+// On a wide window 精选's big card stays near 16:9 and lines up with the
+// columns under it, rather than stretching across all of them but one.
+func TestBigCardOnWideWindow(t *testing.T) {
+	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
+	a.picks = stub("精选", 20)
+	a.picks.grid = true
+	a.root(a.picks)
+	for i, s := range a.picks.list {
+		s.v.Desc, s.loading = fmt.Sprint("视频", i), false
+	}
+	tt := ui.NewTester(a.view, 1885, 1104)
+	tt.Frame()
+	big, ok := tt.Find("视频0")
+	under, ok2 := tt.Find("视频9") // 6 columns: the big card spans 3, 1 to 6 beside it, 7 to 9 under it
+	if !ok || !ok2 {
+		t.Fatalf("cards: %q", tt.Texts())
+	}
+	if r := big.W / big.H; r <= 4.0/3 || r > 16.0/9 {
+		t.Fatalf("big card %.0f×%.0f", big.W, big.H)
+	}
+	if d := big.X + big.W - under.X - under.W; d > 0.5 || d < -0.5 {
+		t.Fatalf("big card ends at %.1f, the column under it at %.1f", big.X+big.W, under.X+under.W)
+	}
+}
+
 // At 2x a silent 2-second clip's frames last a second in all, while the
 // clock it gives the view, having no sound, counts its own 2 seconds; a
 // rewind, as a loop does, sets that clock back to its start.

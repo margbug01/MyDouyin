@@ -82,7 +82,8 @@ type Video struct {
 	Duration         time.Duration
 	Likes, Comments  int
 	Collects, Shares int
-	Cover, Avatar    string // image addresses: the frame the video shows first, the author's picture
+	Cover, Avatar    string // image addresses: the video's cover as the list it came in crops it, the author's picture
+	WideCover        string // a 16:9 cover of 1760×990, which 精选 has for most of its videos; "" elsewhere
 	Mix              Mix    // the series the video is an episode of, if any
 	Live             *Live  // a live room in the list, which has no PlayURL
 	Created          time.Time
@@ -744,6 +745,7 @@ type aweme struct {
 	Video struct {
 		Duration int  `json:"duration"`
 		Cover    addr `json:"cover"`
+		Wide     addr `json:"universal_cover_horizontal169_big"`
 		PlayAddr addr `json:"play_addr"`
 		Gears    []struct {
 			Name   string `json:"gear_name"`
@@ -797,7 +799,8 @@ func videos(list []aweme) []Video {
 		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, AuthorUID: a.Author.UID, AuthorFollow: a.Author.FollowStatus, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
-			Cover: a.Video.Cover.first(), Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),
+			Cover: a.Video.Cover.first(), WideCover: a.Video.Wide.first(),
+			Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),
 			Liked: a.Digged == 1, Saved: a.Saved == 1, Pinned: a.Top == 1, Qualities: qs})
 	}
 	return out

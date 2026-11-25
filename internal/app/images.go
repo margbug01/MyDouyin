@@ -40,6 +40,7 @@ const (
 	keepPictures    = 48
 	pictureBudget   = 12 << 20 // decoded pixels; GPU textures may hold another copy
 	commentFullEdge = 1600
+	wideCoverEdge   = 1760 // 精选's 16:9 cover, whole, for its big card
 	pictureEdge     = 720
 	coverEdge       = 540
 	thumbEdge       = 320

@@ -563,11 +563,19 @@ func (a *app) grid(c *ui.Context, p *page) {
 	}
 	cols := max(2, int((inner+16)/(p.covers.minWidth()+16)))
 	colW := (inner - 16*float32(cols-1)) / float32(cols)
-	hasBig := p == a.picks && cols >= 3 && len(p.list) > 0
+	// 精选's first video spans span columns and two rows; the next ones take
+	// the rest of those two rows, side to a row.
+	span, side, bigH := 0, 0, float32(0)
+	if p == a.picks && cols >= 3 && len(p.list) > 0 {
+		bigH = 2*(colW/p.covers.ratio()+63) + 26
+		span = bigSpan(cols, colW, bigH)
+		side = cols - span
+	}
+	hasBig := span > 0
 	nCardRows := 0
 	if hasBig {
 		nCardRows = 1
-		if rem := len(p.list) - 3; rem > 0 {
+		if rem := len(p.list) - 1 - 2*side; rem > 0 {
 			nCardRows += (rem + cols - 1) / cols
 		}
 	} else if len(p.list) > 0 {
@@ -606,15 +614,21 @@ func (a *app) grid(c *ui.Context, p *page) {
 			return
 		}
 		if hasBig && row == 0 {
-			bigH := 2*(colW/p.covers.ratio()+63) + 26
+			// Grown by their widths, the big card and the cards beside it line
+			// up with the columns under them.
 			ui.Row(c).Padding(0, barGutter, 26, 24).Gap(16).AlignItems(ui.Stretch).Children(func() {
-				a.bigCard(c.Key("0"), p, p.list[0], float32(cols-1), bigH, viewport)
-				ui.Column(c.Key("side")).Grow(1).Basis(0).MinWidth(0).Gap(26).Children(func() {
-					if len(p.list) > 1 {
-						a.card(c.Key("1"), p, 1, p.list[1])
-					}
-					if len(p.list) > 2 {
-						a.card(c.Key("2"), p, 2, p.list[2])
+				a.bigCard(c.Key("0"), p, p.list[0], spanWidth(span, colW), bigH, viewport)
+				ui.Column(c.Key("side")).Grow(spanWidth(side, colW)).Basis(0).MinWidth(0).Gap(26).Children(func() {
+					for r := range 2 {
+						ui.Row(c.Key(fmt.Sprint("side", r))).Gap(16).AlignItems(ui.Start).Children(func() {
+							for j := range side {
+								if idx := 1 + r*side + j; idx < len(p.list) {
+									a.card(c.Key(fmt.Sprint(idx)), p, idx, p.list[idx]).Grow(1).Basis(0).MinWidth(0)
+								} else {
+									ui.Box(c).Grow(1).Basis(0).MinWidth(0)
+								}
+							}
+						})
 					}
 				})
 			})
@@ -622,7 +636,7 @@ func (a *app) grid(c *ui.Context, p *page) {
 		}
 		start := row * cols
 		if hasBig {
-			start = 3 + (row-1)*cols
+			start = 1 + 2*side + (row-1)*cols
 		}
 		ui.Row(c).Padding(0, barGutter, 26, 24).Gap(16).AlignItems(ui.Start).Children(func() {
 			for j := range cols {
@@ -636,6 +650,23 @@ func (a *app) grid(c *ui.Context, p *page) {
 		})
 	}).Grow(1).Padding(4, 0, 0, 0)
 }
+
+// bigSpan is how many of cols columns colW wide 精选's big card spans, h
+// high: those that make it the nearest to 16:9, two at least and one left
+// for the cards beside it, which a window of the usual size shows with it.
+func bigSpan(cols int, colW, h float32) int {
+	off := func(n int) float32 { d := spanWidth(n, colW) - h*16/9; return max(d, -d) }
+	best := 2
+	for n := 3; n < cols; n++ {
+		if off(n) < off(best) {
+			best = n
+		}
+	}
+	return best
+}
+
+// spanWidth is n columns colW wide and the gaps between them.
+func spanWidth(n int, colW float32) float32 { return float32(n)*colW + 16*float32(n-1) }
 
 // card is a video in the grid: its cover with its likes and length, its text
 // in two lines, and its author and day.
@@ -681,11 +712,17 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) ui.Element {
 	return b
 }
 
-// bigCard is 精选's first video across span columns and two rows, playing
-// silent once loaded, its cover until then, with its author and text over it.
-func (a *app) bigCard(c *ui.Context, p *page, s *slot, grow float32, height float32, viewport ui.Element) {
+// bigCard is 精选's first video, width by height, playing silent once
+// loaded, its cover until then, with its author and text over it. A card
+// wider than 4:3 takes the 16:9 cover 精选 has for most videos: its 4:3
+// one would be stretched across it more than twice.
+func (a *app) bigCard(c *ui.Context, p *page, s *slot, width, height float32, viewport ui.Element) {
 	v := s.v
-	b := ui.ButtonBase(c).Grow(grow).Basis(0).MinWidth(0).Height(height).Radius(12).Clip().Background(ui.RGB(0, 0, 0)).FocusRing(false).Label(v.Desc)
+	cover := v.Cover
+	if v.WideCover != "" && width/height > 4.0/3 {
+		cover = v.WideCover
+	}
+	b := ui.ButtonBase(c).Grow(width).Basis(0).MinWidth(0).Height(height).Radius(12).Clip().Background(ui.RGB(0, 0, 0)).FocusRing(false).Label(v.Desc)
 	if nativePlayer(s.vp) {
 		b.Background(ui.Color{})
 	}
@@ -694,7 +731,7 @@ func (a *app) bigCard(c *ui.Context, p *page, s *slot, grow float32, height floa
 			a.mainVideo.video(c, s.vp, true, viewport, 12).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		}
 		if !videoPictureReady(s.vp) {
-			a.playbackCover(c, v.Cover, ui.Cover)
+			a.playbackCover(c, a.img.getSized(cover, wideCoverEdge), ui.Cover)
 		}
 		if v.Live != nil {
 			liveBadge(c)
@@ -819,7 +856,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					a.mainVideo.video(c, s.vp, false, ui.Element{}, 12).Fill().Fit(ui.Contain)
 				}
 				if !videoPictureReady(s.vp) {
-					a.playbackCover(c, s.v.Cover, ui.Contain)
+					a.playbackCover(c, a.img.get(s.v.Cover), ui.Contain)
 				}
 			}
 			a.slideIn(c, s, bounds.H)
@@ -876,10 +913,10 @@ func (a *app) stage(c *ui.Context, p *page) {
 	})
 }
 
-func (a *app) playbackCover(c *ui.Context, url string, fit ui.Fit) {
+func (a *app) playbackCover(c *ui.Context, bmp *ui.Bitmap, fit ui.Fit) {
 	// Keep the cover above the native layer until that layer can display a frame.
 	ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGB(0, 0, 0)).PassThrough().Children(func() {
-		if bmp := a.img.get(url); bmp != nil {
+		if bmp != nil {
 			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(fit).PassThrough()
 		}
 	})
