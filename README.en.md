@@ -166,6 +166,7 @@ go test ./...
 ```
 
 - **macOS (builds both `darwin/arm64` and `windows/amd64` releases)**: Run `./scripts/build-release.sh`. It builds from a clean Git archive and keeps only the latest 1 `build.noindex/release-*` directory by default (run `./scripts/build-release.sh --prune-only --keep 0` after uploading to free disk space).
+- **Publish to Cloudflare R2 update feed and GitHub Releases**: Run `./scripts/publish-release.sh` (uploads versioned binaries to `https://dl.imclawd.tech/mydouyin/` first, then `no-cache` manifests, and mirrors the release to GitHub Releases).
 - **Windows (PowerShell 7)**: Run `./scripts/build-windows.ps1`, which also prunes old `build.noindex/release-*` directories automatically.
 
 ## FAQ

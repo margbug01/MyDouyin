@@ -5,7 +5,12 @@
   "out": "build.noindex",
   "updates": {
     "publicKey": "B7L0fiMl3NgA3GUVbRP8BQpLcQ2dQRgQYgwPjEd2164=",
-    "github": "margbug01/MyDouyin",
+    "url": "https://dl.imclawd.tech/mydouyin",
+    "s3": {
+      "bucket": "almago-releases",
+      "prefix": "mydouyin",
+      "endpoint": "https://f89ce9ab40a8617053dbcbb255991ea3.r2.cloudflarestorage.com"
+    },
     "deltas": 1
   }
 }

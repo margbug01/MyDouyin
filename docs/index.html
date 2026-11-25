@@ -1285,10 +1285,10 @@
         </p>
 
         <div class="hero-ctas">
-          <a class="btn btn-primary" id="primaryDl" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg">
+          <a class="btn btn-primary" id="primaryDl" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.26-arm64.dmg">
             <span id="primaryDlText" data-i18n="dlMac">免费下载 macOS 版（Apple Silicon）</span>
           </a>
-          <a class="btn btn-secondary" id="secondaryDl" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe">
+          <a class="btn btn-secondary" id="secondaryDl" href="https://dl.imclawd.tech/mydouyin/mydouyin-setup-0.2.26-amd64.exe">
             <span id="secondaryDlText" data-i18n="dlWin">免费下载 Windows 版（x64）</span>
           </a>
           <a class="btn btn-ghost" href="#install" data-i18n="allInstall">安装步骤 ↓</a>
@@ -1611,7 +1611,7 @@
         <div class="section-head reveal">
           <span class="eyebrow">DOWNLOAD &amp; INSTALL</span>
           <h2 data-i18n="instTitle">如何在 macOS 和 Windows 上下载安装抖音与红果短剧电脑版</h2>
-          <p data-i18n="instSub">所有版本均免费发布在 GitHub Releases 并附带 SHA256SUMS 校验和，支持安装后在应用内一键升级。</p>
+          <p data-i18n="instSub">安装包优先通过 Cloudflare R2 全球节点高速直连分发，同时同步至 GitHub Releases 并附带 SHA256SUMS 校验和，支持安装后在应用内一键升级。</p>
         </div>
 
         <div class="install-box reveal">
@@ -1622,21 +1622,21 @@
 
           <div class="os-pane active" data-os-pane="mac">
             <div class="dl-list">
-              <a class="dl-card" id="dlMacDmg" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg">
+              <a class="dl-card" id="dlMacDmg" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.26-arm64.dmg">
                 <div>
                   <strong data-i18n="macDmgName">macOS 安装镜像（推荐）</strong>
                   <span id="macDmgFile">mydouyin-0.2.26-arm64.dmg</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
-              <a class="dl-card" id="dlMacTar" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-darwin-arm64.tar.gz">
+              <a class="dl-card" id="dlMacTar" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.26-darwin-arm64.tar.gz">
                 <div>
                   <strong data-i18n="macTarName">macOS 便携压缩包</strong>
                   <span id="macTarFile">mydouyin-0.2.26-darwin-arm64.tar.gz</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
-              <a class="dl-card" id="dlSha1" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS">
+              <a class="dl-card" id="dlSha1" href="https://dl.imclawd.tech/mydouyin/SHA256SUMS">
                 <div>
                   <strong data-i18n="shaName">文件完整性校验 SHA256SUMS</strong>
                   <span>SHA256SUMS</span>
@@ -1660,21 +1660,21 @@
 
           <div class="os-pane" data-os-pane="win">
             <div class="dl-list">
-              <a class="dl-card" id="dlWinExe" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe">
+              <a class="dl-card" id="dlWinExe" href="https://dl.imclawd.tech/mydouyin/mydouyin-setup-0.2.26-amd64.exe">
                 <div>
                   <strong data-i18n="winExeName">Windows 安装程序（推荐）</strong>
                   <span id="winExeFile">mydouyin-setup-0.2.26-amd64.exe</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
-              <a class="dl-card" id="dlWinTar" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-windows-amd64.tar.gz">
+              <a class="dl-card" id="dlWinTar" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.26-windows-amd64.tar.gz">
                 <div>
                   <strong data-i18n="winTarName">Windows 免安装绿色版</strong>
                   <span id="winTarFile">mydouyin-0.2.26-windows-amd64.tar.gz</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
-              <a class="dl-card" id="dlSha2" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS">
+              <a class="dl-card" id="dlSha2" href="https://dl.imclawd.tech/mydouyin/SHA256SUMS">
                 <div>
                   <strong data-i18n="shaName">文件完整性校验 SHA256SUMS</strong>
                   <span>SHA256SUMS</span>
@@ -1685,9 +1685,9 @@
             <div class="cmd-box">
               <div class="cmd-head">
                 <span data-i18n="winPsLabel">PowerShell 一键安装命令</span>
-                <button class="copy-btn" data-copy="irm https://github.com/margbug01/MyDouyin/releases/latest/download/install.ps1 | iex" data-i18n="copyBtn">复制命令</button>
+                <button class="copy-btn" data-copy="irm https://dl.imclawd.tech/mydouyin/install.ps1 | iex" data-i18n="copyBtn">复制命令</button>
               </div>
-              <pre class="code">irm https://github.com/margbug01/MyDouyin/releases/latest/download/install.ps1 | iex</pre>
+              <pre class="code">irm https://dl.imclawd.tech/mydouyin/install.ps1 | iex</pre>
               <ol class="install-steps">
                 <li data-i18n="winS1">下载安装程序运行，或解压绿色包直接启动，无需安装 FFmpeg 或商店 HEVC 扩展。</li>
                 <li data-i18n="winS2">首次运行若触发 SmartScreen 提示，点击「更多信息 › 仍要运行」；Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。</li>
@@ -1853,7 +1853,7 @@
           r3k: "免登录使用", r3a: "红果全程免登录；抖音免登录可看视频、搜索与直播间", r3b: "频繁弹出登录拦截", r3c: "通常需先登录手机端账号环境",
           r4k: "电脑流畅度", r4a: "原生桌面端、硬件解码，Mac 不把缓存写满硬盘", r4b: "多开标签后浏览器内存持续上涨", r4c: "虚拟机/套壳常驻占用高，风扇噪音明显",
           r5k: "安装与更新", r5a: "开箱即用，无需装额外编解码插件，支持应用内一键升级", r5b: "依赖浏览器与插件兼容性", r5c: "体积庞大，每次升级需重新下载完整包",
-          instTitle: "如何在 macOS 和 Windows 上下载安装抖音与红果短剧电脑版", instSub: "所有版本均免费发布在 GitHub Releases 并附带 SHA256SUMS 校验和，支持安装后在应用内一键升级。",
+          instTitle: "如何在 macOS 和 Windows 上下载安装抖音与红果短剧电脑版", instSub: "安装包优先通过 Cloudflare R2 全球节点高速直连分发，同时同步至 GitHub Releases 并附带 SHA256SUMS 校验和，支持安装后在应用内一键升级。",
           macDmgName: "macOS 安装镜像（推荐）", macTarName: "macOS 便携压缩包", winExeName: "Windows 安装程序（推荐）", winTarName: "Windows 免安装绿色版",
           shaName: "文件完整性校验 SHA256SUMS", copyBtn: "复制命令", copied: "已复制",
           macGateLabel: "macOS 首次打开提示「无法验证开发者 / 已损坏」解决命令",
@@ -1932,7 +1932,7 @@
           r3k: "No-login browsing", r3a: "Hongguo needs zero login; Douyin browses public videos & live rooms", r3b: "Frequent login popups", r3c: "Usually requires mobile account setup inside VM",
           r4k: "Desktop comfort", r4a: "Native hardware decode without filling macOS disk cache", r4b: "Browser tab memory climbs over time", r4c: "Heavy VM footprint and loud fans",
           r5k: "Install & updates", r5a: "Ready out of the box with one-click in-app updates", r5b: "Limited by browser codec support", r5c: "Huge installers and manual full re-downloads",
-          instTitle: "How to Download and Install on macOS and Windows", instSub: "All releases ship free on GitHub Releases with SHA256SUMS verification and one-click in-app updates.",
+          instTitle: "How to Download and Install on macOS and Windows", instSub: "Downloads are served directly from Cloudflare R2 edge nodes and mirrored on GitHub Releases with SHA256SUMS verification and one-click in-app updates.",
           macDmgName: "macOS Disk Image (Recommended)", macTarName: "macOS Portable Archive", winExeName: "Windows Installer (Recommended)", winTarName: "Windows Portable Archive",
           shaName: "Checksums (SHA256SUMS)", copyBtn: "Copy", copied: "Copied",
           macGateLabel: "Fix macOS Gatekeeper warning on first launch",
@@ -2118,12 +2118,13 @@
       });
 
       const isWin = /Windows/i.test(navigator.userAgent);
+      const cfBase = "https://dl.imclawd.tech/mydouyin/";
       let latestUrls = {
-        macDmg: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg",
-        macTar: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-darwin-arm64.tar.gz",
-        winExe: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe",
-        winTar: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-windows-amd64.tar.gz",
-        sha: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS"
+        macDmg: cfBase + "mydouyin-0.2.26-arm64.dmg",
+        macTar: cfBase + "mydouyin-0.2.26-darwin-arm64.tar.gz",
+        winExe: cfBase + "mydouyin-setup-0.2.26-amd64.exe",
+        winTar: cfBase + "mydouyin-0.2.26-windows-amd64.tar.gz",
+        sha: cfBase + "SHA256SUMS"
       };
 
       function selectOSTab(os) {
@@ -2182,11 +2183,12 @@
           const exe = find(/setup-.*amd64\.exe$/i);
           const wtar = find(/windows-amd64\.tar\.gz$/i);
           const sha = find(/^SHA256SUMS$/i);
-          if (dmg) { latestUrls.macDmg = dmg.browser_download_url; document.getElementById("dlMacDmg").href = dmg.browser_download_url; document.getElementById("macDmgFile").textContent = dmg.name; }
-          if (mtar) { latestUrls.macTar = mtar.browser_download_url; document.getElementById("dlMacTar").href = mtar.browser_download_url; document.getElementById("macTarFile").textContent = mtar.name; }
-          if (exe) { latestUrls.winExe = exe.browser_download_url; document.getElementById("dlWinExe").href = exe.browser_download_url; document.getElementById("winExeFile").textContent = exe.name; }
-          if (wtar) { latestUrls.winTar = wtar.browser_download_url; document.getElementById("dlWinTar").href = wtar.browser_download_url; document.getElementById("winTarFile").textContent = wtar.name; }
-          if (sha) { latestUrls.sha = sha.browser_download_url; document.getElementById("dlSha1").href = sha.browser_download_url; document.getElementById("dlSha2").href = sha.browser_download_url; }
+          const cfUrl = (asset) => cfBase + encodeURIComponent(asset.name);
+          if (dmg) { latestUrls.macDmg = cfUrl(dmg); document.getElementById("dlMacDmg").href = cfUrl(dmg); document.getElementById("macDmgFile").textContent = dmg.name; }
+          if (mtar) { latestUrls.macTar = cfUrl(mtar); document.getElementById("dlMacTar").href = cfUrl(mtar); document.getElementById("macTarFile").textContent = mtar.name; }
+          if (exe) { latestUrls.winExe = cfUrl(exe); document.getElementById("dlWinExe").href = cfUrl(exe); document.getElementById("winExeFile").textContent = exe.name; }
+          if (wtar) { latestUrls.winTar = cfUrl(wtar); document.getElementById("dlWinTar").href = cfUrl(wtar); document.getElementById("winTarFile").textContent = wtar.name; }
+          if (sha) { latestUrls.sha = cfUrl(sha); document.getElementById("dlSha1").href = cfUrl(sha); document.getElementById("dlSha2").href = cfUrl(sha); }
           applyOSPrimaryCTA();
         })
         .catch(() => {});

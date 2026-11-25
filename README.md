@@ -128,7 +128,7 @@ MyHongguo 是内置在 MyDouyin 中的红果短剧电脑端模式，支持在 Ma
 
 ### macOS（Apple Silicon）安装步骤
 
-1. 打开 [GitHub Releases](https://github.com/margbug01/MyDouyin/releases/latest)，下载最新的 `mydouyin-<版本>-arm64.dmg`。
+1. 直接下载最新安装包（Cloudflare 加速源 `https://dl.imclawd.tech/mydouyin/`，或前往 [GitHub Releases](https://github.com/margbug01/MyDouyin/releases/latest)），获取 `mydouyin-<版本>-arm64.dmg`。
 2. 双击打开 `.dmg`，将 **MyDouyin.app** 拖入「应用程序（Applications）」目录。
 3. 首次打开若因应用未做 Apple 官方公证被系统拦截，在「系统设置 › 隐私与安全性」底部点击「仍要打开」，或在终端执行：
 
@@ -136,13 +136,13 @@ MyHongguo 是内置在 MyDouyin 中的红果短剧电脑端模式，支持在 Ma
 xattr -dr com.apple.quarantine /Applications/MyDouyin.app
 ```
 
-4. 后续有新版本发布时，窗口右上角会出现更新胶囊，点击即可查看更新日志、下载签名增量包并自动重启完成升级。
+4. 后续有新版本发布时，应用自动检查 Cloudflare R2 更新源，窗口右上角出现更新胶囊后点击即可查看更新日志、下载签名增量包并自动重启完成升级。
 
 ### Windows 10 / 11（x64）安装步骤
 
-1. 打开 [GitHub Releases](https://github.com/margbug01/MyDouyin/releases/latest)，下载安装程序 `mydouyin-setup-<版本>-amd64.exe`，或下载免安装压缩包 `mydouyin-<版本>-windows-amd64.tar.gz`。
+1. 直接下载安装程序 `mydouyin-setup-<版本>-amd64.exe` 或免安装压缩包 `mydouyin-<版本>-windows-amd64.tar.gz`（Cloudflare 加速源 `https://dl.imclawd.tech/mydouyin/`，或前往 [GitHub Releases](https://github.com/margbug01/MyDouyin/releases/latest)）。
 2. 直接运行即可播放抖音与红果短剧视频并显示 HEIC 封面，**无需安装 FFmpeg 或微软商店 HEIF/HEVC 扩展**。若使用 Windows N / KN 精简版，请先在「设置 › 应用 › 可选功能」中安装 Media Feature Pack。
-3. 首次运行若触发 Windows SmartScreen 拦截，点击「更多信息 › 仍要运行」；如需校验文件完整性，可比对 Release 附带的 `SHA256SUMS`。
+3. 首次运行若触发 Windows SmartScreen 拦截，点击「更多信息 › 仍要运行」；如需校验文件完整性，可比对附带的 `SHA256SUMS`。
 
 ### 常用快捷键一览
 
@@ -167,6 +167,7 @@ go test ./...
 ```
 
 - **macOS 构建跨平台发布包（默认同时输出 `darwin/arm64` 与 `windows/amd64`）**：运行 `./scripts/build-release.sh`。脚本从干净 Git 快照构建，`build.noindex/release-*` 默认仅保留最新 1 份，上传后可执行 `./scripts/build-release.sh --prune-only --keep 0` 释放磁盘空间。
+- **一键双发到 Cloudflare R2 更新源与 GitHub Releases**：运行 `./scripts/publish-release.sh`（复用本机 `wrangler` 与 `gh`，自动先传大文件再传 `no-cache` 清单；如需只发 R2 可加 `--r2-only`）。
 - **Windows 本地构建（PowerShell 7）**：运行 `./scripts/build-windows.ps1`，默认同样自动清理旧产物并仅保留最新 1 份。
 
 ## 常见问题（FAQ）
