@@ -759,16 +759,23 @@ func TestHGPlayerDanmakuRenderAndToggle(t *testing.T) {
 	mu.Unlock()
 	vp.setPos(10 * time.Second)
 	tt.Frame()
-
-	if !tt.HasText("高能预警弹幕") || !tt.HasText("太爽了吧") {
-		t.Fatalf("expected floating danmaku bullets visible at 10s: %q", tt.Texts())
+	if lanes := a.hg.player.dm.lane; len(lanes) != 2 {
+		t.Fatalf("expected both bullets flying at 10s, lanes %v", lanes)
 	}
+	shown := slices.Clone(tt.Image().Pix)
 
-	// Turning dmOff hides bullets immediately.
+	// Turning dmOff hides bullets immediately: the picture loses them.
 	a.dmOff = true
 	tt.Frame()
-	if tt.HasText("高能预警弹幕") || tt.HasText("太爽了吧") {
-		t.Fatalf("expected danmaku hidden when a.dmOff=true: %q", tt.Texts())
+	hidden := tt.Image().Pix
+	changed := 0
+	for i := 0; i < len(shown); i += 4 {
+		if shown[i] != hidden[i] || shown[i+1] != hidden[i+1] || shown[i+2] != hidden[i+2] {
+			changed++
+		}
+	}
+	if changed < 1000 { // the 弹幕 chip alone changes about 130
+		t.Fatalf("expected the bullets' pixels gone when a.dmOff=true, %d changed", changed)
 	}
 }
 

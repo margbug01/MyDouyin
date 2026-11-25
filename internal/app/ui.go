@@ -6,7 +6,6 @@ import (
 	"math"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -882,21 +881,22 @@ func (a *app) stage(c *ui.Context, p *page) {
 				a.loadDanmaku(s, at)
 			}
 		}
-		danmakuAt := at
-		if s.v.Live != nil && a.liveChat != nil {
-			danmakuAt = time.Since(a.liveChat.started)
-		}
-		danmakuShown := false
 		if !a.clear && (s.v.Live == nil || !a.paused) {
-			// Isolate dynamic danmaku children inside a keyed pass-through layer so
-			// arriving/leaving bullets never shift the positional IDs of caption, rail, or controls.
-			ui.Box(c.Key("danmaku-layer")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Children(func() {
-				danmakuShown = a.danmakuLayer(c, s, bounds.W, danmakuAt)
+			clock := func() time.Duration { // as at: the player's, read again as each frame paints
+				if s.vp == nil {
+					return 0
+				}
+				return s.at()
+			}
+			if s.v.Live != nil && a.liveChat != nil {
+				started := a.liveChat.started
+				clock = func() time.Duration { return time.Since(started) }
+			}
+			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w float32) ([]dmFlying, time.Duration) {
+				return flyDanmaku(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w)
 			})
 		}
-		if danmakuShown && !a.paused {
-			c.AnimationFrame() // they fly
-		} else if s.vp != nil && !a.paused {
+		if s.vp != nil && !a.paused {
 			c.After(500 * time.Millisecond) // the time moves on
 		}
 		overlayHovered := false
@@ -1010,112 +1010,8 @@ func (a *app) playbackStatus(c *ui.Context, s *slot) {
 	})
 }
 
-// flight is how long a bullet comment takes to cross the video.
-const flight = 8 * time.Second
-
-const dmLanes, dmGap = 7, 24 // lanes over the video; px kept between two in a lane
-
-// laneTail is the last comment given a lane: when it set off, how wide.
-type laneTail struct {
-	at   time.Duration
-	w    float32
-	used bool
-}
-
 func (s *slot) clearDanmaku() {
-	s.danmaku, s.dmLane, s.dmWidth, s.dmTail = nil, nil, nil, [dmLanes]laneTail{}
-}
-
-// place gives a comment setting off at at, tw wide, the topmost lane where it
-// neither starts on the last one's tail nor, being faster, catches it up
-// before that one is gone: -1 when none, as Douyin's drops a crowd's excess.
-func (s *slot) place(d dy.Danmaku, tw, w float32) int {
-	fits := func(t laneTail) bool {
-		if !t.used {
-			return true
-		}
-		sec := float32(flight.Seconds())
-		v0, v := (w+t.w)/sec, (w+tw)/sec // px a second: wider ones fly faster
-		if float32((d.At-t.at).Seconds())*v0 < t.w+dmGap {
-			return false
-		}
-		return v <= v0 || float32((t.at+flight-d.At).Seconds())*v <= w-dmGap
-	}
-	lane := -1
-	for i, t := range s.dmTail {
-		if fits(t) {
-			lane = i
-			break
-		}
-	}
-	if lane < 0 && d == s.dmOwn { // the user's own shows anyway, where the last one set off longest ago
-		lane = 0
-		for i, t := range s.dmTail {
-			if t.at < s.dmTail[lane].at {
-				lane = i
-			}
-		}
-	}
-	if lane >= 0 {
-		s.dmTail[lane] = laneTail{d.At, tw, true}
-	}
-	if s.dmLane == nil {
-		s.dmLane = map[dy.Danmaku]int{}
-	}
-	s.dmLane[d] = lane
-	return lane
-}
-
-// danmakuLayer flies the bullet comments of s across the top of the video,
-// w wide, each from its time on, in the lane it got when it set off. It
-// reports whether any shows.
-func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) bool {
-	if a.dmOff || w <= 0 || len(s.danmaku) == 0 {
-		return false
-	}
-	const lane, size = 30, 17
-	shown := false
-	// s.danmaku is time-ordered: jump straight to the first bullet still in flight.
-	start := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At > at-flight })
-	for i := start; i < len(s.danmaku); i++ {
-		d := s.danmaku[i]
-		age := at - d.At
-		if age < 0 {
-			break
-		}
-		if age >= flight {
-			continue
-		}
-		l, ok := s.dmLane[d]
-		if ok && l < 0 {
-			continue
-		}
-		spans, pics := a.emojiSpans(d.Text, size, 600)
-		tw, hasW := s.dmWidth[d]
-		if !hasW {
-			tw, _ = c.MeasureText(0, spans...)
-			if s.dmWidth == nil {
-				s.dmWidth = map[dy.Danmaku]float32{}
-			}
-			s.dmWidth[d] = tw
-		}
-		if !ok {
-			l = s.place(d, tw, w)
-		}
-		if l < 0 {
-			continue
-		}
-		x := w - float32(age)/float32(flight)*(w+tw)
-		if len(pics) == 0 {
-			ui.Text(c.Key(d), d.Text).Absolute().Top(float32(14+l*lane)).Left(0).Translate(x, 0).FontSize(size).FontWeight(600).Label(d.Text).
-				TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine()
-		} else {
-			ui.RichText(c.Key(d), spans...).Absolute().Top(float32(14+l*lane)).Left(0).Translate(x, 0).FontSize(size).FontWeight(600).Label(d.Text).
-				TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine().DrawObjects(pics.draw)
-		}
-		shown = true
-	}
-	return shown
+	s.danmaku, s.dm = nil, dmField{}
 }
 
 // caption is the author, the day and the text, over the foot of the video;
@@ -1417,6 +1313,10 @@ func (a *app) setFullScreen(on bool) {
 	a.theater = on
 }
 
+// progressFPS is how often the bar's fill moves on as the video plays: a few
+// px a second, smooth at it.
+const progressFPS = 30
+
 // progress is the line of how far the video played, over the bar, as
 // Douyin's: inset as the bar's buttons are, thicker under the pointer with a
 // knob, the stretch up to the pointer lighter and the time there above it.
@@ -1463,6 +1363,13 @@ func (a *app) progress(c *ui.Context, s *slot, at, of time.Duration) {
 		pointer = a.dragAt
 	}
 	bar.Draw(func(p *ui.Painter, r ui.Rect) {
+		f := f
+		if s.vp != nil && !a.dragging && of > 0 { // the clock as it paints, gliding without building the view
+			f = min(1, float32(s.at())/float32(of))
+			if !a.paused {
+				p.AnimationFrameRate(progressFPS)
+			}
+		}
 		h := float32(3)
 		if hot {
 			h = 5
@@ -2177,6 +2084,7 @@ type emojiRef struct {
 type emojiCached struct {
 	spans []ui.Span
 	refs  []emojiRef
+	dm    *dmShaped // the text shaped as a bullet comment, once one shows it (danmakuText)
 }
 
 // emojiSpans are text in size and weight, the emoji it names objects in it,

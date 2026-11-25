@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -528,7 +529,7 @@ func TestControlBar(t *testing.T) {
 // at any moment of its flight; the excess is dropped, the user's own is not.
 func TestDanmakuLanesNeverOverlap(t *testing.T) {
 	const w = 800
-	s := &slot{}
+	f := &dmField{}
 	type flying struct {
 		d    dy.Danmaku
 		tw   float32
@@ -539,9 +540,9 @@ func TestDanmakuLanesNeverOverlap(t *testing.T) {
 		d := dy.Danmaku{At: time.Duration(i) * 45 * time.Millisecond, Text: fmt.Sprint(i)}
 		tw := float32(40 + i*37%300) // mixed widths: wide ones fly faster
 		if i == 150 {
-			s.dmOwn = d
+			f.own = d
 		}
-		all = append(all, flying{d, tw, s.place(d, tw, w)})
+		all = append(all, flying{d, tw, f.place(d, tw, w)})
 	}
 	placed := 0
 	for _, f := range all {
@@ -555,7 +556,7 @@ func TestDanmakuLanesNeverOverlap(t *testing.T) {
 	for at := time.Duration(0); at < 18*time.Second; at += 20 * time.Millisecond {
 		for i, a := range all {
 			for _, b := range all[i+1:] {
-				if a.lane < 0 || a.lane != b.lane || a.d == s.dmOwn || b.d == s.dmOwn {
+				if a.lane < 0 || a.lane != b.lane || a.d == f.own || b.d == f.own {
 					continue
 				}
 				ageA, ageB := at-a.d.At, at-b.d.At
@@ -572,6 +573,8 @@ func TestDanmakuLanesNeverOverlap(t *testing.T) {
 	}
 }
 
+func sameDanmaku(d dy.Danmaku) dy.Danmaku { return d }
+
 // Dense traffic must keep entering at the right, even with over 40 older
 // comments still crossing the video. Lane spacing already bounds the crowd.
 func TestDanmakuCrowdFillsWidth(t *testing.T) {
@@ -585,23 +588,12 @@ func TestDanmakuCrowdFillsWidth(t *testing.T) {
 				})
 			}
 			a := &app{}
-			var at time.Duration
-			tt := ui.NewTester(func(c *ui.Context) {
-				ui.Box(c).Fill().Clip().Children(func() { a.danmakuLayer(c, s, width, at) })
-			}, int(width), 240)
-			for at = 250 * time.Millisecond; at <= 12*time.Second; at += 250 * time.Millisecond {
-				tt.Frame()
+			for at := 250 * time.Millisecond; at <= 12*time.Second; at += 250 * time.Millisecond {
+				flying, _ := flyDanmaku(a, &s.dm, s.danmaku, sameDanmaku, at, width)
 				if at < flight {
 					continue
 				}
-				entering := false
-				for _, d := range s.danmaku {
-					if r, ok := tt.Find(d.Text); ok && r.X >= width*0.9 && r.X < width {
-						entering = true
-						break
-					}
-				}
-				if !entering {
+				if !slices.ContainsFunc(flying, func(f dmFlying) bool { return f.x >= width*0.9 && f.x < width }) {
 					t.Fatalf("at %v: no comments entering the rightmost 10%% of width %v", at, width)
 				}
 			}
@@ -609,35 +601,80 @@ func TestDanmakuCrowdFillsWidth(t *testing.T) {
 	}
 }
 
-// A bullet comment shows from its time for flight, and not before or after;
-// hidden, none shows.
-func TestDanmakuLayer(t *testing.T) {
+// A bullet comment flies from its time for flight, and not before or after;
+// those flown are let go, and the one still flying keeps its lane.
+func TestDanmakuFlight(t *testing.T) {
 	s := &slot{danmaku: []dy.Danmaku{{At: time.Second, Text: "早了"}, {At: 3 * time.Second, Text: "正在飞"}, {At: 9 * time.Second, Text: "还没到"}}}
 	a := &app{}
-	at := 5 * time.Second
-	var shown bool
+	fly := func(at time.Duration) (map[string]dmFlying, time.Duration) {
+		flying, next := flyDanmaku(a, &s.dm, s.danmaku, sameDanmaku, at, 800)
+		m := map[string]dmFlying{}
+		for _, f := range flying {
+			m[f.d.Text] = f
+		}
+		return m, next
+	}
+	at5, next := fly(5 * time.Second)
+	if _, ok := at5["早了"]; !ok || len(at5) != 2 || next != 4*time.Second {
+		t.Fatalf("at 5s: %v, next in %v", at5, next)
+	}
+	at10, next := fly(10 * time.Second)
+	if _, ok := at10["早了"]; ok || len(at10) != 2 || next != -1 {
+		t.Fatalf("at 10s: %v, next in %v", at10, next)
+	}
+	if at10["正在飞"].x >= at5["正在飞"].x {
+		t.Fatalf("did not fly left: %v -> %v", at5["正在飞"].x, at10["正在飞"].x)
+	}
+	a.loadDanmaku(s, 10*time.Second)
+	after, _ := fly(10 * time.Second)
+	if len(s.danmaku) != 2 || after["正在飞"].y != at10["正在飞"].y {
+		t.Fatalf("after letting go of the first: %d left, y %v -> %v", len(s.danmaku), at10["正在飞"].y, after["正在飞"].y)
+	}
+}
+
+// Flying comments repaint the layer on their own, without building the view
+// again, and stop asking for frames once paused or turned off; then the
+// layer paints nothing.
+func TestDanmakuLayerPaintsWithoutBuildingTheView(t *testing.T) {
+	s := &slot{danmaku: []dy.Danmaku{{At: 0, Text: "前方高能弹幕"}}}
+	a := &app{}
+	at, moving, builds := 2*time.Second, true, 0
 	tt := ui.NewTester(func(c *ui.Context) {
-		ui.Box(c).Fill().Children(func() { shown = a.danmakuLayer(c, s, 800, at) })
-	}, 800, 400)
-	if !shown || !tt.HasText("早了") || !tt.HasText("正在飞") || tt.HasText("还没到") {
-		t.Fatalf("at 5s: %q", tt.Texts())
+		builds++
+		ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).Children(func() {
+			a.danmakuLayer(c, "dm", moving, func(w float32) ([]dmFlying, time.Duration) {
+				return flyDanmaku(a, &s.dm, s.danmaku, sameDanmaku, at, w)
+			})
+		})
+	}, 800, 200)
+	ink := func() (n int) {
+		img := tt.Image()
+		for i := 0; i < len(img.Pix); i += 4 {
+			if img.Pix[i] > 200 && img.Pix[i+1] > 200 && img.Pix[i+2] > 200 {
+				n++
+			}
+		}
+		return n
 	}
-	at = 10 * time.Second
-	tt.Frame()
-	if tt.HasText("早了") || !tt.HasText("正在飞") || !tt.HasText("还没到") {
-		t.Fatalf("at 10s: %q", tt.Texts())
+	before, first := builds, tt.Image()
+	if ink() == 0 || !tt.FramePending() {
+		t.Fatalf("flying: %d white pixels, frame pending %v", ink(), tt.FramePending())
 	}
-	// Those flown are let go; the one still flying keeps its lane.
-	before, _ := tt.Find("正在飞")
-	a.loadDanmaku(s, at)
+	frame0 := slices.Clone(first.Pix)
+	at += 500 * time.Millisecond
+	tt.Advance(time.Second / dmFPS)
+	if builds != before || slices.Equal(frame0, tt.Image().Pix) {
+		t.Fatalf("moving took %d builds of the view, picture changed %v", builds-before, !slices.Equal(frame0, tt.Image().Pix))
+	}
+	moving = false
 	tt.Frame()
-	if after, ok := tt.Find("正在飞"); len(s.danmaku) != 2 || !ok || after.Y != before.Y {
-		t.Fatalf("after letting go of the first: %d left, y %v -> %v", len(s.danmaku), before.Y, after.Y)
+	if ink() == 0 || tt.FramePending() {
+		t.Fatalf("paused: %d white pixels, frame pending %v", ink(), tt.FramePending())
 	}
 	a.dmOff = true
 	tt.Frame()
-	if shown || tt.HasText("正在飞") {
-		t.Fatal("hidden bullet comments showed")
+	if ink() != 0 {
+		t.Fatalf("turned off: %d white pixels", ink())
 	}
 }
 
@@ -1865,6 +1902,36 @@ func TestRepliesVerifyOnce(t *testing.T) {
 	run(passed)
 	if len(a.login.retry) != 1 || !strings.Contains(passed.msg, "验证过了") {
 		t.Fatalf("verified, held back still: %d waiting, %q", len(a.login.retry), passed.msg)
+	}
+}
+
+// The progress line follows the playing video between the view's builds, as
+// the bullet comments do, rather than in its half-second steps.
+func TestProgressGlidesBetweenBuilds(t *testing.T) {
+	p := stub("推荐", 1)
+	s := p.list[0]
+	s.v.Duration, s.resume = time.Minute, 10*time.Second
+	ready(t, s)
+	a := withRoots(&app{pages: []*page{p}, dmOff: true})
+	tt := newTester(a)
+	tt.Advance(300 * time.Millisecond) // the controls faded in
+	r, ok := tt.Find("进度")
+	if !ok {
+		t.Fatalf("no progress line: %q", tt.Texts())
+	}
+	line := func() []byte {
+		img := tt.Image()
+		var out []byte
+		for y := int(r.Y); y < int(r.Y+r.H); y++ {
+			out = append(out, img.Pix[y*img.Stride+int(r.X)*4:y*img.Stride+int(r.X+r.W)*4]...)
+		}
+		return out
+	}
+	before := line()
+	s.resume += 6 * time.Second
+	tt.Advance(40 * time.Millisecond)
+	if slices.Equal(before, line()) {
+		t.Fatal("the progress line stood still while the video played on")
 	}
 }
 

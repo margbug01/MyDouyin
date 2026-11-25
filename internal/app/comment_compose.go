@@ -139,10 +139,7 @@ func (a *app) ensureEmojis() {
 			applyEmojiAliases(m)
 			a.emojiList = list
 			a.emoji = m
-			a.emojiCache = nil
-			if a.hg != nil && a.hg.player != nil {
-				a.hg.player.dmWidth = nil
-			}
+			a.emojiCache = nil // and with it the bullet comments shaped without these emoji
 		})
 	}()
 }

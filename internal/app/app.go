@@ -48,11 +48,8 @@ type slot struct {
 	seeking    bool
 	dmGen      int // counts seeks: bullet comments loaded before one are let go
 
-	danmaku   []dy.Danmaku           // the bullet comments loaded, in time order
-	dmLane    map[dy.Danmaku]int     // each one's lane once it set off, kept as it flies; -1: no room, not shown
-	dmWidth   map[dy.Danmaku]float32 // each one's measured width, cached once when placed
-	dmTail    [dmLanes]laneTail
-	dmOwn     dy.Danmaku    // the user's last sent: shown even when the lanes are full
+	danmaku   []dy.Danmaku  // the bullet comments loaded, in time order
+	dm        dmField       // where they fly
 	dmTo      time.Duration // how far into the video they are loaded
 	dmLoading bool
 	lastAt    time.Duration // where the view last saw it, which a loop goes back from
@@ -835,7 +832,7 @@ func (a *app) sendBullet(s *slot) {
 	d := dy.Danmaku{At: at + 300*time.Millisecond, Text: text}
 	i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At > d.At })
 	s.danmaku = slices.Insert(s.danmaku, i, d)
-	s.dmOwn = d
+	s.dm.own = d
 	a.dmText, a.dmOff = "", false
 	id := s.v.ID
 	go func() {
@@ -915,8 +912,7 @@ func (a *app) setSpeed(s float64) {
 func (s *slot) pruneDanmaku(at time.Duration) {
 	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flight }); i > 0 {
 		for _, d := range s.danmaku[:i] {
-			delete(s.dmLane, d)
-			delete(s.dmWidth, d)
+			delete(s.dm.lane, d)
 		}
 		s.danmaku = slices.Delete(s.danmaku, 0, i)
 	}

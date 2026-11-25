@@ -14,6 +14,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"douyin/internal/dy"
 	"douyin/internal/hg"
 	"douyin/internal/media"
 )
@@ -129,9 +130,7 @@ type hgPlayer struct {
 
 	// Danmaku playback state.
 	danmaku   []hg.Danmaku
-	dmLane    map[hg.Danmaku]int
-	dmWidth   map[hg.Danmaku]float32
-	dmTail    [dmLanes]laneTail
+	dm        dmField // where they fly
 	dmCursor  string
 	dmHasMore bool
 	dmTotal   int
@@ -217,9 +216,7 @@ func (hp *hgPlayer) clearDanmaku() {
 		return
 	}
 	hp.danmaku = nil
-	hp.dmLane = nil
-	hp.dmWidth = nil
-	hp.dmTail = [dmLanes]laneTail{}
+	hp.dm = dmField{}
 	hp.dmCursor = ""
 	hp.dmHasMore = false
 	hp.dmTotal = 0
@@ -232,9 +229,7 @@ func (hp *hgPlayer) resetDanmakuLayout() {
 	if hp == nil {
 		return
 	}
-	hp.dmLane = nil
-	hp.dmWidth = nil
-	hp.dmTail = [dmLanes]laneTail{}
+	hp.dm = dmField{}
 }
 
 func (hp *hgPlayer) isSeeking() bool {
@@ -1293,85 +1288,6 @@ func (a *app) hgLoadDanmaku(hp *hgPlayer, ep hg.Episode, startMs int64, cursor s
 	}()
 }
 
-func (hp *hgPlayer) placeDanmaku(d hg.Danmaku, tw, w float32) int {
-	fits := func(t laneTail) bool {
-		if !t.used {
-			return true
-		}
-		sec := float32(flight.Seconds())
-		v0, v := (w+t.w)/sec, (w+tw)/sec
-		if float32((d.At-t.at).Seconds())*v0 < t.w+dmGap {
-			return false
-		}
-		return v <= v0 || float32((t.at+flight-d.At).Seconds())*v <= w-dmGap
-	}
-	lane := -1
-	for i, t := range hp.dmTail {
-		if fits(t) {
-			lane = i
-			break
-		}
-	}
-	if lane >= 0 {
-		hp.dmTail[lane] = laneTail{d.At, tw, true}
-	}
-	if hp.dmLane == nil {
-		hp.dmLane = map[hg.Danmaku]int{}
-	}
-	hp.dmLane[d] = lane
-	return lane
-}
-
-func (a *app) hgDanmakuLayer(c *ui.Context, hp *hgPlayer, w float32, at time.Duration) bool {
-	if a.dmOff || a.clear || hp == nil || w <= 0 || len(hp.danmaku) == 0 {
-		return false
-	}
-	const lane, size = 30, 17
-	shown := false
-	start := sort.Search(len(hp.danmaku), func(i int) bool { return hp.danmaku[i].At > at-flight })
-	for i := start; i < len(hp.danmaku); i++ {
-		d := hp.danmaku[i]
-		age := at - d.At
-		if age < 0 {
-			break
-		}
-		if age >= flight {
-			continue
-		}
-		l, ok := hp.dmLane[d]
-		if ok && l < 0 {
-			continue
-		}
-		spans, pics := a.emojiSpans(d.Text, size, 600)
-		tw, hasW := hp.dmWidth[d]
-		if !hasW {
-			tw, _ = c.MeasureText(0, spans...)
-			if hp.dmWidth == nil {
-				hp.dmWidth = map[hg.Danmaku]float32{}
-			}
-			hp.dmWidth[d] = tw
-		}
-		if !ok {
-			l = hp.placeDanmaku(d, tw, w)
-		}
-		if l < 0 {
-			continue
-		}
-		x := w - float32(age)/float32(flight)*(w+tw)
-		if len(pics) == 0 {
-			ui.Text(c.Key(d), d.Text).Absolute().Top(float32(14+l*lane)).Left(0).Translate(x, 0).
-				FontSize(size).FontWeight(600).Label(d.Text).
-				TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine()
-		} else {
-			ui.RichText(c.Key(d), spans...).Absolute().Top(float32(14+l*lane)).Left(0).Translate(x, 0).
-				FontSize(size).FontWeight(600).Label(d.Text).
-				TextColor(ui.RGBA(255, 255, 255, 0.92)).TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.7)).SingleLine().DrawObjects(pics.draw)
-		}
-		shown = true
-	}
-	return shown
-}
-
 // hgPlayerView renders the Hongguo native playback stage beside a collapsible
 // episode drawer (and supports full-window theater mode).
 func (a *app) hgPlayerView(c *ui.Context, h *hgApp, p *hgPage) {
@@ -1493,15 +1409,12 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		dur := hp.duration()
 		a.hgTick(hp, at, dur)
 
-		danmakuShown := false
-		if !a.clear && !a.dmOff {
-			ui.Box(c.Key("hg-danmaku-layer")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Children(func() {
-				danmakuShown = a.hgDanmakuLayer(c, hp, bounds.W, at)
+		if !a.clear {
+			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w float32) ([]dmFlying, time.Duration) {
+				return flyDanmaku(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, hp.at(), w)
 			})
 		}
-		if danmakuShown && !hp.paused {
-			c.AnimationFrame()
-		} else if hp.pl.vp != nil && !hp.paused {
+		if hp.pl.vp != nil && !hp.paused {
 			c.After(500 * time.Millisecond)
 		}
 
@@ -1762,6 +1675,13 @@ func (a *app) hgProgress(c *ui.Context, hp *hgPlayer, at, dur time.Duration) {
 		pointer = hp.dragAt
 	}
 	bar.Draw(func(p *ui.Painter, r ui.Rect) {
+		f := f
+		if hp.pl.vp != nil && !hp.dragging && dur > 0 { // the clock as it paints, gliding without building the view
+			f = min(1, float32(hp.at())/float32(dur))
+			if !hp.paused {
+				p.AnimationFrameRate(progressFPS)
+			}
+		}
 		h := float32(3)
 		if hot {
 			h = 5
