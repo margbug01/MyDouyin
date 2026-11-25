@@ -42,7 +42,7 @@ const (
 	commentFullEdge = 1600
 	wideCoverEdge   = 1760 // 精选's 16:9 cover, whole, for its big card
 	pictureEdge     = 720
-	coverEdge       = 540
+	coverEdge       = 640 // 精选's and 直播's covers whole: a card 2x wide needs about as much
 	thumbEdge       = 320
 	commentPicEdge  = 256
 	avatarEdge      = 160
