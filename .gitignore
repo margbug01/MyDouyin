@@ -2,4 +2,5 @@ ref/
 *.mp4
 !testdata/silent.mp4
 build.noindex/
+.wrangler/
 .DS_Store
