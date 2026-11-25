@@ -298,7 +298,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 8px 10px 8px 8px;
+      padding: 7px 9px;
       border-radius: 999px;
       background: var(--bg-elev);
       backdrop-filter: blur(20px) saturate(1.6);
@@ -309,24 +309,17 @@
 
     .brand-switcher {
       position: relative;
-      display: inline-flex;
+      display: inline-grid;
+      grid-template-columns: 1fr 1fr;
       align-items: center;
-      padding: 3px;
-      border-radius: 999px;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
     }
     .brand-pill-bg {
       position: absolute;
-      top: 3px;
-      left: 3px;
-      height: calc(100% - 6px);
-      width: calc(50% - 3px);
+      inset: 0;
+      width: 50%;
       border-radius: 999px;
-      background: var(--surface);
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-      border: 1px solid var(--border);
-      transition: transform 0.36s var(--ease);
+      background: var(--surface-2);
+      transition: transform 0.32s var(--ease);
     }
     html[data-mode="hongguo"] .brand-pill-bg {
       transform: translateX(100%);
@@ -336,28 +329,22 @@
       z-index: 1;
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 7px;
       padding: 6px 13px;
       border-radius: 999px;
-      font-size: 13px;
+      font-size: 13.5px;
       font-weight: 650;
       letter-spacing: -0.01em;
-      color: var(--ink-2);
+      color: var(--ink-3);
       transition: color 0.25s ease;
       white-space: nowrap;
     }
+    .brand-btn:hover { color: var(--ink-2); }
     .brand-btn img {
       width: 20px;
       height: 20px;
       border-radius: 5px;
-    }
-    .brand-btn .kbd-mini {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 5px;
-      background: var(--surface-3);
-      color: var(--ink-3);
     }
     html[data-mode="douyin"] .brand-btn[data-switch="douyin"],
     html[data-mode="hongguo"] .brand-btn[data-switch="hongguo"] {
@@ -385,36 +372,34 @@
     .topbar-actions {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
     }
     .icon-pill {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 6px;
-      height: 34px;
-      padding: 0 11px;
+      height: 32px;
+      padding: 0 10px;
       border-radius: 999px;
       font-size: 12.5px;
       font-weight: 600;
       color: var(--ink-2);
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      transition: transform 0.18s var(--ease), color 0.2s, border-color 0.2s;
+      background: transparent;
+      transition: background 0.2s, color 0.2s;
     }
     .icon-pill:hover {
+      background: var(--surface-2);
       color: var(--ink);
-      border-color: var(--border-strong);
-      transform: translateY(-1px);
     }
-    .icon-pill.icon-only { width: 34px; padding: 0; }
+    .icon-pill.icon-only { width: 32px; padding: 0; }
     .icon-pill.gh-link {
       background: var(--ink);
       color: var(--bg);
-      border-color: transparent;
+      margin-left: 4px;
       padding: 0 13px;
     }
-    .icon-pill.gh-link:hover { color: var(--bg); opacity: 0.9; }
+    .icon-pill.gh-link:hover { background: var(--ink); color: var(--bg); opacity: 0.88; }
 
     /* Hero */
     .hero {
@@ -765,33 +750,31 @@
       flex-wrap: wrap;
       align-items: center;
       justify-content: center;
-      gap: 10px;
-      margin-top: 18px;
-      padding: 12px 16px;
-      border-radius: 18px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow-sm);
+      gap: 8px 14px;
+      margin-top: 16px;
+      padding: 6px 4px;
     }
-    .kbd-dock-label { font-size: 12px; font-weight: 600; color: var(--ink-3); margin-right: 4px; }
+    .kbd-dock-label { font-size: 12px; font-weight: 600; color: var(--ink-3); }
     .key-item {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      padding: 5px 10px 5px 6px;
-      border-radius: 10px;
+      gap: 6px;
+      padding: 4px 6px;
+      border-radius: 8px;
       font-size: 12.5px;
       color: var(--ink-2);
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      transition: transform 0.12s ease, border-color 0.2s, background 0.2s, color 0.2s;
+      transition: transform 0.12s ease, color 0.2s;
     }
-    .key-item:hover { color: var(--ink); border-color: var(--border-strong); }
+    .key-item:hover { color: var(--ink); }
     .key-item.pressed {
       transform: translateY(2px) scale(0.97);
+      color: var(--accent);
+    }
+    .key-item.pressed .keycap {
       background: var(--accent-soft);
       border-color: var(--accent);
-      color: var(--ink);
+      color: var(--accent);
+      box-shadow: none;
     }
     .keycap {
       font-family: var(--font-mono);
@@ -839,25 +822,18 @@
       line-height: 1.72;
     }
 
-    /* Entity Definition Spec Card */
-    .entity-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 28px 30px;
-      box-shadow: var(--shadow-sm);
-    }
+    /* Entity Definition Spec Grid */
     .spec-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 14px;
-      margin-top: 20px;
     }
     .spec-item {
-      padding: 15px 16px;
-      border-radius: 14px;
-      background: var(--surface-2);
+      padding: 18px 20px;
+      border-radius: var(--radius-md);
+      background: var(--surface);
       border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
     }
     .spec-item dt {
       font-size: 12px;
@@ -999,28 +975,33 @@
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       padding: 28px;
-      box-shadow: var(--shadow-md);
+      box-shadow: var(--shadow-sm);
     }
     .os-tabs {
-      display: inline-flex;
-      padding: 4px;
-      border-radius: 999px;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      margin-bottom: 22px;
+      display: flex;
+      gap: 24px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
     }
     .os-tab {
-      padding: 8px 18px;
-      border-radius: 999px;
-      font-size: 13.5px;
+      position: relative;
+      padding: 0 2px 12px;
+      font-size: 14px;
       font-weight: 650;
-      color: var(--ink-2);
-      transition: all 0.22s var(--ease);
+      color: var(--ink-3);
+      transition: color 0.2s;
     }
-    .os-tab.active {
-      background: var(--surface);
-      color: var(--ink);
-      box-shadow: var(--shadow-sm);
+    .os-tab:hover { color: var(--ink-2); }
+    .os-tab.active { color: var(--ink); }
+    .os-tab.active::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -1px;
+      height: 2px;
+      border-radius: 2px;
+      background: var(--accent);
     }
     .os-pane { display: none; }
     .os-pane.active {
@@ -1043,7 +1024,7 @@
     }
     .dl-card:hover { border-color: var(--accent); transform: translateY(-1px); }
     .dl-card strong { display: block; font-size: 14px; }
-    .dl-card span { display: block; font-size: 12px; color: var(--ink-3); font-family: var(--font-mono); }
+    .dl-card div span { display: block; font-size: 12px; color: var(--ink-3); font-family: var(--font-mono); }
     .dl-arrow {
       width: 34px;
       height: 34px;
@@ -1054,12 +1035,10 @@
       color: var(--bg);
       flex: 0 0 34px;
       font-size: 15px;
+      font-weight: 700;
     }
     .cmd-box {
-      padding: 16px;
-      border-radius: 14px;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
+      padding: 4px 0 0;
     }
     .cmd-head {
       display: flex;
@@ -1203,15 +1182,13 @@
     <header class="topbar" role="banner">
       <div class="brand-switcher" role="tablist" aria-label="切换模式">
         <span class="brand-pill-bg" aria-hidden="true"></span>
-        <button class="brand-btn" data-switch="douyin" role="tab" aria-selected="true">
+        <button class="brand-btn" data-switch="douyin" role="tab" aria-selected="true" title="快捷键 ⌘1">
           <img src="douyin-icon.png" width="20" height="20" alt="MyDouyin 抖音桌面客户端图标">
           <span>MyDouyin</span>
-          <span class="kbd-mini">⌘1</span>
         </button>
-        <button class="brand-btn" data-switch="hongguo" role="tab" aria-selected="false">
+        <button class="brand-btn" data-switch="hongguo" role="tab" aria-selected="false" title="快捷键 ⌘2">
           <img src="hongguo-icon.png" width="20" height="20" alt="MyHongguo 红果短剧电脑版图标">
           <span>MyHongguo</span>
-          <span class="kbd-mini">⌘2</span>
         </button>
       </div>
 
@@ -1384,14 +1361,13 @@
     <!-- Entity Definition & Spec Table -->
     <section class="block" id="what-is">
       <div class="container">
-        <div class="entity-card reveal">
-          <div class="section-head" style="margin-bottom: 18px; text-align: left; max-width: none;">
-            <span class="eyebrow">ENTITY OVERVIEW</span>
-            <h2 data-i18n="whatTitle">MyDouyin · MyHongguo 是什么？</h2>
-            <p data-i18n="whatDesc">MyDouyin · MyHongguo 是一款面向 macOS（Apple Silicon）和 Windows 10/11 用户的开源原生桌面软件，在一个应用内同时提供「抖音桌面端（MyDouyin）」与「红果短剧电脑版（MyHongguo）」。它直接运行在电脑桌面，无需安卓模拟器或浏览器多标签，适合想在电脑大屏刷抖音、看直播以及免费追红果短剧和漫剧的用户。</p>
-          </div>
+        <div class="section-head reveal">
+          <span class="eyebrow">ENTITY OVERVIEW</span>
+          <h2 data-i18n="whatTitle">MyDouyin · MyHongguo 是什么？</h2>
+          <p data-i18n="whatDesc">MyDouyin · MyHongguo 是一款面向 macOS（Apple Silicon）和 Windows 10/11 用户的开源原生桌面软件，在一个应用内同时提供「抖音桌面端（MyDouyin）」与「红果短剧电脑版（MyHongguo）」。它直接运行在电脑桌面，无需安卓模拟器或浏览器多标签，适合想在电脑大屏刷抖音、看直播以及免费追红果短剧和漫剧的用户。</p>
+        </div>
 
-          <dl class="spec-grid">
+        <dl class="spec-grid reveal">
             <div class="spec-item">
               <dt data-i18n="s1k">核心用途</dt>
               <dd data-i18n="s1v">电脑端刷抖音视频、看抖音直播 + 免登录免费追红果短剧与漫剧</dd>
@@ -1417,7 +1393,6 @@
               <dd data-i18n="s6v">零遥测、不上传统计，登录态与红果追剧进度全部保存在本机</dd>
             </div>
           </dl>
-        </div>
       </div>
     </section>
 
