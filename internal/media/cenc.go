@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	cencProbeSize    = 64 << 10 // 64 KiB initial HTTP Range probe
-	cencMaxMoovBytes = 64 << 20 // 64 MiB safety cap for moov
-	cencMaxMoofBytes = 16 << 20 // 16 MiB safety cap for a single moof
-	cencMaxAuxBytes  = 16 << 20 // 16 MiB safety cap for saio aux info
+	cencProbeSize    = 512 << 10 // 512 KiB initial HTTP Range probe (covers typical moov + opening frames in 1 RTT)
+	cencMaxMoovBytes = 64 << 20  // 64 MiB safety cap for moov
+	cencMaxMoofBytes = 16 << 20  // 16 MiB safety cap for a single moof
+	cencMaxAuxBytes  = 16 << 20  // 16 MiB safety cap for saio aux info
 )
 
 // PIFF SampleEncryptionBox UUID: a2394f52-5a9b-4f14-a244-6c427c648df4
@@ -281,12 +281,47 @@ func (p *cencPlan) lookupCached(offset, length uint64) ([]byte, bool) {
 	return nil, false
 }
 
+// lookupCachedPrefix returns the longest contiguous cached slice starting at
+// offset (up to maxLen bytes), allowing range responses to stream cached head
+// bytes immediately at 0 ms before fetching only the uncached tail upstream.
+func (p *cencPlan) lookupCachedPrefix(offset, maxLen uint64) []byte {
+	if maxLen == 0 {
+		return nil
+	}
+	var best []byte
+	for _, b := range p.cached {
+		bEnd := b.offset + uint64(len(b.data))
+		if offset >= b.offset && offset < bEnd {
+			avail := min(maxLen, bEnd-offset)
+			if uint64(len(best)) < avail {
+				best = b.data[offset-b.offset : offset-b.offset+avail]
+			}
+		}
+	}
+	return best
+}
+
 func (p *cencPlan) readBytes(ctx context.Context, offset, length uint64) ([]byte, error) {
 	if length == 0 {
 		return nil, nil
 	}
 	if b, ok := p.lookupCached(offset, length); ok {
 		return b, nil
+	}
+	if prefix := p.lookupCachedPrefix(offset, length); len(prefix) > 0 {
+		remOff := offset + uint64(len(prefix))
+		remLen := length - uint64(len(prefix))
+		tail, _, err := p.fetchRange(ctx, int64(remOff), int64(remOff+remLen-1))
+		if err != nil {
+			return nil, err
+		}
+		if uint64(len(tail)) < remLen {
+			return nil, io.ErrUnexpectedEOF
+		}
+		out := make([]byte, length)
+		copy(out, prefix)
+		copy(out[len(prefix):], tail[:remLen])
+		return out, nil
 	}
 	end := offset + length - 1
 	data, _, err := p.fetchRange(ctx, int64(offset), int64(end))
@@ -1887,19 +1922,65 @@ func (p *cencPlan) serve(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Fast path: range is completely covered by cached probe/moov bytes.
-	if cached, hit := p.lookupCached(uint64(start), uint64(reqLen)); hit {
+	// Fast path: serve any cached prefix immediately (0 ms TTFB), then fetch
+	// only the uncached tail from upstream if the request extends further.
+	if prefix := p.lookupCachedPrefix(uint64(start), uint64(reqLen)); len(prefix) > 0 {
 		writeHeaders()
 		var stackBuf [32 << 10]byte
 		pos := uint64(start)
-		for len(cached) > 0 {
-			n := copy(stackBuf[:], cached)
+		remPrefix := prefix
+		for len(remPrefix) > 0 {
+			n := copy(stackBuf[:], remPrefix)
 			p.transformChunk(stackBuf[:n], pos)
 			if _, err := w.Write(stackBuf[:n]); err != nil {
 				return
 			}
-			cached = cached[n:]
+			remPrefix = remPrefix[n:]
 			pos += uint64(n)
+		}
+		if int64(len(prefix)) >= reqLen {
+			return
+		}
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		tailStart := start + int64(len(prefix))
+		remaining := end - tailStart + 1
+		upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, p.source, nil)
+		if err != nil {
+			return
+		}
+		for k, v := range p.headers {
+			upReq.Header.Set(k, v)
+		}
+		upReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", tailStart, end))
+		resp, err := p.client.Do(upReq)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+			return
+		}
+		if resp.StatusCode == http.StatusOK && tailStart > 0 {
+			if _, err := io.CopyN(io.Discard, resp.Body, tailStart); err != nil {
+				return
+			}
+		}
+		reader := io.LimitReader(resp.Body, remaining)
+		for remaining > 0 {
+			n, rerr := reader.Read(stackBuf[:min(int64(len(stackBuf)), remaining)])
+			if n > 0 {
+				p.transformChunk(stackBuf[:n], pos)
+				if _, werr := w.Write(stackBuf[:n]); werr != nil {
+					return
+				}
+				pos += uint64(n)
+				remaining -= int64(n)
+			}
+			if rerr != nil {
+				return
+			}
 		}
 		return
 	}

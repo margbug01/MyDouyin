@@ -175,3 +175,64 @@ func TestStreamProxyReleaseAbortsBlockedUpstream(t *testing.T) {
 		t.Fatalf("cancel took too long: %v", time.Since(start))
 	}
 }
+
+func TestStreamProxyCachesVODHeadAndStreamsTail(t *testing.T) {
+	// Payload larger than vodHeadCacheSize so head is served from RAM and tail streams from upstream.
+	payload := make([]byte, vodHeadCacheSize+32768)
+	for i := range payload {
+		payload[i] = byte((i*31 + 7) & 0xff)
+	}
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.ServeContent(w, r, "clip.mp4", time.Unix(1700000000, 0), strings.NewReader(string(payload)))
+	}))
+	defer srv.Close()
+
+	pu, release, err := localProxy.register(context.Background(), srv.URL+"/clip.mp4", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if hits.Load() != 1 {
+		t.Fatalf("preflight hits = %d, want 1", hits.Load())
+	}
+
+	// HEAD and initial Range inside cached head must hit RAM without upstream requests.
+	hresp, err := http.Head(pu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hresp.Body.Close()
+	if hresp.StatusCode != http.StatusOK || hresp.ContentLength != int64(len(payload)) {
+		t.Fatalf("HEAD: status=%d len=%d want=%d", hresp.StatusCode, hresp.ContentLength, len(payload))
+	}
+	req, _ := http.NewRequest(http.MethodGet, pu, nil)
+	req.Header.Set("Range", "bytes=0-4095")
+	rresp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headChunk, _ := io.ReadAll(rresp.Body)
+	rresp.Body.Close()
+	if rresp.StatusCode != http.StatusPartialContent || string(headChunk) != string(payload[:4096]) {
+		t.Fatalf("head range mismatch: status=%d len=%d", rresp.StatusCode, len(headChunk))
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("HEAD + cached head range made upstream requests: hits=%d, want 1", hits.Load())
+	}
+
+	// Full GET spanning cached head + uncached tail must stitch seamlessly.
+	fresp, err := http.Get(pu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, _ := io.ReadAll(fresp.Body)
+	fresp.Body.Close()
+	if fresp.StatusCode != http.StatusOK || len(full) != len(payload) || string(full) != string(payload) {
+		t.Fatalf("full stitched GET mismatch: status=%d len=%d want=%d", fresp.StatusCode, len(full), len(payload))
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("expected exactly 1 extra upstream request for tail, got hits=%d", hits.Load())
+	}
+}

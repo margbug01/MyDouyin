@@ -486,7 +486,13 @@ type Mix struct {
 
 // New loads the cookies the login step saved; without them the client is anonymous.
 func New() (*Client, error) {
-	c := &Client{http: &http.Client{Timeout: 60 * time.Second}, signer: sign.New(ua)}
+	tr := &http.Transport{}
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok && dt != nil {
+		tr = dt.Clone()
+	}
+	tr.MaxIdleConns = 32
+	tr.MaxIdleConnsPerHost = 16
+	c := &Client{http: &http.Client{Timeout: 60 * time.Second, Transport: tr}, signer: sign.New(ua)}
 	err := c.ReloadCookies()
 	if errors.Is(err, os.ErrNotExist) {
 		return c, c.anonymous()

@@ -200,7 +200,7 @@ func decodePictureEdgeBytes(data []byte, maxEdge int) (*ui.Bitmap, []byte, error
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > 16<<20 {
 		return nil, nil, fmt.Errorf("cover dimensions exceed limit: %dx%d", cfg.Width, cfg.Height)
 	}
-	if max(cfg.Width, cfg.Height) <= maxEdge {
+	if max(cfg.Width, cfg.Height) <= maxEdge && format != "heic" {
 		bmp, derr := ui.DecodeBitmap(data)
 		if derr != nil {
 			return nil, nil, derr
@@ -211,9 +211,16 @@ func decodePictureEdgeBytes(data []byte, maxEdge int) (*ui.Bitmap, []byte, error
 	if err != nil {
 		return nil, nil, err
 	}
-	w, h := max(1, cfg.Width*maxEdge/max(cfg.Width, cfg.Height)), max(1, cfg.Height*maxEdge/max(cfg.Width, cfg.Height))
+	w, h := cfg.Width, cfg.Height
+	if max(w, h) > maxEdge {
+		w, h = max(1, cfg.Width*maxEdge/max(cfg.Width, cfg.Height)), max(1, cfg.Height*maxEdge/max(cfg.Width, cfg.Height))
+	}
 	small := image.NewRGBA(image.Rect(0, 0, w, h))
-	draw.ApproxBiLinear.Scale(small, small.Bounds(), img, img.Bounds(), draw.Src, nil)
+	if w == img.Bounds().Dx() && h == img.Bounds().Dy() {
+		draw.Copy(small, image.Point{}, img, img.Bounds(), draw.Src, nil)
+	} else {
+		draw.ApproxBiLinear.Scale(small, small.Bounds(), img, img.Bounds(), draw.Src, nil)
+	}
 	// Re-encode the downscaled image so ui.DecodeBitmap keeps only compact
 	// compressed bytes and ReleasePixels can drop 100% of CPU RGBA pixels.
 	var buf bytes.Buffer

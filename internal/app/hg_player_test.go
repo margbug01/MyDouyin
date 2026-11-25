@@ -402,6 +402,67 @@ func TestHGPlayerPrefetchAt75PercentAndCacheReuse(t *testing.T) {
 	}
 }
 
+func TestHGDetailPreResolvesTargetEpisodeAndCachesDetail(t *testing.T) {
+	svc := &playerStubHGService{
+		stubHGService: stubHGService{
+			getSeriesFn: func(_ context.Context, id string) (hg.Series, error) {
+				return hg.Series{ID: id, Title: "秒开短剧", EpisodeCount: 2}, nil
+			},
+			episodesFn: func(_ context.Context, id string) ([]hg.Episode, error) {
+				return []hg.Episode{
+					{ID: "ep-detail-1", Index: 1, Duration: 90 * time.Second},
+					{ID: "ep-detail-2", Index: 2, Duration: 90 * time.Second},
+				}, nil
+			},
+		},
+		resolveFn: func(_ context.Context, epID string) (hg.Playback, error) {
+			return hg.Playback{
+				EpisodeID: epID,
+				Duration:  90 * time.Second,
+				ExpiresAt: time.Now().Add(10 * time.Minute),
+				Streams: []hg.Stream{
+					{Definition: "720p", Codec: "h264", URL: "https://cdn.example/" + epID + ".mp4", Height: 720},
+				},
+			}, nil
+		},
+	}
+
+	a, tt, _, _ := newHGPlayerTestEnv(t, svc, 90*time.Second)
+	a.switchMode(modeHongguo)
+	tt.Frame()
+
+	// Opening detail page loads episodes and pre-resolves episode 1 in background.
+	a.hgOpenDetail(hg.Series{ID: "ser-instant", Title: "秒开短剧"})
+	tt.Frame()
+	waitUntil(t, a, tt, "detail pre-resolved ep-1", func() bool {
+		top := a.hg.top()
+		return top != nil && top.kind == hgPageDetail && top.prefetchEpID == "ep-detail-1" && top.prefetchPB != nil && !top.prefetchBusy
+	})
+	if got := svc.resolveCount("ep-detail-1"); got != 1 {
+		t.Fatalf("detail pre-resolve count = %d, want 1", got)
+	}
+
+	// Clicking Play consumes the detail pre-resolve with zero additional ResolvePlayback calls.
+	top := a.hg.top()
+	a.hgOpenPlayer(top.series, top.episodes, 0)
+	tt.Frame()
+	waitUntil(t, a, tt, "ep-1 started from detail prefetch", func() bool {
+		return a.hg.player != nil && a.hg.player.pl.vp != nil && !a.hg.player.loading
+	})
+	if got := svc.resolveCount("ep-detail-1"); got != 1 {
+		t.Fatalf("Play after detail pre-resolve triggered extra ResolvePlayback: count=%d, want 1", got)
+	}
+
+	// Pop player and detail, then reopen detail -> episodes must be populated synchronously from detailCache.
+	a.hgPop()
+	a.hgPop()
+	a.hgOpenDetail(hg.Series{ID: "ser-instant", Title: "秒开短剧"})
+	reopened := a.hg.top()
+	if reopened == nil || len(reopened.episodes) != 2 {
+		t.Fatalf("reopened detail page did not hydrate episodes synchronously from cache: %+v", reopened)
+	}
+}
+
 func TestHGPlayerEOFAutoNextAndFinalEpisodeToast(t *testing.T) {
 	svc := &playerStubHGService{
 		resolveFn: func(_ context.Context, epID string) (hg.Playback, error) {

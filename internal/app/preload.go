@@ -30,7 +30,7 @@ func (n *nextVideo) close() {
 }
 
 func (a *app) preloadNextVideo(p *page) {
-	if !media.NativeAvailable || a.win == nil || a.paused || !p.plays() || p.idx+1 >= len(p.list) {
+	if a.win == nil || a.paused || !p.plays() || p.idx+1 >= len(p.list) {
 		a.preload.close()
 		return
 	}

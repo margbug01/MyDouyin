@@ -456,11 +456,7 @@ func (a *app) orbitView(c *ui.Context) {
 			if !a.orbit.hidden {
 				a.orbitCards(c, w, h)
 			}
-			brandLeft := float32(94)
-			if runtime.GOOS == "windows" {
-				brandLeft = 20
-			}
-			ui.Box(c.Key("orbit-brand")).Absolute().Top(11).Left(brandLeft).ZIndex(30).Children(func() {
+			ui.Box(c.Key("orbit-brand")).Absolute().Top(11).Left(brandBarLeft()).ZIndex(30).Children(func() {
 				a.brandSwitcher(c)
 			})
 			a.orbitCenterHub(c, w, h)

@@ -31,38 +31,44 @@ func (a *app) hgView(c *ui.Context) {
 		}
 		a.hgDock(c, h, winH)
 		a.topRight(c)
+		if h.root == hgRootOrbit && h.top() == nil && !(h.svc == nil && h.err != "") {
+			a.hgOrbitView(c, h)
+			return
+		}
 		ui.Row(c.Key("hg-main-row")).Fill().AlignItems(ui.Stretch).Children(func() {
-			ui.Column(c.Key("hg-main")).Grow(1).PaddingStart(contentLeft).Children(func() {
+			ui.Column(c.Key("hg-main")).Grow(1).Children(func() {
 				a.hgTopBar(c, h)
-				if h.svc == nil && h.err != "" {
-					a.hgInitErrorView(c, h)
-					return
-				}
-				if p := h.top(); p != nil {
-					switch p.kind {
-					case hgPageSearch:
-						a.hgSearchView(c, h, p)
-					case hgPageDetail:
-						a.hgDetailView(c, h, p)
-					case hgPagePerson:
-						a.hgPersonView(c, h, p)
-					case hgPagePlayer:
-						a.hgPlayerView(c, h, p)
+				ui.Column(c.Key("hg-main-body")).Grow(1).PaddingStart(contentLeft).Children(func() {
+					if h.svc == nil && h.err != "" {
+						a.hgInitErrorView(c, h)
+						return
 					}
-					return
-				}
-				switch h.root {
-				case hgRootDiscover:
-					a.hgDiscoverView(c, h)
-				case hgRootRank:
-					a.hgRankView(c, h)
-				case hgRootFilter:
-					a.hgFilterView(c, h)
-				case hgRootNew:
-					a.hgNewView(c, h)
-				case hgRootTrack:
-					a.hgTrackView(c, h)
-				}
+					if p := h.top(); p != nil {
+						switch p.kind {
+						case hgPageSearch:
+							a.hgSearchView(c, h, p)
+						case hgPageDetail:
+							a.hgDetailView(c, h, p)
+						case hgPagePerson:
+							a.hgPersonView(c, h, p)
+						case hgPagePlayer:
+							a.hgPlayerView(c, h, p)
+						}
+						return
+					}
+					switch h.root {
+					case hgRootDiscover:
+						a.hgDiscoverView(c, h)
+					case hgRootRank:
+						a.hgRankView(c, h)
+					case hgRootFilter:
+						a.hgFilterView(c, h)
+					case hgRootNew:
+						a.hgNewView(c, h)
+					case hgRootTrack:
+						a.hgTrackView(c, h)
+					}
+				})
 			})
 		})
 	})
@@ -91,6 +97,7 @@ func (a *app) hgDock(c *ui.Context, h *hgApp, winH float32) {
 		root  hgRootKind
 	}
 	items := []hgDockItem{
+		{key: "orbit", icon: iconOrbit, label: "引力场", root: hgRootOrbit},
 		{key: "discover", icon: iconCompass, label: "发现", root: hgRootDiscover},
 		{key: "rank", icon: iconTrend, label: "榜单", root: hgRootRank},
 		{key: "filter", icon: iconGrid, label: "分类", root: hgRootFilter},
@@ -147,7 +154,7 @@ func (a *app) hgDock(c *ui.Context, h *hgApp, winH float32) {
 // hgTopBar matches MyDouyin's topBar geometry: brand switcher or back+title on
 // the left, centered search pill in the middle, DragWindow on empty space.
 func (a *app) hgTopBar(c *ui.Context, h *hgApp) {
-	ui.Row(c.Key("hg-topbar")).Height(topBarHeight).PaddingX(8).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
+	ui.Row(c.Key("hg-topbar")).Height(topBarHeight).Padding(0, 8, 0, brandBarLeft()).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
 		if top := h.top(); top != nil {
 			if iconButton(c.Key("hg-back"), iconBack, 18, pal.muted, "返回").Clicked() {
 				a.hgPop()
@@ -158,7 +165,6 @@ func (a *app) hgTopBar(c *ui.Context, h *hgApp) {
 		}
 
 		left, fieldW := a.searchField(c)
-		left -= contentLeft
 		field := ui.Row(c.Key("hg-search-field")).Absolute().Top(10).Left(left).Width(fieldW).Height(36).Radius(12).PaddingStart(14).
 			AlignItems(ui.Center).Background(pal.searchTint).Shadow(0, 6, 18, -8, pal.searchShadow)
 		if c.Focused(h.searchBox) {

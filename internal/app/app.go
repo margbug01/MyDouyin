@@ -1183,6 +1183,10 @@ func (a *app) escape() {
 				return
 			}
 		}
+		if a.hg != nil && a.hg.root == hgRootOrbit && len(a.hg.stack) == 0 && a.hg.orbit.hotOpen {
+			a.hg.orbit.hotOpen = false
+			return
+		}
 		a.hgPop()
 		return
 	}
@@ -1554,7 +1558,7 @@ func (a *app) prepare(s *slot) {
 		var fresh *dy.Video
 		var freshAt time.Time
 		var refreshedVideo *dy.Video
-		if cached && v.Live == nil && v.ID != "" && a.c != nil {
+		if cached && v.Live == nil && v.ID != "" && v.PlayURL == "" && a.c != nil {
 			if fv, ferr := a.c.Video(v.ID); ferr == nil && fv.PlayURL != "" {
 				v = fv
 				refreshedVideo = &fv
@@ -1589,6 +1593,13 @@ func (a *app) prepare(s *slot) {
 			}
 		}
 		pl, err := a.build(ctx, v, quality, resume, from, preload)
+		if err != nil && cached && refreshedVideo == nil && v.Live == nil && v.ID != "" && a.c != nil && ctx.Err() == nil {
+			if fv, ferr := a.c.Video(v.ID); ferr == nil && fv.PlayURL != "" {
+				v = fv
+				refreshedVideo = &fv
+				pl, err = a.build(ctx, v, quality, resume, from, nil)
+			}
+		}
 		a.post(func() {
 			if gen != s.loadGen || s.gone {
 				pl.close()
@@ -1874,7 +1885,12 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 			pl.live, err = media.OpenNative(ctx, url, headers, true)
 		}
 	default:
-		pl.live, err = media.OpenVideo(ctx, url, headers)
+		if preload != nil {
+			pl.live, _ = preload.OpenContext(ctx, false)
+		}
+		if pl.live == nil {
+			pl.live, err = media.OpenVideo(ctx, url, headers)
+		}
 	}
 	if err != nil {
 		return players{}, err

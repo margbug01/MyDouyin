@@ -41,11 +41,20 @@ func (a *app) orbitCachePath() string {
 	return filepath.Join(a.cacheDir, "orbit-picks.json")
 }
 
-func (a *app) hgDiscoverCachePath() string {
+func (a *app) hgDiscoverCachePath(channel string) string {
 	if a.cacheDir == "" {
 		return ""
 	}
-	return filepath.Join(a.cacheDir, "hg-discover.json")
+	switch channel {
+	case "", hgDiscoverChannels[0]:
+		return filepath.Join(a.cacheDir, "hg-discover.json")
+	case "真人剧":
+		return filepath.Join(a.cacheDir, "hg-discover-live.json")
+	case "漫剧":
+		return filepath.Join(a.cacheDir, "hg-discover-comic.json")
+	default:
+		return ""
+	}
 }
 
 func (a *app) coverCacheDir() string {
@@ -113,15 +122,17 @@ func (a *app) saveOrbitCache() {
 	go writeJSONAtomic(path, snap)
 }
 
-// loadHGDiscoverCache seeds MyHongguo's default 推荐 channel from disk so the
+// loadHGDiscoverCache seeds a MyHongguo discover channel from disk so the
 // first open shows cards immediately while refreshing live data in the background.
-func (a *app) loadHGDiscoverCache(h *hgApp) {
-	path := a.hgDiscoverCachePath()
+func (a *app) loadHGDiscoverCache(h *hgApp, channel string) {
+	if channel == "" {
+		channel = hgDiscoverChannels[0]
+	}
+	path := a.hgDiscoverCachePath(channel)
 	if path == "" || h == nil {
 		return
 	}
-	ch := hgDiscoverChannels[0]
-	l := h.discoverList(ch)
+	l := h.discoverList(channel)
 	if len(l.items) > 0 || l.loaded {
 		return
 	}
@@ -133,7 +144,7 @@ func (a *app) loadHGDiscoverCache(h *hgApp) {
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		return
 	}
-	if snap.Channel != ch || len(snap.Items) == 0 || snap.SavedAt.IsZero() || time.Since(snap.SavedAt) > fastCacheTTL {
+	if snap.Channel != channel || len(snap.Items) == 0 || snap.SavedAt.IsZero() || time.Since(snap.SavedAt) > fastCacheTTL {
 		return
 	}
 	l.appendUnique(snap.Items)
@@ -141,8 +152,8 @@ func (a *app) loadHGDiscoverCache(h *hgApp) {
 }
 
 func (a *app) saveHGDiscoverCache(channel string, items []hg.Series) {
-	path := a.hgDiscoverCachePath()
-	if path == "" || channel != hgDiscoverChannels[0] || len(items) == 0 {
+	path := a.hgDiscoverCachePath(channel)
+	if path == "" || len(items) == 0 {
 		return
 	}
 	n := min(len(items), hgCacheMaxItems)

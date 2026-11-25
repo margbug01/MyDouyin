@@ -260,7 +260,7 @@ func TestHongguoShellViewAndAccentIsolation(t *testing.T) {
 	tt := newTester(a)
 	tt.Frame()
 
-	for _, want := range []string{"MyHongguo", "推荐", "真人剧", "漫剧", "搜索"} {
+	for _, want := range []string{"MyHongguo", "双星", "真人剧", "漫剧", "追剧"} {
 		if !tt.HasText(want) {
 			t.Fatalf("Hongguo view missing %q: %q", want, tt.Texts())
 		}
@@ -358,5 +358,66 @@ func TestHGSettingsReconfigureAndReset(t *testing.T) {
 	}
 	if a.toast != "已重置红果匿名设备" {
 		t.Fatalf("unexpected toast after reset: %q", a.toast)
+	}
+}
+
+func TestBrandSwitcherPositionUnifiedAcrossModesAndPages(t *testing.T) {
+	if got := brandBarLeftFor("windows"); got != 20 {
+		t.Fatalf("brandBarLeftFor(windows) = %v, want 20", got)
+	}
+	if got := brandBarLeftFor("darwin"); got != contentLeft+8 {
+		t.Fatalf("brandBarLeftFor(darwin) = %v, want %v", got, contentLeft+8)
+	}
+
+	home := &page{title: "引力场", grid: true}
+	picks := stub("精选", 2)
+	picks.grid = true
+	a := &app{
+		home:       home,
+		picks:      picks,
+		orbitPicks: picks,
+		feed:       stub("推荐", 1),
+		pages:      []*page{home},
+		hgDirect:   true,
+		newHGService: func(cfg hg.Config) (hg.Service, error) {
+			return &fakeHGService{}, nil
+		},
+	}
+	tt := newTester(a)
+
+	measure := func(label string) (float32, float32) {
+		tt.Frame()
+		box, ok := tt.Find("切换模式")
+		if !ok {
+			t.Fatalf("%s: brand switcher not found", label)
+		}
+		if box.X != a.brandMenuLeft() {
+			t.Fatalf("%s: brand switcher X=%v != brandMenuLeft=%v", label, box.X, a.brandMenuLeft())
+		}
+		return box.X, box.Y
+	}
+
+	dyOrbitX, dyOrbitY := measure("Douyin 引力场")
+
+	a.root(picks)
+	dyPicksX, dyPicksY := measure("Douyin 精选")
+
+	a.switchMode(modeHongguo)
+	hgOrbitX, hgOrbitY := measure("Hongguo 引力场")
+
+	a.hgSelectRoot(hgRootDiscover)
+	hgDiscX, hgDiscY := measure("Hongguo 发现")
+
+	for _, tc := range []struct {
+		name string
+		x, y float32
+	}{
+		{"Douyin 精选", dyPicksX, dyPicksY},
+		{"Hongguo 引力场", hgOrbitX, hgOrbitY},
+		{"Hongguo 发现", hgDiscX, hgDiscY},
+	} {
+		if tc.x != dyOrbitX || tc.y != dyOrbitY {
+			t.Fatalf("brand switcher jumped on %s: got (%v, %v), want (%v, %v)", tc.name, tc.x, tc.y, dyOrbitX, dyOrbitY)
+		}
 	}
 }

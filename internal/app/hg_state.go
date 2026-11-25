@@ -4,19 +4,22 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"douyin/internal/hg"
+	"douyin/internal/media"
 )
 
 // hgRootKind selects which top-level MyHongguo destination is active in the dock.
 type hgRootKind uint8
 
 const (
-	hgRootDiscover hgRootKind = iota
+	hgRootOrbit hgRootKind = iota
+	hgRootDiscover
 	hgRootRank
 	hgRootFilter
 	hgRootNew
@@ -25,6 +28,8 @@ const (
 
 func (r hgRootKind) title() string {
 	switch r {
+	case hgRootOrbit:
+		return "引力场"
 	case hgRootDiscover:
 		return "发现"
 	case hgRootRank:
@@ -36,7 +41,7 @@ func (r hgRootKind) title() string {
 	case hgRootTrack:
 		return "追剧"
 	default:
-		return "发现"
+		return "引力场"
 	}
 }
 
@@ -69,7 +74,17 @@ const (
 	hgRequestTimeout   = 20 * time.Second
 	hgSuggestDelay     = 300 * time.Millisecond
 	hgEpisodeGroupSize = 30
+	hgDetailCacheMax   = 16
+	hgDetailCacheTTL   = 5 * time.Minute
 )
+
+type hgDetailCacheEntry struct {
+	series     hg.Series
+	episodes   []hg.Episode
+	seasons    []hg.Season
+	recommends []hg.Series
+	savedAt    time.Time
+}
 
 // hgSeriesList stores a paginated, deduplicated list of series for a grid view.
 type hgSeriesList struct {
@@ -144,6 +159,12 @@ type hgPage struct {
 	recLoading     bool
 	err            hg.ErrorInfo
 	epErr          hg.ErrorInfo
+	prefetchEpID   string
+	prefetchPB     *hg.Playback
+	prefetchURL    string
+	prefetchWarm   *media.WarmVideo
+	prefetchBusy   bool
+	prefetchGen    int
 
 	// hgPagePerson
 	userID        string
@@ -168,6 +189,7 @@ type hgApp struct {
 
 	root  hgRootKind
 	stack []*hgPage
+	orbit hgOrbitState
 
 	// Discover
 	discChannel string
@@ -220,6 +242,9 @@ type hgApp struct {
 	// Cached actor name -> userID mappings discovered from rankings.
 	actorIDs map[string]string
 
+	// Short-lived in-memory detail cache for instant reopening of recent dramas.
+	detailCache map[string]*hgDetailCacheEntry
+
 	// Active episode player controller (PR-5).
 	player *hgPlayer
 }
@@ -235,6 +260,7 @@ func newHGApp(cfg hg.Config) *hgApp {
 		newResult:      newHGSeriesList(),
 		suggestDelay:   hgSuggestDelay,
 		actorIDs:       map[string]string{},
+		detailCache:    map[string]*hgDetailCacheEntry{},
 	}
 }
 
@@ -288,6 +314,67 @@ func (h *hgApp) activeRankBoards() []hg.RankBoard {
 	return nil
 }
 
+func (p *hgPage) closePrefetch() {
+	if p == nil {
+		return
+	}
+	if p.prefetchWarm != nil {
+		p.prefetchWarm.Close()
+		p.prefetchWarm = nil
+	}
+	p.prefetchEpID = ""
+	p.prefetchPB = nil
+	p.prefetchURL = ""
+	p.prefetchBusy = false
+	p.prefetchGen++
+}
+
+func (h *hgApp) closeStackPrefetch() {
+	if h == nil {
+		return
+	}
+	for _, p := range h.stack {
+		p.closePrefetch()
+	}
+}
+
+func (h *hgApp) saveDetailCache(p *hgPage) {
+	if h == nil || p == nil || p.seriesID == "" {
+		return
+	}
+	if h.detailCache == nil {
+		h.detailCache = map[string]*hgDetailCacheEntry{}
+	}
+	e := h.detailCache[p.seriesID]
+	if e == nil {
+		if len(h.detailCache) >= hgDetailCacheMax {
+			var oldestKey string
+			var oldestTime time.Time
+			for k, v := range h.detailCache {
+				if oldestKey == "" || v.savedAt.Before(oldestTime) {
+					oldestKey, oldestTime = k, v.savedAt
+				}
+			}
+			if oldestKey != "" {
+				delete(h.detailCache, oldestKey)
+			}
+		}
+		e = &hgDetailCacheEntry{}
+		h.detailCache[p.seriesID] = e
+	}
+	e.series = p.series
+	if len(p.episodes) > 0 {
+		e.episodes = slices.Clone(p.episodes)
+	}
+	if len(p.seasons) > 0 {
+		e.seasons = slices.Clone(p.seasons)
+	}
+	if len(p.recommends) > 0 {
+		e.recommends = slices.Clone(p.recommends)
+	}
+	e.savedAt = time.Now()
+}
+
 func (a *app) hgPop() {
 	if a.hg == nil || len(a.hg.stack) == 0 {
 		return
@@ -296,6 +383,7 @@ func (a *app) hgPop() {
 	if last.kind == hgPagePlayer {
 		a.hgStopPlayer()
 	}
+	last.closePrefetch()
 	last.gen++
 	if last.results != nil {
 		last.results.gen++
@@ -313,14 +401,20 @@ func (a *app) hgSelectRoot(r hgRootKind) {
 		a.hgStopPlayer()
 	}
 	if h.root != r {
+		h.closeStackPrefetch()
 		h.root = r
 		h.stack = nil
 		a.hgEnsureRootLoaded()
 		return
 	}
 	if len(h.stack) > 0 {
+		h.closeStackPrefetch()
 		h.stack = nil
 		a.hgEnsureRootLoaded()
+		return
+	}
+	if r == hgRootOrbit {
+		a.hgCycleOrbit()
 		return
 	}
 	a.hgRefreshRoot()
@@ -346,6 +440,8 @@ func (a *app) hgEnsureRootLoaded() {
 		return
 	}
 	switch h.root {
+	case hgRootOrbit:
+		a.hgEnsureOrbitLoaded()
 	case hgRootDiscover:
 		l := h.discoverList(h.discChannel)
 		if !l.loaded && !l.loading && l.err.Kind == hg.ErrKindNone {
@@ -376,6 +472,8 @@ func (a *app) hgRefreshRoot() {
 		return
 	}
 	switch h.root {
+	case hgRootOrbit:
+		a.hgCycleOrbit()
 	case hgRootDiscover:
 		a.hgLoadDiscover(h.discChannel, true)
 	case hgRootRank:
@@ -420,6 +518,8 @@ func (a *app) hgRetryIfErrored() {
 		return
 	}
 	switch h.root {
+	case hgRootOrbit:
+		a.hgRetryOrbit(h)
 	case hgRootDiscover:
 		l := h.discoverList(h.discChannel)
 		if l.err.Kind != hg.ErrKindNone {
@@ -522,6 +622,7 @@ func (a *app) hgLoadDiscover(channel string, reset bool) {
 			l.cursor = nextCursor
 			a.hgPrefetchDiscoverCovers(h, channel)
 			a.saveHGDiscoverCache(channel, l.items)
+			a.onHGOrbitChannelLoaded(h, channel)
 		})
 	}()
 }
@@ -999,7 +1100,30 @@ func (a *app) hgOpenDetail(seed hg.Series) {
 		series:   seed,
 		reviews:  newHGCommentFeed(seed.ID, ""),
 	}
+	if cached := h.detailCache[seed.ID]; cached != nil && time.Since(cached.savedAt) < hgDetailCacheTTL {
+		p.series = mergeHGSeries(p.series, cached.series)
+		if p.series.Title != "" {
+			p.title = p.series.Title
+		}
+		if len(cached.episodes) > 0 {
+			p.episodes = slices.Clone(cached.episodes)
+			if h.hist != nil {
+				if entry, ok := h.hist.Get(seed.ID); ok {
+					p.epGroup = hgResumeEpisodeIndex(p.episodes, entry) / hgEpisodeGroupSize
+				}
+			}
+		}
+		if len(cached.seasons) > 0 {
+			p.seasons = slices.Clone(cached.seasons)
+		}
+		if len(cached.recommends) > 0 {
+			p.recommends = slices.Clone(cached.recommends)
+		}
+	}
 	h.stack = append(h.stack, p)
+	if len(p.episodes) > 0 {
+		a.hgPrefetchDetailTargetEpisode(p)
+	}
 	a.hgLoadDetail(p)
 }
 
@@ -1007,6 +1131,7 @@ func (a *app) hgSwitchSeason(p *hgPage, s hg.Season) {
 	if p == nil || p.kind != hgPageDetail || s.SeriesID == "" || s.SeriesID == p.seriesID {
 		return
 	}
+	p.closePrefetch()
 	p.seriesID = s.SeriesID
 	p.series = hg.Series{
 		ID:           s.SeriesID,
@@ -1020,6 +1145,61 @@ func (a *app) hgSwitchSeason(p *hgPage, s hg.Season) {
 	p.reviews = newHGCommentFeed(s.SeriesID, "")
 	p.epGroup = 0
 	a.hgLoadDetail(p)
+}
+
+func (a *app) hgPrefetchDetailTargetEpisode(p *hgPage) {
+	h := a.hg
+	if h == nil || h.svc == nil || p == nil || p.kind != hgPageDetail || len(p.episodes) == 0 {
+		return
+	}
+	idx := 0
+	if h.hist != nil && p.seriesID != "" {
+		if entry, ok := h.hist.Get(p.seriesID); ok {
+			idx = hgResumeEpisodeIndex(p.episodes, entry)
+		}
+	}
+	if idx < 0 || idx >= len(p.episodes) {
+		idx = 0
+	}
+	ep := p.episodes[idx]
+	if ep.ID == "" {
+		return
+	}
+	if p.prefetchEpID == ep.ID && (p.prefetchBusy || (p.prefetchPB != nil && !hg.IsExpired(*p.prefetchPB, time.Now()))) {
+		return
+	}
+	p.closePrefetch()
+	p.prefetchEpID = ep.ID
+	p.prefetchBusy = true
+	gen, epID, svc, quality := p.prefetchGen, ep.ID, h.svc, a.quality
+	prewarm := a.win != nil && a.openHGStream == nil
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), hgRequestTimeout)
+		pb, err := svc.ResolvePlayback(ctx, epID)
+		cancel()
+		var (
+			warmURL string
+			warm    *media.WarmVideo
+		)
+		if err == nil && prewarm {
+			warmURL, warm = hgStartPrewarm(pb, quality)
+		}
+		a.post(func() {
+			if a.hg != h || p.prefetchGen != gen || p.prefetchEpID != epID {
+				warm.Close()
+				return
+			}
+			p.prefetchBusy = false
+			if err == nil {
+				cp := pb
+				p.prefetchPB = &cp
+				p.prefetchURL = warmURL
+				p.prefetchWarm = warm
+			} else {
+				warm.Close()
+			}
+		})
+	}()
 }
 
 func (a *app) hgLoadDetail(p *hgPage) {
@@ -1054,6 +1234,7 @@ func (a *app) hgLoadDetail(p *hgPage) {
 			if p.series.Title != "" {
 				p.title = p.series.Title
 			}
+			h.saveDetailCache(p)
 		})
 	}()
 
@@ -1081,6 +1262,8 @@ func (a *app) hgLoadDetail(p *hgPage) {
 					p.epGroup = idx / hgEpisodeGroupSize
 				}
 			}
+			h.saveDetailCache(p)
+			a.hgPrefetchDetailTargetEpisode(p)
 		})
 	}()
 
@@ -1095,6 +1278,7 @@ func (a *app) hgLoadDetail(p *hgPage) {
 			p.seasonsLoading = false
 			if err == nil {
 				p.seasons = seasons
+				h.saveDetailCache(p)
 			}
 		})
 	}()
@@ -1110,6 +1294,7 @@ func (a *app) hgLoadDetail(p *hgPage) {
 			p.recLoading = false
 			if err == nil {
 				p.recommends = recs
+				h.saveDetailCache(p)
 			}
 		})
 	}()

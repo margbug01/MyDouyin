@@ -42,12 +42,140 @@ const PreferH264 = true
 
 const sampleRate = 48000
 
-// Windows playback streams directly through Media Foundation without prewarming.
-type WarmVideo struct{}
+// WarmVideo pre-registers a loopback proxy route (buffering the initial head
+// bytes and optional CENC decryption plan in RAM) without creating a Media
+// Foundation engine or D3D11 device until Open is called.
+type WarmVideo struct {
+	mu       sync.Mutex
+	done     chan struct{}
+	cancel   context.CancelFunc
+	proxyURL string
+	release  func()
+	err      error
+	closed   bool
+	opened   bool
+}
 
-func PreloadVideo(string, map[string]string) *WarmVideo { return nil }
-func (*WarmVideo) Close()                               {}
-func (*WarmVideo) Open() (*Live, error)                 { return nil, errors.New("media: video preload unavailable") }
+func PreloadVideo(source string, headers map[string]string) *WarmVideo {
+	return PreloadStream(context.Background(), source, StreamOptions{Headers: headers})
+}
+
+func PreloadStream(ctx context.Context, source string, opts StreamOptions) *WarmVideo {
+	if source == "" {
+		return nil
+	}
+	norm, isLocal, err := normalizeLocalSource(source)
+	if err != nil || isLocal {
+		return nil
+	}
+	if len(opts.DecryptKey) != 0 && len(opts.DecryptKey) != 16 {
+		return nil
+	}
+	wctx, cancel := context.WithCancel(ctx)
+	w := &WarmVideo{
+		done:   make(chan struct{}),
+		cancel: cancel,
+	}
+	var hdrCopy map[string]string
+	if len(opts.Headers) > 0 {
+		hdrCopy = make(map[string]string, len(opts.Headers))
+		for k, v := range opts.Headers {
+			hdrCopy[k] = v
+		}
+	}
+	var keyCopy []byte
+	if len(opts.DecryptKey) > 0 {
+		keyCopy = append([]byte(nil), opts.DecryptKey...)
+	}
+	go func() {
+		defer close(w.done)
+		pu, rel, rerr := localProxy.registerOptions(wctx, norm, StreamOptions{Headers: hdrCopy, DecryptKey: keyCopy}, true)
+		w.mu.Lock()
+		if w.closed {
+			w.mu.Unlock()
+			if rel != nil {
+				rel()
+			}
+			return
+		}
+		w.proxyURL, w.release, w.err = pu, rel, rerr
+		w.mu.Unlock()
+	}()
+	return w
+}
+
+func (w *WarmVideo) Close() {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return
+	}
+	w.closed = true
+	cancel := w.cancel
+	rel := w.release
+	w.release = nil
+	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if rel != nil {
+		rel()
+	}
+}
+
+func (w *WarmVideo) Open() (*Live, error) {
+	return w.OpenContext(context.Background(), false)
+}
+
+func (w *WarmVideo) OpenContext(ctx context.Context, _ bool) (*Live, error) {
+	if w == nil {
+		return nil, errors.New("media: nil warm video")
+	}
+	select {
+	case <-w.done:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	w.mu.Lock()
+	if w.closed || w.opened {
+		w.mu.Unlock()
+		return nil, errors.New("media: video preload already consumed or closed")
+	}
+	if w.err != nil || w.proxyURL == "" {
+		err := w.err
+		w.mu.Unlock()
+		if err == nil {
+			err = errors.New("media: video preload failed")
+		}
+		return nil, err
+	}
+	w.opened = true
+	pu, rel := w.proxyURL, w.release
+	w.release = nil
+	w.mu.Unlock()
+
+	vp, err := video.OpenURL(pu)
+	if err != nil {
+		if rel != nil {
+			rel()
+		}
+		return nil, err
+	}
+	vp.SetMuted(true)
+	vp.Pause()
+	return &Live{
+		vp:      vp,
+		release: rel,
+		vod:     true,
+		paused:  true,
+		speed:   1,
+		volume:  1,
+		muted:   true,
+	}, nil
+}
 
 // Live wraps a mygo/ui/video player (Media Foundation + D3D11 GPU textures)
 // and owns any loopback proxy route created for custom HTTP headers / HLS.

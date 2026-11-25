@@ -151,38 +151,40 @@ func (a *app) view(c *ui.Context) {
 			return
 		}
 		ui.Row(c.Key("main-row")).Fill().AlignItems(ui.Stretch).Children(func() {
-			ui.Column(c.Key("main")).Grow(1).PaddingStart(contentLeft).Children(func() {
+			ui.Column(c.Key("main")).Grow(1).Children(func() {
 				a.topBar(c, p)
-				if !p.plays() {
-					switch {
-					case p == a.picks:
-						a.tabsRow(c)
-					case p == a.follow:
-						a.followsRow(c)
-					case a.isMine(p):
-						a.mineHeader(c)
-					case p.user != nil:
-						a.profileHeader(c, *p.user, false)
-					case len(p.users) > 0:
-						a.usersRow(c.Key("users"), p.users)
+				ui.Column(c.Key("main-body")).Grow(1).PaddingStart(contentLeft).Children(func() {
+					if !p.plays() {
+						switch {
+						case p == a.picks:
+							a.tabsRow(c)
+						case p == a.follow:
+							a.followsRow(c)
+						case a.isMine(p):
+							a.mineHeader(c)
+						case p.user != nil:
+							a.profileHeader(c, *p.user, false)
+						case len(p.users) > 0:
+							a.usersRow(c.Key("users"), p.users)
+						}
 					}
-				}
-				ui.Row(c).Grow(1).Padding(0, 16, 16, 0).Gap(16).AlignItems(ui.Stretch).Children(func() {
-					if p.plays() {
-						a.stage(c, p)
-					} else {
-						a.grid(c, p)
-					}
-					switch {
-					case a.notes != nil:
-						a.notePanel(c, a.notes)
-					case a.dms != nil:
-						a.dmPanel(c, a.dms)
-					case a.sheet != nil && p.plays():
-						a.commentPanel(c, a.sheet)
-					case a.liveChat != nil && !a.liveChat.hidden && !a.clear:
-						a.liveMessagePanel(c, a.liveChat)
-					}
+					ui.Row(c).Grow(1).Padding(0, 16, 16, 0).Gap(16).AlignItems(ui.Stretch).Children(func() {
+						if p.plays() {
+							a.stage(c, p)
+						} else {
+							a.grid(c, p)
+						}
+						switch {
+						case a.notes != nil:
+							a.notePanel(c, a.notes)
+						case a.dms != nil:
+							a.dmPanel(c, a.dms)
+						case a.sheet != nil && p.plays():
+							a.commentPanel(c, a.sheet)
+						case a.liveChat != nil && !a.liveChat.hidden && !a.clear:
+							a.liveMessagePanel(c, a.liveChat)
+						}
+					})
 				})
 			})
 		})
@@ -190,7 +192,7 @@ func (a *app) view(c *ui.Context) {
 	if a.mode == modeDouyin && c.Focused(a.searchBox) && !a.isHome(p) {
 		a.searchList(c)
 	}
-	if a.mode == modeHongguo && a.hg != nil && c.Focused(a.hg.searchBox) {
+	if a.mode == modeHongguo && a.hg != nil && c.Focused(a.hg.searchBox) && !a.isHGOrbit() {
 		a.hgSearchList(c)
 	}
 	a.brandMenu(c, a.brandMenuLeft())
@@ -443,7 +445,7 @@ func (a *app) avatar(c *ui.Context, p palette, url, name string, size float32) {
 // topBar holds the way back with the page's name, and the search field in
 // the middle; it drags the window. The buttons at its right are chrome's.
 func (a *app) topBar(c *ui.Context, p *page) {
-	ui.Row(c).Height(topBarHeight).PaddingX(8).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
+	ui.Row(c).Height(topBarHeight).Padding(0, 8, 0, brandBarLeft()).Gap(4).AlignItems(ui.Center).DragWindow().Children(func() {
 		if len(a.pages) > 1 || p.grid && p.playing {
 			if iconButton(c.Key("back"), iconBack, 18, pal.muted, "返回").Clicked() {
 				a.back()
@@ -455,7 +457,6 @@ func (a *app) topBar(c *ui.Context, p *page) {
 			a.brandSwitcher(c)
 		}
 		left, fieldW := a.searchField(c)
-		left -= contentLeft // the bar starts beside the dock
 		field := ui.Row(c).Absolute().Top(10).Left(left).Width(fieldW).Height(36).Radius(12).PaddingStart(14).
 			AlignItems(ui.Center).Background(pal.searchTint).Shadow(0, 6, 18, -8, pal.searchShadow)
 		if c.Focused(a.searchBox) {

@@ -99,7 +99,10 @@ func (a *app) ensureHG() *hgApp {
 		hist, _ = hg.NewHistoryStore("")
 	}
 	h.hist = hist
-	a.loadHGDiscoverCache(h)
+	for _, ch := range hgDiscoverChannels {
+		a.loadHGDiscoverCache(h, ch)
+	}
+	a.hgPrefetchOrbitCovers(h)
 	a.hgPrefetchDiscoverCovers(h, hgDiscoverChannels[0])
 	a.hg = h
 	return h
@@ -173,12 +176,14 @@ func (a *app) resetHGDevice() {
 // playback when leaving MyHongguo mode, while keeping hgPagePlayer on the stack
 // so returning to MyHongguo resumes at the saved position.
 func (a *app) hgSuspend() {
-	if a.hg != nil && a.hg.player != nil {
-		hp := a.hg.player
-		a.hgCheckpoint(true)
-		hp.releasePlayer()
-		hp.prefetchGen++
-		hp.prefetchBusy = false
+	if a.hg != nil {
+		a.hg.closeStackPrefetch()
+		if a.hg.player != nil {
+			hp := a.hg.player
+			a.hgCheckpoint(true)
+			hp.releasePlayer()
+			hp.closePrefetch()
+		}
 	}
 	a.mainVideo.hide()
 	a.mainVideo.player = nil
@@ -251,17 +256,19 @@ func (a *app) switchMode(next appMode) {
 	a.redraw()
 }
 
-func (a *app) brandMenuLeft() float32 {
-	if a.mode == modeHongguo {
-		return contentLeft + 8
-	}
-	if len(a.pages) > 0 && a.isHome(a.cur()) {
-		if runtime.GOOS == "windows" {
-			return 20
-		}
-		return 94
+func brandBarLeftFor(goos string) float32 {
+	if goos == "windows" {
+		return 20
 	}
 	return contentLeft + 8
+}
+
+func brandBarLeft() float32 {
+	return brandBarLeftFor(runtime.GOOS)
+}
+
+func (a *app) brandMenuLeft() float32 {
+	return brandBarLeft()
 }
 
 // brandSwitcher renders the unified top-left brand pill button that opens the

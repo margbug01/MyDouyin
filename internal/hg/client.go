@@ -175,11 +175,10 @@ func newDirectTransport() sdk.Transport {
 }
 
 func newImageHTTPClient(direct bool) *http.Client {
-	if !direct {
-		return &http.Client{Timeout: 15 * time.Second}
-	}
 	tr := cloneDefaultHTTPTransport()
-	tr.Proxy = nil
+	if direct {
+		tr.Proxy = nil
+	}
 	return &http.Client{
 		Timeout:   15 * time.Second,
 		Transport: tr,
@@ -187,10 +186,19 @@ func newImageHTTPClient(direct bool) *http.Client {
 }
 
 func cloneDefaultHTTPTransport() *http.Transport {
+	var tr *http.Transport
 	if dt, ok := http.DefaultTransport.(*http.Transport); ok && dt != nil {
-		return dt.Clone()
+		tr = dt.Clone()
+	} else {
+		tr = &http.Transport{}
 	}
-	return &http.Transport{}
+	if tr.MaxIdleConns < 32 {
+		tr.MaxIdleConns = 32
+	}
+	if tr.MaxIdleConnsPerHost < 16 {
+		tr.MaxIdleConnsPerHost = 16
+	}
+	return tr
 }
 
 type rawHTTPTransport struct {

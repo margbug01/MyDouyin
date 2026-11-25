@@ -24,7 +24,10 @@ import (
 	"golang.org/x/net/http/httpproxy"
 )
 
-const maxPlaylistBytes = 4 << 20
+const (
+	maxPlaylistBytes = 4 << 20
+	vodHeadCacheSize = 256 << 10 // 256 KiB preflight head cache for instant VOD startup
+)
 
 var m3u8URIAttr = regexp.MustCompile(`URI="([^"]+)"`)
 
@@ -48,6 +51,15 @@ type proxyRoute struct {
 	cachedBody []byte
 	cachedType string
 	cachedAt   time.Time
+
+	// Optional cached head bytes from VOD preflight so HEAD and initial Range
+	// reads respond immediately from RAM instead of paying another network RTT.
+	headData   []byte
+	headTotal  int64
+	headType   string
+	headETag   string
+	headMod    string
+	headRanges bool
 }
 
 type streamProxy struct {
@@ -72,7 +84,8 @@ var localProxy = &streamProxy{
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
 			ResponseHeaderTimeout: 20 * time.Second,
-			MaxIdleConns:          16,
+			MaxIdleConns:          32,
+			MaxIdleConnsPerHost:   16,
 			IdleConnTimeout:       60 * time.Second,
 		},
 	},
@@ -230,7 +243,11 @@ func (p *streamProxy) registerOptions(ctx context.Context, source string, opts S
 		}
 		wantPlaylist := ext == ".m3u8"
 		if !wantPlaylist {
-			req.Header.Set("Range", "bytes=0-0")
+			if vod {
+				req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", vodHeadCacheSize-1))
+			} else {
+				req.Header.Set("Range", "bytes=0-0")
+			}
 		}
 		resp, err := p.client.Do(req)
 		if err != nil {
@@ -263,6 +280,37 @@ func (p *streamProxy) registerOptions(ctx context.Context, source string, opts S
 			route.cachedBody = []byte(rewritten)
 			route.cachedType = "application/vnd.apple.mpegurl"
 			route.cachedAt = time.Now()
+		} else if vod && !wantPlaylist {
+			if resp.StatusCode == http.StatusPartialContent {
+				total, hasTotal := parseContentRangeTotal(resp.Header.Get("Content-Range"))
+				head, rerr := io.ReadAll(io.LimitReader(resp.Body, vodHeadCacheSize))
+				resp.Body.Close()
+				if rerr == nil && len(head) > 0 && hasTotal && total > 0 {
+					route.headData = head
+					route.headTotal = total
+					route.headType = ct
+					route.headETag = resp.Header.Get("ETag")
+					route.headMod = resp.Header.Get("Last-Modified")
+					route.headRanges = true
+					// Follow any redirect target so subsequent tail reads hit the final CDN node directly.
+					if finalURL := resp.Request.URL.String(); finalURL != "" {
+						route.source = finalURL
+					}
+				}
+			} else if resp.StatusCode == http.StatusOK && resp.ContentLength > 0 && resp.ContentLength <= vodHeadCacheSize {
+				head, rerr := io.ReadAll(io.LimitReader(resp.Body, vodHeadCacheSize))
+				resp.Body.Close()
+				if rerr == nil && int64(len(head)) == resp.ContentLength {
+					route.headData = head
+					route.headTotal = resp.ContentLength
+					route.headType = ct
+					route.headETag = resp.Header.Get("ETag")
+					route.headMod = resp.Header.Get("Last-Modified")
+					route.headRanges = strings.EqualFold(resp.Header.Get("Accept-Ranges"), "bytes")
+				}
+			} else {
+				resp.Body.Close()
+			}
 		} else {
 			resp.Body.Close()
 		}
@@ -313,6 +361,11 @@ func (p *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			defer stop()
 			route.plan.serve(reqCtx, w, r)
 			return
+		}
+		if len(route.headData) > 0 && route.headTotal > 0 {
+			if p.serveCachedHead(w, r, route) {
+				return
+			}
 		}
 		target = route.source
 		if r.Method == http.MethodGet {
@@ -401,6 +454,99 @@ func (p *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if method == http.MethodGet {
 		_, _ = io.Copy(w, resp.Body)
 	}
+}
+
+// serveCachedHead serves HEAD and initial Range/GET requests directly from the
+// preflight head buffer in RAM, seamlessly streaming any uncached tail from
+// upstream when a request starts inside the buffer and extends beyond it.
+func (p *streamProxy) serveCachedHead(w http.ResponseWriter, r *http.Request, route *proxyRoute) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	// Let conditional requests pass through to upstream.
+	if r.Header.Get("If-Range") != "" || r.Header.Get("If-None-Match") != "" || r.Header.Get("If-Modified-Since") != "" {
+		return false
+	}
+	total := route.headTotal
+	headLen := int64(len(route.headData))
+	start, end, partial, ok := parseSingleByteRange(r.Header.Get("Range"), total)
+	if !ok {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+		http.Error(w, "range not satisfiable", http.StatusRequestedRangeNotSatisfiable)
+		return true
+	}
+	writeMeta := func(reqLen int64) {
+		if route.headType != "" {
+			w.Header().Set("Content-Type", route.headType)
+		}
+		if route.headRanges {
+			w.Header().Set("Accept-Ranges", "bytes")
+		}
+		if route.headETag != "" {
+			w.Header().Set("ETag", route.headETag)
+		}
+		if route.headMod != "" {
+			w.Header().Set("Last-Modified", route.headMod)
+		}
+		w.Header().Set("Content-Length", strconv.FormatInt(reqLen, 10))
+		w.Header().Set("Cache-Control", "no-store")
+		if partial {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+			w.WriteHeader(http.StatusPartialContent)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}
+	if r.Method == http.MethodHead {
+		writeMeta(end - start + 1)
+		return true
+	}
+	if start >= headLen {
+		return false
+	}
+	reqLen := end - start + 1
+	if end < headLen {
+		writeMeta(reqLen)
+		_, _ = w.Write(route.headData[start : end+1])
+		return true
+	}
+	if !route.headRanges {
+		return false
+	}
+	// Stream cached head bytes immediately (0 ms TTFB), then fetch only the tail.
+	writeMeta(reqLen)
+	if _, err := w.Write(route.headData[start:headLen]); err != nil {
+		return true
+	}
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+	reqCtx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	stop := context.AfterFunc(route.ctx, cancel)
+	defer stop()
+
+	upReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, route.source, nil)
+	if err != nil {
+		return true
+	}
+	for k, v := range route.headers {
+		upReq.Header.Set(k, v)
+	}
+	upReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", headLen, end))
+	resp, err := p.client.Do(upReq)
+	if err != nil {
+		return true
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusPartialContent {
+		_, _ = io.CopyN(w, resp.Body, end-headLen+1)
+	} else if resp.StatusCode == http.StatusOK {
+		if _, err := io.CopyN(io.Discard, resp.Body, headLen); err == nil {
+			_, _ = io.CopyN(w, resp.Body, end-headLen+1)
+		}
+	}
+	return true
 }
 
 func rewriteM3U8(body string, base *url.URL, proxyAddr, token string) string {

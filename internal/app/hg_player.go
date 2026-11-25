@@ -119,9 +119,11 @@ type hgPlayer struct {
 	speedOpen   bool
 	volumeOpen  bool
 
-	// 75% next-episode pre-resolve cache (never populated from browse grids).
+	// 75% next-episode pre-resolve & stream pre-warm cache (never populated from browse grids).
 	prefetchEpID string
 	prefetchPB   *hg.Playback
+	prefetchURL  string
+	prefetchWarm *media.WarmVideo
 	prefetchBusy bool
 	prefetchGen  int
 
@@ -170,6 +172,44 @@ func (hp *hgPlayer) releasePlayer() {
 	hp.pl.close()
 	hp.pl = players{}
 	hp.seeking = false
+}
+
+func (hp *hgPlayer) closePrefetch() {
+	if hp == nil {
+		return
+	}
+	if hp.prefetchWarm != nil {
+		hp.prefetchWarm.Close()
+		hp.prefetchWarm = nil
+	}
+	hp.prefetchEpID = ""
+	hp.prefetchPB = nil
+	hp.prefetchURL = ""
+	hp.prefetchBusy = false
+	hp.prefetchGen++
+}
+
+func hgStartPrewarm(pb hg.Playback, quality string) (string, *media.WarmVideo) {
+	if strings.TrimSpace(pb.AudioURL) != "" {
+		return "", nil
+	}
+	var opts media.StreamOptions
+	if pb.Protected {
+		key, err := hg.DecodeKeyHex(pb.KeyHex)
+		if err != nil {
+			return "", nil
+		}
+		opts.DecryptKey = key
+	}
+	_, candidates := hg.SelectStream(pb, quality, media.PreferH264)
+	if len(candidates) == 0 {
+		return "", nil
+	}
+	warm := media.PreloadStream(context.Background(), candidates[0], opts)
+	if warm == nil {
+		return "", nil
+	}
+	return candidates[0], warm
 }
 
 func (hp *hgPlayer) clearDanmaku() {
@@ -422,8 +462,26 @@ func (a *app) hgOpenPlayer(series hg.Series, episodes []hg.Episode, epIndex int)
 	a.hgStopPlayer()
 
 	var seasons []hg.Season
-	if top := h.top(); top != nil && top.kind == hgPageDetail && top.seriesID == series.ID && len(top.seasons) > 0 {
-		seasons = slices.Clone(top.seasons)
+	var (
+		preEpID string
+		prePB   *hg.Playback
+		preURL  string
+		preWarm *media.WarmVideo
+	)
+	if top := h.top(); top != nil && top.kind == hgPageDetail && top.seriesID == series.ID {
+		if len(top.seasons) > 0 {
+			seasons = slices.Clone(top.seasons)
+		}
+		if top.prefetchEpID != "" && top.prefetchPB != nil {
+			preEpID = top.prefetchEpID
+			prePB = top.prefetchPB
+			preURL = top.prefetchURL
+			preWarm = top.prefetchWarm
+			top.prefetchWarm = nil
+			top.prefetchPB = nil
+			top.prefetchEpID = ""
+			top.prefetchURL = ""
+		}
 	}
 
 	eps := slices.Clone(episodes)
@@ -434,12 +492,16 @@ func (a *app) hgOpenPlayer(series hg.Series, episodes []hg.Episode, epIndex int)
 	}
 
 	hp := &hgPlayer{
-		series:   series,
-		episodes: eps,
-		seasons:  seasons,
-		epIdx:    epIndex,
-		epGroup:  epIndex / hgEpisodeGroupSize,
-		quality:  a.quality,
+		series:       series,
+		episodes:     eps,
+		seasons:      seasons,
+		epIdx:        epIndex,
+		epGroup:      epIndex / hgEpisodeGroupSize,
+		quality:      a.quality,
+		prefetchEpID: preEpID,
+		prefetchPB:   prePB,
+		prefetchURL:  preURL,
+		prefetchWarm: preWarm,
 	}
 	p := &hgPage{
 		kind:     hgPagePlayer,
@@ -571,16 +633,18 @@ func (a *app) hgPlayEpisode(idx int) {
 	hp.lastAt = resume
 	hp.savedAt = time.Time{}
 
-	// Consume matching non-expired 75% prefetch entry if available.
+	// Consume matching non-expired prefetch entry (from detail page or 75% next-episode pre-resolve).
 	var cachedPB *hg.Playback
+	var warm *media.WarmVideo
+	var warmURL string
 	if hp.prefetchEpID == ep.ID && hp.prefetchPB != nil && !hg.IsExpired(*hp.prefetchPB, time.Now()) {
 		cp := *hp.prefetchPB
 		cachedPB = &cp
+		warm = hp.prefetchWarm
+		warmURL = hp.prefetchURL
+		hp.prefetchWarm = nil
 	}
-	hp.prefetchEpID = ""
-	hp.prefetchPB = nil
-	hp.prefetchBusy = false
-	hp.prefetchGen++
+	hp.closePrefetch()
 
 	hp.clearDanmaku()
 	hp.dmGen++
@@ -590,7 +654,7 @@ func (a *app) hgPlayEpisode(idx int) {
 	}
 	a.ensureEmojis()
 
-	a.hgLoadEpisodeStream(hp, ep, cachedPB, resume)
+	a.hgLoadEpisodeStream(hp, ep, cachedPB, warm, warmURL, resume)
 	a.hgLoadCommentFeed(hp.epComments, false)
 	if hp.drawerOpen && hp.drawerTab == hgDrawerTabComments && hp.commentTab == hgCommentTabSeries {
 		a.hgEnsureActiveComments(hp)
@@ -622,7 +686,7 @@ func (a *app) hgRetryPlayback() {
 	hp.errInfo = hg.ErrorInfo{}
 	hp.dashUnsupported = false
 	hp.finished = false
-	a.hgLoadEpisodeStream(hp, ep, nil, pos)
+	a.hgLoadEpisodeStream(hp, ep, nil, nil, "", pos)
 }
 
 func (a *app) hgSetQuality(q string) {
@@ -660,7 +724,7 @@ func (a *app) hgSetQuality(q string) {
 	hp.releasePlayer()
 	hp.errInfo = hg.ErrorInfo{}
 	hp.dashUnsupported = false
-	a.hgLoadEpisodeStream(hp, ep, cachedPB, pos)
+	a.hgLoadEpisodeStream(hp, ep, cachedPB, nil, "", pos)
 }
 
 func (a *app) hgPlayerSwitchSeason(sn hg.Season) {
@@ -691,10 +755,7 @@ func (a *app) hgPlayerSwitchSeason(sn hg.Season) {
 	hp.finished = false
 	hp.resume = 0
 	hp.lastAt = 0
-	hp.prefetchEpID = ""
-	hp.prefetchPB = nil
-	hp.prefetchBusy = false
-	hp.prefetchGen++
+	hp.closePrefetch()
 	hp.clearDanmaku()
 	hp.dmGen++
 	hp.epComments = nil
@@ -743,9 +804,41 @@ func (a *app) openHGStreamDefault(ctx context.Context, rawURL string, opts media
 	return pl, nil
 }
 
-func (a *app) hgLoadEpisodeStream(hp *hgPlayer, ep hg.Episode, cachedPB *hg.Playback, resume time.Duration) {
+func (a *app) openHGStreamFromWarm(ctx context.Context, warm *media.WarmVideo, native bool) (players, error) {
+	if warm == nil {
+		return players{}, errors.New("media: nil warm video")
+	}
+	live, err := warm.OpenContext(ctx, native)
+	if err != nil {
+		return players{}, err
+	}
+	pl := players{live: live}
+	stop := context.AfterFunc(ctx, func() { live.Close() })
+	newPlayer := newStreamPlayer
+	if native {
+		newPlayer = newNativePlayer
+	}
+	vp, err := newPlayer(live, false)
+	stop()
+	if err == nil {
+		pl.vp = vp
+		err = ctx.Err()
+	} else if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		pl.close()
+		return players{}, err
+	}
+	pl.vp.Pause()
+	live.Pause()
+	return pl, nil
+}
+
+func (a *app) hgLoadEpisodeStream(hp *hgPlayer, ep hg.Episode, cachedPB *hg.Playback, warm *media.WarmVideo, warmURL string, resume time.Duration) {
 	h := a.hg
 	if h == nil || h.svc == nil || hp == nil {
+		warm.Close()
 		return
 	}
 	if hp.cancel != nil {
@@ -763,12 +856,14 @@ func (a *app) hgLoadEpisodeStream(hp *hgPlayer, ep hg.Episode, cachedPB *hg.Play
 	svc := h.svc
 	quality := hp.quality
 	native := a.win != nil && media.NativeAvailable
+	customOpen := a.openHGStream != nil
 	openFn := a.openHGStream
 	if openFn == nil {
 		openFn = a.openHGStreamDefault
 	}
 
 	go func() {
+		defer warm.Close()
 		openFromPlayback := func(pb hg.Playback) (players, bool, error) {
 			if strings.TrimSpace(pb.AudioURL) != "" {
 				return players{}, true, nil
@@ -795,7 +890,21 @@ func (a *app) hgLoadEpisodeStream(hp *hgPlayer, ep hg.Episode, cachedPB *hg.Play
 				if i < len(candidates)-1 {
 					attemptCtx, attemptCancel = context.WithTimeout(ctx, 12*time.Second)
 				}
-				pl, err := openFn(attemptCtx, u, opts, native)
+				var (
+					pl  players
+					err error
+				)
+				if warm != nil && !customOpen && warmURL == u {
+					w := warm
+					warm = nil
+					pl, err = a.openHGStreamFromWarm(attemptCtx, w, native)
+					if err != nil {
+						w.Close()
+					}
+				}
+				if pl.vp == nil {
+					pl, err = openFn(attemptCtx, u, opts, native)
+				}
 				if attemptCancel != nil {
 					attemptCancel()
 				}
@@ -915,7 +1024,7 @@ func (a *app) hgEnsurePlayerResumed() {
 	if resume <= 0 {
 		resume = h.savedPosition(hp.series.ID, ep)
 	}
-	a.hgLoadEpisodeStream(hp, ep, nil, resume)
+	a.hgLoadEpisodeStream(hp, ep, nil, nil, "", resume)
 	if !a.dmOff && !hp.dmLoaded && !hp.dmLoading {
 		a.hgLoadDanmaku(hp, ep, 0, "")
 	}
@@ -952,8 +1061,7 @@ func (a *app) hgStopPlayer() {
 		a.hgCheckpoint(true)
 		hp.releasePlayer()
 		hp.listGen++
-		hp.prefetchGen++
-		hp.prefetchBusy = false
+		hp.closePrefetch()
 		hp.dmGen++
 		a.hg.player = nil
 	}
@@ -1027,23 +1135,35 @@ func (a *app) hgPrefetchEpisode(hp *hgPlayer, ep hg.Episode) {
 	if h == nil || h.svc == nil || hp == nil || ep.ID == "" {
 		return
 	}
+	hp.closePrefetch()
 	hp.prefetchBusy = true
 	hp.prefetchEpID = ep.ID
-	hp.prefetchPB = nil
-	hp.prefetchGen++
-	gen, epID, svc := hp.prefetchGen, ep.ID, h.svc
+	gen, epID, svc, quality := hp.prefetchGen, ep.ID, h.svc, hp.quality
+	prewarm := a.win != nil && a.openHGStream == nil
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), hgRequestTimeout)
 		pb, err := svc.ResolvePlayback(ctx, epID)
 		cancel()
+		var (
+			warmURL string
+			warm    *media.WarmVideo
+		)
+		if err == nil && prewarm {
+			warmURL, warm = hgStartPrewarm(pb, quality)
+		}
 		a.post(func() {
 			if a.hg != h || h.player != hp || hp.prefetchGen != gen {
+				warm.Close()
 				return
 			}
 			hp.prefetchBusy = false
 			if err == nil {
 				cp := pb
 				hp.prefetchPB = &cp
+				hp.prefetchURL = warmURL
+				hp.prefetchWarm = warm
+			} else {
+				warm.Close()
 			}
 		})
 	}()

@@ -893,10 +893,10 @@ func TestCENCLargeMultiTrackStreaming(t *testing.T) {
 
 	ftyp := makeBox("ftyp", []byte("isom\x00\x00\x02\x00isommp41"))
 
-	// Build 192 KiB of sample payloads across 3 tracks so mdat far exceeds cencProbeSize (64 KiB).
+	// Build >1.3 MiB of sample payloads across 3 tracks so mdat far exceeds cencProbeSize (512 KiB).
 	const (
 		vSamples = 8
-		vSize    = 16 << 10 // 128 KiB encrypted video
+		vSize    = 160 << 10 // 1280 KiB encrypted video
 		aSamples = 8
 		aSize    = 4 << 10 // 32 KiB encrypted audio
 		cSamples = 4

@@ -308,6 +308,7 @@ func TestHGLazyDiscoverHotSearchAndThemes(t *testing.T) {
 	}
 
 	a.switchMode(modeHongguo)
+	a.hgSelectRoot(hgRootDiscover)
 	tt.Frame()
 	waitUntil(t, a, tt, "discover and hot search loaded", func() bool {
 		return a.hg != nil && a.hg.hotLoaded && a.hg.discoverList("推荐").loaded
@@ -369,6 +370,7 @@ func TestHGDiscoverChannelCacheAndDeduplication(t *testing.T) {
 
 	a, tt := newHGTestApp(t, svc)
 	a.switchMode(modeHongguo)
+	a.hgSelectRoot(hgRootDiscover)
 	tt.Frame()
 	waitUntil(t, a, tt, "推荐 paginated and deduplicated", func() bool {
 		l := a.hg.discoverList("推荐")
@@ -383,7 +385,8 @@ func TestHGDiscoverChannelCacheAndDeduplication(t *testing.T) {
 		t.Fatalf("unexpected dedup order: %+v", recList.items)
 	}
 
-	// Switch to 漫剧, then back to 推荐: 推荐 must reuse cache without refetching.
+	// Switch to 漫剧 (already warmed by orbit startup), then back to 推荐:
+	// both channels must reuse their in-memory cache without extra Discover calls.
 	svc.mu.Lock()
 	recCallsBefore := len(svc.discoverCalls)
 	svc.mu.Unlock()
@@ -409,8 +412,8 @@ func TestHGDiscoverChannelCacheAndDeduplication(t *testing.T) {
 	svc.mu.Lock()
 	totalCalls := len(svc.discoverCalls)
 	svc.mu.Unlock()
-	if totalCalls != recCallsBefore+1 {
-		t.Fatalf("expected exactly 1 extra Discover call (for 漫剧), got %d -> %d (%v)", recCallsBefore, totalCalls, svc.discoverCalls)
+	if totalCalls != recCallsBefore {
+		t.Fatalf("expected cached channel switches to trigger 0 extra Discover calls, got %d -> %d (%v)", recCallsBefore, totalCalls, svc.discoverCalls)
 	}
 }
 
@@ -717,6 +720,7 @@ func TestHGDetailFavoritePersistencePlayerAndTrackView(t *testing.T) {
 
 	a, tt := newHGTestApp(t, svc)
 	a.switchMode(modeHongguo)
+	a.hgSelectRoot(hgRootDiscover)
 	tt.Frame()
 	waitUntil(t, a, tt, "discover loaded", func() bool {
 		return a.hg.discoverList("推荐").loaded
@@ -799,6 +803,7 @@ func TestHGErrorBannerAnonymousLimitedAndResetRetry(t *testing.T) {
 
 	a, tt := newHGTestApp(t, svc)
 	a.switchMode(modeHongguo)
+	a.hgSelectRoot(hgRootDiscover)
 	tt.Frame()
 	waitUntil(t, a, tt, "discover error classified", func() bool {
 		return a.hg.discoverList("推荐").err.Kind == hg.ErrKindAnonymousLimited

@@ -99,6 +99,7 @@ func TestHGDiscoverStaleWhileRevalidateCache(t *testing.T) {
 	})
 
 	h := a.ensureHG()
+	h.root = hgRootDiscover
 	l := h.discoverList(hgDiscoverChannels[0])
 	if len(l.items) != 2 || l.items[0].ID != "c1" || !l.stale {
 		t.Fatalf("expected stale cached items on ensureHG: items=%+v stale=%v", l.items, l.stale)
@@ -127,7 +128,7 @@ func TestHGDiscoverStaleWhileRevalidateCache(t *testing.T) {
 	// Wait for the async cache update to finish before TempDir cleanup.
 	writeDeadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(writeDeadline) {
-		if raw, err := os.ReadFile(a.hgDiscoverCachePath()); err == nil && bytes.Contains(raw, []byte(`"f1"`)) {
+		if raw, err := os.ReadFile(a.hgDiscoverCachePath(hgDiscoverChannels[0])); err == nil && bytes.Contains(raw, []byte(`"f1"`)) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -157,6 +158,7 @@ func TestHGDiscoverStaleCacheKeptOnRefreshError(t *testing.T) {
 		},
 	})
 	h := a.ensureHG()
+	h.root = hgRootDiscover
 	l := h.discoverList(hgDiscoverChannels[0])
 	a.hgEnsureActiveLoaded()
 	deadline := time.After(2 * time.Second)
