@@ -83,6 +83,7 @@ type Video struct {
 	Likes, Comments  int
 	Collects, Shares int
 	Cover, Avatar    string // image addresses: the video's cover as the list it came in crops it, the author's picture
+	Poster           string // its cover at the video's own proportions, 360p: what shows in its place before it plays
 	WideCover        string // a 16:9 cover of 1760×990, which 精选 has for most of its videos; "" elsewhere
 	Mix              Mix    // the series the video is an episode of, if any
 	Live             *Live  // a live room in the list, which has no PlayURL
@@ -441,7 +442,7 @@ func room(raw []byte, onAir bool) (v Video, ok bool) {
 		return v, false
 	}
 	return Video{ID: "live:" + r.ID, Desc: r.Title, Author: r.Owner.Nickname, AuthorID: r.Owner.SecUID,
-		Cover: r.Cover.first(), Avatar: r.Owner.Avatar.first(), Qualities: qualities,
+		Cover: r.Cover.first(), Poster: r.Cover.first(), Avatar: r.Owner.Avatar.first(), Qualities: qualities,
 		Live: &Live{RoomID: r.ID, WebRID: r.Owner.WebRID, OwnerID: r.Owner.ID,
 			HLS: hls, H264HLS: h264, DefaultQuality: defaultQuality, Streams: streams, Viewers: r.Stats.Viewers}}, true
 }
@@ -745,6 +746,7 @@ type aweme struct {
 	Video struct {
 		Duration int  `json:"duration"`
 		Cover    addr `json:"cover"`
+		Origin   addr `json:"origin_cover"`
 		Wide     addr `json:"universal_cover_horizontal169_big"`
 		PlayAddr addr `json:"play_addr"`
 		Gears    []struct {
@@ -799,7 +801,7 @@ func videos(list []aweme) []Video {
 		out = append(out, Video{Mix: mix, ID: a.ID, Desc: a.Desc, Author: a.Author.Nickname, AuthorID: a.Author.SecUID, AuthorUID: a.Author.UID, AuthorFollow: a.Author.FollowStatus, PlayURL: play,
 			W: pa.W, H: pa.H, Size: pa.Size, Duration: time.Duration(a.Video.Duration) * time.Millisecond,
 			Likes: a.Stats.Likes, Comments: a.Stats.Comments, Collects: a.Stats.Collects, Shares: a.Stats.Shares,
-			Cover: a.Video.Cover.first(), WideCover: a.Video.Wide.first(),
+			Cover: a.Video.Cover.first(), Poster: firstNonEmpty(a.Video.Origin.first(), a.Video.Cover.first()), WideCover: a.Video.Wide.first(),
 			Avatar: a.Author.Avatar.first(), Created: time.Unix(a.Created, 0),
 			Liked: a.Digged == 1, Saved: a.Saved == 1, Pinned: a.Top == 1, Qualities: qs})
 	}

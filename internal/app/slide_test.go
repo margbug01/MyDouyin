@@ -24,8 +24,8 @@ func TestStepSlides(t *testing.T) {
 	im.m["red"] = &picture{bmp: solid(color.RGBA{255, 0, 0, 255})}
 	im.m["blue"] = &picture{bmp: solid(color.RGBA{0, 0, 255, 255})}
 	p := &page{title: "推荐", done: true, list: []*slot{
-		{v: dy.Video{ID: "a", Cover: "red"}, loading: true},
-		{v: dy.Video{ID: "b", Cover: "blue"}, loading: true},
+		{v: dy.Video{ID: "a", Poster: "red"}, loading: true},
+		{v: dy.Video{ID: "b", Poster: "blue"}, loading: true},
 	}}
 	a := withRoots(&app{pages: []*page{p}, img: im})
 	tt := newTester(a)

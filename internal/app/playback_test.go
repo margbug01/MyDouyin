@@ -76,11 +76,11 @@ func TestSeekingDoesNotAutoAdvance(t *testing.T) {
 func TestPlaybackShowsCoverUntilFirstPicture(t *testing.T) {
 	p := stub("推荐", 1)
 	s := p.list[0]
-	s.v.Cover = "cover"
+	s.v.Poster = "cover"
 	cover := image.NewRGBA(image.Rect(0, 0, 160, 90))
 	draw.Draw(cover, cover.Bounds(), image.NewUniform(color.RGBA{R: 230, B: 180, A: 255}), image.Point{}, draw.Src)
 	a := withRoots(&app{pages: []*page{p}, img: newImages(nil, nil)})
-	a.img.m[s.v.Cover] = &picture{bmp: ui.NewBitmap(cover)}
+	a.img.m[s.v.Poster] = &picture{bmp: ui.NewBitmap(cover)}
 	tt := newTester(a)
 	tt.Frame()
 	coverVisible := func() bool {

@@ -488,17 +488,19 @@ func TestLiveReplies(t *testing.T) {
 	t.Logf("%d replies, first %q by %q", len(rs), rs[0].Text, rs[0].Author)
 }
 
-// A video keeps the covers Douyin gives it: the list's, and 精选's 16:9 one.
+// A video keeps the covers Douyin gives it: the list's, 精选's 16:9 one, and
+// the one at its own proportions, or the list's where it has none.
 func TestCovers(t *testing.T) {
 	var list []aweme
 	err := json.Unmarshal([]byte(`[{"aweme_id":"1","video":{"play_addr":{"url_list":["https://x/aweme/v1/play/?1"]},
-		"cover":{"url_list":["c"]},"universal_cover_horizontal169_big":{"url_list":["w"]}}},
+		"cover":{"url_list":["c"]},"origin_cover":{"url_list":["o"]},"universal_cover_horizontal169_big":{"url_list":["w"]}}},
 		{"aweme_id":"2","video":{"play_addr":{"url_list":["https://x/aweme/v1/play/?2"]},"cover":{"url_list":["c2"]}}}]`), &list)
 	if err != nil {
 		t.Fatal(err)
 	}
 	vs := videos(list)
-	if len(vs) != 2 || vs[0].Cover != "c" || vs[0].WideCover != "w" || vs[1].Cover != "c2" || vs[1].WideCover != "" {
+	if len(vs) != 2 || vs[0].Cover != "c" || vs[0].Poster != "o" || vs[0].WideCover != "w" ||
+		vs[1].Cover != "c2" || vs[1].Poster != "c2" || vs[1].WideCover != "" {
 		t.Fatalf("covers: %+v", vs)
 	}
 }

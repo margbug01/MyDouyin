@@ -706,6 +706,9 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) ui.Element {
 		}
 		ui.Text(c, byline(v)).FontSize(12).TextColor(pal.faint).SingleLine()
 	})
+	if b.Hovered() {
+		a.img.get(v.Poster) // what the stage shows until the video does, there as it is clicked
+	}
 	if b.Clicked() {
 		a.play(p, i)
 	}
@@ -833,7 +836,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 
 		picture.Children(func() {
 			if s.vp != nil && a.listen { // 听抖音: the sound goes on, the picture gives way to the cover
-				if bmp := a.img.get(s.v.Cover); bmp != nil {
+				if bmp := a.img.get(s.v.Poster); bmp != nil {
 					ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.35)
 				}
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(10).Children(func() {
@@ -841,7 +844,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					ui.Text(c, "听抖音中").FontSize(15).FontWeight(600).TextColor(white)
 				})
 			} else if s.vp != nil && a.pipOn { // playing in 小窗: a player shows in one place at a time
-				if bmp := a.img.get(s.v.Cover); bmp != nil {
+				if bmp := a.img.get(s.v.Poster); bmp != nil {
 					ui.Image(c, bmp).Fill().Fit(ui.Contain).Opacity(0.3)
 				}
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(14).Children(func() {
@@ -856,7 +859,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					a.mainVideo.video(c, s.vp, false, ui.Element{}, 12).Fill().Fit(ui.Contain)
 				}
 				if !videoPictureReady(s.vp) {
-					a.playbackCover(c, a.img.get(s.v.Cover), ui.Contain)
+					a.playbackCover(c, a.img.get(s.v.Poster), ui.Contain)
 				}
 			}
 			a.slideIn(c, s, bounds.H)
@@ -961,7 +964,7 @@ func (a *app) slideIn(c *ui.Context, s *slot, h float32) {
 		for _, it := range []struct {
 			url string
 			y   float32
-		}{{sl.from, -off * t}, {s.v.Cover, off * (1 - t)}} {
+		}{{sl.from, -off * t}, {s.v.Poster, off * (1 - t)}} {
 			page := ui.Box(c).Absolute().Left(0).Right(0).Top(it.y).Height(h)
 			if bmp := a.img.get(it.url); bmp != nil {
 				page.Children(func() { ui.Image(c, bmp).Fill().Fit(ui.Contain) })
@@ -2302,9 +2305,10 @@ func (a *app) relatedList(c *ui.Context, sh *sheet) {
 			b := ui.ButtonBase(c.Key(fmt.Sprint(i))).Row().Padding(6).Gap(10).Radius(10).AlignItems(ui.Start).Justify(ui.Start).FocusRing(false).Label(v.Desc)
 			if b.Hovered() {
 				b.Background(pal.hover)
+				a.img.get(v.Poster) // what the stage shows until the video does
 			}
 			b.Children(func() {
-				ui.Box(c).Width(128).AspectRatio(16.0 / 9).Radius(8).Clip().Background(pal.press).Children(func() {
+				ui.Box(c).Width(112).AspectRatio(4.0 / 3).Radius(8).Clip().Background(pal.press).Children(func() {
 					if bmp := a.img.getSized(v.Cover, thumbEdge); bmp != nil {
 						ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 					}

@@ -851,6 +851,9 @@ func (a *app) orbitCards(c *ui.Context, w, h float32) {
 		b := ui.ButtonBase(c.Key(fmt.Sprintf("orbit-card:%d:%s", slotIdx, v.ID))).Absolute().Left(r.x).Top(r.y).Size(r.w, r.h).
 			Radius(18).Clip().Background(pal.well).FocusRing(false).Label(v.Desc).Transition(orbitCardMotion(i))
 		hovered := b.Hovered()
+		if hovered {
+			a.img.get(v.Poster) // what the stage shows until the video does, there as it is clicked
+		}
 		bd, z, pose := pal.cardBorder, 10, ui.Pose{}
 		switch {
 		case q != "" && !matched:

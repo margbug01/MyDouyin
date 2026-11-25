@@ -2052,7 +2052,7 @@ func (a *app) step(d int) {
 	keepSheet, relatedTab := a.sheet != nil, a.sheet != nil && a.sheet.related
 	if p.idx < len(p.list) { // past the end, 载入中… shows: nothing slides away
 		a.slides++
-		a.slide = &slide{n: a.slides, from: p.list[p.idx].v.Cover, to: p.list[i], dir: d}
+		a.slide = &slide{n: a.slides, from: p.list[p.idx].v.Poster, to: p.list[i], dir: d}
 	}
 	p.idx, a.paused = i, false
 	if keepSheet {
