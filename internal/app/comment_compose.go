@@ -63,6 +63,63 @@ type commentDraft struct {
 	err          string
 }
 
+// hgEmojiAliases maps Hongguo / Fanqie danmaku emoji shortcodes that differ in
+// wording from Douyin's canonical emoji names onto the matching ByteDance icons.
+var hgEmojiAliases = map[string]string{
+	"[爱慕]":   "[色]",
+	"[哭]":    "[流泪]",
+	"[怒]":    "[发怒]",
+	"[生气]":   "[发怒]",
+	"[酷]":    "[酷拽]",
+	"[吃瓜]":   "[吃瓜群众]",
+	"[什么]":   "[疑问]",
+	"[疑惑]":   "[疑问]",
+	"[探究]":   "[暗中观察]",
+	"[爽]":    "[好开心]",
+	"[开心]":   "[好开心]",
+	"[重拳出击]": "[拳头]",
+	"[求爆更]":  "[求求了]",
+	"[催更]":   "[求求了]",
+	"[没看够]":  "[星星眼]",
+	"[赶稿中]":  "[奋斗]",
+	"[笑]":    "[微笑]",
+	"[哈哈]":   "[大笑]",
+	"[哈哈哈]":  "[大笑]",
+	"[破涕为笑]": "[笑哭]",
+	"[捂脸哭]":  "[笑哭]",
+	"[哭笑]":   "[笑哭]",
+	"[惊呆]":   "[震惊]",
+	"[吃惊]":   "[震惊]",
+	"[惊讶]":   "[震惊]",
+	"[无语]":   "[无语流汗]",
+	"[尴尬]":   "[尴尬流汗]",
+	"[汗]":    "[擦汗]",
+	"[流汗]":   "[擦汗]",
+	"[悲伤]":   "[难过]",
+	"[抱抱]":   "[抱抱你]",
+	"[祈祷]":   "[黄脸祈祷]",
+	"[干杯]":   "[黄脸干杯]",
+	"[玫瑰花]":  "[玫瑰]",
+	"[牛]":    "[强]",
+	"[狗头]":   "[二哈]",
+	"[加油]":   "[一起加油]",
+	"[菜]":    "[菜狗]",
+	"[爱了]":   "[爱心]",
+	"[心动]":   "[爱心]",
+	"[吐舌头]":  "[吐舌]",
+	"[嫌弃]":   "[鄙视]",
+}
+
+func applyEmojiAliases(m map[string]string) {
+	for alias, canonical := range hgEmojiAliases {
+		if m[alias] == "" {
+			if u := m[canonical]; u != "" {
+				m[alias] = u
+			}
+		}
+	}
+}
+
 func (a *app) ensureEmojis() {
 	if len(a.emoji) > 0 || a.emojiLoading || a.c == nil {
 		return
@@ -75,13 +132,17 @@ func (a *app) ensureEmojis() {
 			if err != nil {
 				return
 			}
-			m := make(map[string]string, len(list))
+			m := make(map[string]string, len(list)+len(hgEmojiAliases))
 			for _, e := range list {
 				m[e.Name] = e.URL
 			}
+			applyEmojiAliases(m)
 			a.emojiList = list
 			a.emoji = m
 			a.emojiCache = nil
+			if a.hg != nil && a.hg.player != nil {
+				a.hg.player.dmWidth = nil
+			}
 		})
 	}()
 }

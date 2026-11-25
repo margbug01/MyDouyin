@@ -20,6 +20,7 @@ type images struct {
 	m             map[string]*picture
 	slots         chan struct{} // downloads at once
 	decoding      chan struct{} // full-size source images being decoded at once
+	cacheDir      string        // optional bounded disk cache of scaled cover bytes
 	frame         int
 	bytes         int
 	releasePixels bool // true on GPU windows: drop CPU pixels after GPU upload
@@ -48,7 +49,7 @@ const (
 )
 
 func newImages(fetch func(string) ([]byte, error), post func(func())) *images {
-	return &images{fetch: fetch, post: post, m: map[string]*picture{}, slots: make(chan struct{}, 6), decoding: make(chan struct{}, 2)}
+	return &images{fetch: fetch, post: post, m: map[string]*picture{}, slots: make(chan struct{}, 12), decoding: make(chan struct{}, 4)}
 }
 
 // get returns the picture at url decoded up to pictureEdge, nil while it loads
@@ -110,12 +111,26 @@ func (im *images) getKeyed(key, url string, maxEdge int) *ui.Bitmap {
 }
 
 func (im *images) load(url string, p *picture, maxEdge int) {
-	b, err := im.fetch(url)
 	var bmp *ui.Bitmap
-	if err == nil {
-		im.decoding <- struct{}{}
-		bmp, err = decodePictureEdge(b, maxEdge)
-		<-im.decoding
+	var err error
+	cacheDir := im.cacheDir
+	if cached := readCoverCache(cacheDir, url, maxEdge); len(cached) > 0 {
+		if b, derr := ui.DecodeBitmap(cached); derr == nil {
+			bmp = b
+		}
+	}
+	if bmp == nil {
+		var raw []byte
+		raw, err = im.fetch(url)
+		if err == nil {
+			var encoded []byte
+			im.decoding <- struct{}{}
+			bmp, encoded, err = decodePictureEdgeBytes(raw, maxEdge)
+			<-im.decoding
+			if err == nil && cacheDir != "" && len(encoded) > 0 && maxEdge <= coverEdge {
+				writeCoverCache(cacheDir, url, maxEdge, encoded)
+			}
+		}
 	}
 	<-im.slots
 	im.post(func() {
@@ -158,19 +173,43 @@ func decodePicture(data []byte) (*ui.Bitmap, error) {
 }
 
 func decodePictureEdge(data []byte, maxEdge int) (*ui.Bitmap, error) {
+	bmp, _, err := decodePictureEdgeBytes(data, maxEdge)
+	return bmp, err
+}
+
+func decodePictureEdgeBytes(data []byte, maxEdge int) (*ui.Bitmap, []byte, error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		rgba, nerr := decodeNativeImage(data, maxEdge)
+		if nerr != nil {
+			return nil, nil, err
+		}
+		var buf bytes.Buffer
+		if isOpaqueRGBA(rgba) {
+			err = jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: 84})
+		} else {
+			err = png.Encode(&buf, rgba)
+		}
+		if err == nil {
+			if bmp, derr := ui.DecodeBitmap(buf.Bytes()); derr == nil {
+				return bmp, buf.Bytes(), nil
+			}
+		}
+		return ui.NewBitmap(rgba), nil, nil
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > 16<<20 {
-		return nil, fmt.Errorf("cover dimensions exceed limit: %dx%d", cfg.Width, cfg.Height)
+		return nil, nil, fmt.Errorf("cover dimensions exceed limit: %dx%d", cfg.Width, cfg.Height)
 	}
 	if max(cfg.Width, cfg.Height) <= maxEdge {
-		return ui.DecodeBitmap(data)
+		bmp, derr := ui.DecodeBitmap(data)
+		if derr != nil {
+			return nil, nil, derr
+		}
+		return bmp, data, nil
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	w, h := max(1, cfg.Width*maxEdge/max(cfg.Width, cfg.Height)), max(1, cfg.Height*maxEdge/max(cfg.Width, cfg.Height))
 	small := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -185,10 +224,10 @@ func decodePictureEdge(data []byte, maxEdge int) (*ui.Bitmap, error) {
 	}
 	if err == nil {
 		if bmp, derr := ui.DecodeBitmap(buf.Bytes()); derr == nil {
-			return bmp, nil
+			return bmp, buf.Bytes(), nil
 		}
 	}
-	return ui.NewBitmap(small), nil
+	return ui.NewBitmap(small), nil, nil
 }
 
 func isOpaqueRGBA(img *image.RGBA) bool {

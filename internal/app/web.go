@@ -310,7 +310,7 @@ func (a *app) startLogin() {
 			a.fill()
 			if in {
 				a.loadAccount()
-			} else {
+			} else if a.mode == modeDouyin {
 				a.openLogin()
 			}
 		})

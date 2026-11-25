@@ -25,7 +25,7 @@ Built with Go and [MyGo](https://github.com/egoist/mygo) — no Electron wrapper
 
 ## What Is MyDouyin?
 
-**MyDouyin** is a native desktop client for **Douyin** (Chinese TikTok) supporting **macOS (Apple Silicon)** and **Windows 10/11 (x64)**. Instead of wrapping a full Chromium/Electron runtime, MyDouyin draws its interface natively with Go and [MyGo](https://github.com/egoist/mygo): macOS renders video directly through Apple's AVFoundation `AVPlayerLayer` without writing video files to disk, while Windows bundles FFmpeg for up to 60 fps native playback.
+**MyDouyin** is a native desktop client for **Douyin** (Chinese TikTok) supporting **macOS (Apple Silicon)** and **Windows 10/11 (x64)**. Instead of wrapping a full Chromium/Electron runtime, MyDouyin draws its interface natively with Go and [MyGo](https://github.com/egoist/mygo): macOS renders video directly through Apple's AVFoundation `AVPlayerLayer` without writing video files to disk, while Windows decodes in hardware with the system's own Media Foundation and draws the frames as GPU textures.
 
 You can browse public videos, search, and explore the Orbit home page immediately without signing in, or scan a QR code in-app to unlock likes, saves, comments, danmaku, follows, live rooms, and watch-history sync.
 
@@ -35,7 +35,7 @@ You can browse public videos, search, and explore the Orbit home page immediatel
 | --- | --- | --- | --- |
 | **Architecture** | Go + MyGo native UI, dual themes, floating pill navigation | Browser tabs competing with extensions and memory | Bundled Chromium with multiple persistent processes |
 | **Launch Experience** | Opens to the **Orbit** search + curated card home instead of instant autoplay | Autoplays recommended feed on open | Autoplays immediately on launch |
-| **Playback & Disk I/O** | macOS uses AVFoundation native layer with **zero persistent disk cache**; Windows bundles FFmpeg (up to 60 fps) | Continuous browser media caching | High media & renderer cache footprint |
+| **Playback & Disk I/O** | AVFoundation on macOS and Media Foundation on Windows, both with **zero persistent disk cache** | Continuous browser media caching | High media & renderer cache footprint |
 | **Memory Footprint** | ~**65 MB** 1080p native decoder layer; ~**80 MB** on-demand sign page released after 10 s idle | Grows steadily during long browsing sessions | High baseline memory usage |
 | **Updates** | Signed in-app delta updates via top-right pill | Web-only | Full installer downloads |
 
@@ -55,7 +55,7 @@ Watch vertical and landscape videos with smooth slide transitions, auto-hiding p
 | --- | --- |
 | **Orbit Home Screen** | Opens to a centered search bar surrounded by 8 floating video cards instead of noisy autoplay. Switch between Picks, Following, Watch Later, and History, refresh non-repeating batches, or toggle distraction-free search and trending topics. |
 | **Dual Themes & Floating Rail** | Full-app **Pure Black** and **Porcelain White** themes with one-click toggle in the top bar. The left floating pill collapses to icons at rest and expands on hover across Orbit, Picks, Recommend, Following, Friends, Live, and Short Dramas. |
-| **Native Video & Live Streaming** | macOS uses AVFoundation `AVPlayerLayer` with single-item metadata preload for fast switching; Windows bundles `ffmpeg.exe` and `ffprobe.exe` out of the box for VOD and HLS live streams up to 60 fps. |
+| **Native Video & Live Streaming** | macOS uses AVFoundation `AVPlayerLayer` with single-item metadata preload for fast switching; Windows plays VOD and HLS live streams with the system's Media Foundation, no bundled decoder, and switches to the next live stream when one shows no picture. |
 | **Comments, Replies & Danmaku** | Virtualized comment list, nested replies, Douyin emoji picker, image comments (file picker, clipboard paste, drag-and-drop), full-resolution image viewer, clickable `@mentions`, and real-time danmaku. |
 | **On-Demand Lightweight Signing** | Write actions (like, save, follow, comment, danmaku, watch history) spin up a ~80 MB signing page only when needed and release it after 10 s idle. Single-instance lock prevents duplicate sessions from invalidating login. |
 
@@ -85,7 +85,7 @@ xattr -dr com.apple.quarantine /Applications/MyDouyin.app
 ### Windows 10 / 11 (x64)
 
 1. Download `mydouyin-setup-<version>-amd64.exe` (or portable archive `mydouyin-<version>-windows-amd64.tar.gz`) from [GitHub Releases](https://github.com/margbug01/MyDouyin/releases/latest).
-2. Both packages bundle `ffmpeg.exe` and `ffprobe.exe` with upstream license notices — no separate FFmpeg installation required.
+2. Video plays through the system's Media Foundation, so no decoder needs installing. Windows N and KN editions ship without it: install the Media Feature Pack from **Settings › Apps › Optional features** first.
 3. If Windows SmartScreen warns on first launch, choose **More info › Run anyway** (you can verify integrity against `SHA256SUMS` in the release).
 
 ### Keyboard Shortcuts
@@ -107,15 +107,15 @@ go run .
 go test ./...
 ```
 
-- **macOS (builds macOS and/or Windows releases with bounded disk retention)**: `./scripts/build-release.sh` (keeps only the latest 1 `build.noindex/release-*` by default; caches Windows FFmpeg once in `~/Library/Caches/mydouyin-win-ffmpeg`).
-- **Windows (PowerShell 7)**: `./scripts/build-windows.ps1` (bundles local `ffmpeg.exe`/`ffprobe.exe` and prunes old `build.noindex/release-*` directories automatically).
+- **macOS (builds macOS and/or Windows releases with bounded disk retention)**: `./scripts/build-release.sh` (keeps only the latest 1 `build.noindex/release-*` by default).
+- **Windows (PowerShell 7)**: `./scripts/build-windows.ps1` (prunes old `build.noindex/release-*` directories automatically).
 
 ## FAQ
 
 <details>
 <summary><strong>Which operating systems does MyDouyin support?</strong></summary>
 
-MyDouyin supports **macOS on Apple Silicon (arm64)** and **Windows 10/11 (x64)**. macOS uses native AVFoundation playback, and Windows bundles FFmpeg for self-contained native rendering.
+MyDouyin supports **macOS on Apple Silicon (arm64)** and **Windows 10/11 (x64)**. macOS uses native AVFoundation playback, and Windows uses the system's Media Foundation (N and KN editions need the Media Feature Pack).
 </details>
 
 <details>

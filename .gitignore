@@ -2,3 +2,4 @@ ref/
 *.mp4
 !testdata/silent.mp4
 build.noindex/
+.DS_Store

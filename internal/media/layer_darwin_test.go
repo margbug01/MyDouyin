@@ -15,7 +15,7 @@ func TestLayerReleasesPixelsAndNativeObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := OpenNative("file://"+path, nil, true)
+	live, err := OpenNative(t.Context(), "file://"+path, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

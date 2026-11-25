@@ -17,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"douyin/internal/dy"
+	"douyin/internal/media"
 )
 
 // The window is laid out as Douyin's own, with less in it: a floating dock
@@ -62,19 +63,26 @@ var (
 )
 
 func (a *app) view(c *ui.Context) {
-	p := a.cur()
-	pal = onOff(a.orbitIsDark(), darkPal, lightPal)
+	pal = paletteFor(a.orbitIsDark(), a.mode)
 	t := onOff(pal.dark, baseDark, baseLight)
 	t.Background, t.Text, t.TextMuted = ui.Color{}, pal.text, pal.muted
 	if a.win != nil && a.winBg != pal.bgHex { // what shows as the window resizes, before a frame
 		a.winBg = pal.bgHex
 		a.win.SetBackgroundColor(pal.bgHex)
 	}
-	a.syncLiveRoom(p)
-	giftOpen := a.liveChat != nil && a.liveChat.gifts.open
+	var p *page
+	if a.mode == modeDouyin {
+		p = a.cur()
+		a.syncLiveRoom(p)
+	}
+	giftOpen := a.mode == modeDouyin && a.liveChat != nil && a.liveChat.gifts.open
 	a.mainVideo.begin(a.win)
 	defer a.mainVideo.end()
-	a.mainVideo.off = giftOpen || a.group.open || a.picViewer.open || a.upd.dialogOpen || a.loginOpen && a.login.verify && a.web.v != nil
+	if a.mode == modeHongguo {
+		a.mainVideo.off = !a.hgPlaying() || a.settingsOpen || a.upd.dialogOpen || a.brandMenuOpen
+	} else {
+		a.mainVideo.off = giftOpen || a.group.open || a.picViewer.open || a.upd.dialogOpen || a.loginOpen && a.login.verify && a.web.v != nil
+	}
 	t.Accent, t.AccentText = pal.accent, white
 	t.Inverse, t.InverseText = onOff(pal.dark, white, ui.Hex("#11141e")), onOff(pal.dark, ui.Hex("#11141e"), white) // toasts': by default the text is the Background, clear here
 	t.Selection = pal.accent.Alpha(0.35)
@@ -83,15 +91,27 @@ func (a *app) view(c *ui.Context) {
 	defer a.img.sweep()
 	defer a.saveSettings()
 
-	liveInputFocused := a.liveChat != nil && c.Focused(a.liveChat.input)
-	commentInputFocused := a.sheet != nil && !a.sheet.related && (c.Focused(a.sheet.draft.input) || a.sheet.draft.emojiOpen)
-	if !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused {
+	liveInputFocused := a.mode == modeDouyin && a.liveChat != nil && c.Focused(a.liveChat.input)
+	commentInputFocused := a.mode == modeDouyin && a.sheet != nil && !a.sheet.related && (c.Focused(a.sheet.draft.input) || a.sheet.draft.emojiOpen)
+	settingsInputFocused := c.Focused(a.hgSignerURLBox) || c.Focused(a.hgSignerTokenBox)
+	hgSearchFocused := a.mode == modeHongguo && a.hg != nil && c.Focused(a.hg.searchBox)
+	modalOpen := a.settingsOpen || a.upd.dialogOpen || a.loginOpen || a.group.open || a.picViewer.open || giftOpen
+	textFocused := liveInputFocused || commentInputFocused || settingsInputFocused || hgSearchFocused || c.Focused(a.searchBox) || c.Focused(a.shareBox) || c.Focused(a.dmBox)
+	if !modalOpen && !textFocused {
+		c.OnShortcut(ui.Cmd, ui.Key1, func() { a.switchMode(modeDouyin) })
+		c.OnShortcut(ui.Cmd, ui.Key2, func() { a.switchMode(modeHongguo) })
+	}
+	if a.mode == modeDouyin && !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused {
 		c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
 		c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
 	}
+	if a.hgPlaying() && !modalOpen && !textFocused {
+		c.OnShortcut(0, ui.KeyDown, func() { a.hgStepEpisode(1) })
+		c.OnShortcut(0, ui.KeyUp, func() { a.hgStepEpisode(-1) })
+	}
 	c.OnShortcut(0, ui.KeyEscape, a.escape)
 	root := ui.Box(c).Fill()
-	if !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused && !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
+	if a.mode == modeDouyin && !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused && !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
 		// Space pauses wherever the focus is, as in MySpotify: on the box
 		// around everything it comes before a button the pointer focused,
 		// which would take it as a click; on the window, as nothing has
@@ -99,7 +119,15 @@ func (a *app) view(c *ui.Context) {
 		root.OnShortcut(0, ui.KeySpace, a.toggle)
 		c.OnShortcut(0, ui.KeySpace, a.toggle)
 	}
+	if a.hgPlaying() && !modalOpen && !textFocused {
+		root.OnShortcut(0, ui.KeySpace, a.hgTogglePlay)
+		c.OnShortcut(0, ui.KeySpace, a.hgTogglePlay)
+	}
 	root.Children(func() {
+		if a.mode == modeHongguo {
+			a.hgView(c)
+			return
+		}
 		if chat := a.liveChat; chat != nil && chat.view != nil {
 			ui.WebView(c.Key("live-web"), chat.view).Absolute().Top(0).Left(0).Size(4, 4).ZIndex(-3)
 		}
@@ -159,22 +187,28 @@ func (a *app) view(c *ui.Context) {
 			})
 		})
 	})
-	if c.Focused(a.searchBox) && !a.isHome(p) {
+	if a.mode == modeDouyin && c.Focused(a.searchBox) && !a.isHome(p) {
 		a.searchList(c)
 	}
+	if a.mode == modeHongguo && a.hg != nil && c.Focused(a.hg.searchBox) {
+		a.hgSearchList(c)
+	}
+	a.brandMenu(c, a.brandMenuLeft())
 	a.settingsDialog(c)
 	a.updateDialog(c)
-	a.commentGroupDialog(c)
-	a.picViewerDialog(c)
-	if a.liveChat != nil && a.liveChat.gifts.open && p.idx < len(p.list) {
-		a.liveGiftDialog(c, a.liveChat, p.list[p.idx].v.Author)
+	if a.mode == modeDouyin {
+		a.commentGroupDialog(c)
+		a.picViewerDialog(c)
+		if a.liveChat != nil && a.liveChat.gifts.open && p.idx < len(p.list) {
+			a.liveGiftDialog(c, a.liveChat, p.list[p.idx].v.Author)
+		}
+		a.loginPanel(c)
 	}
-	a.loginPanel(c)
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
-	if a.pip != nil { // 小窗 follows what this window plays
+	if a.mode == modeDouyin && a.pip != nil { // 小窗 follows what this window plays
 		a.pip.Invalidate()
 	}
 }
@@ -418,10 +452,7 @@ func (a *app) topBar(c *ui.Context, p *page) {
 		if a.pages[0] != p || p.grid && p.playing {
 			ui.Text(c, p.title).FontSize(15).FontWeight(600).TextColor(pal.text).SingleLine().Shrink(1).MinWidth(0).MaxWidth(220)
 		} else { // a root, which the dock names: the mark, where 引力场 has it
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Image(c, logo).Size(22, 22)
-				ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
-			})
+			a.brandSwitcher(c)
 		}
 		left, fieldW := a.searchField(c)
 		left -= contentLeft // the bar starts beside the dock
@@ -765,7 +796,9 @@ func (a *app) stage(c *ui.Context, p *page) {
 				})
 			}
 		})
-		a.playbackStatus(c, s)
+		if !a.switchStream(s) {
+			a.playbackStatus(c, s)
+		}
 		at := time.Duration(0)
 		if s.vp != nil { // the sound's clock, or the picture's for a video without
 			at = s.at()
@@ -888,13 +921,16 @@ func (a *app) playbackStatus(c *ui.Context, s *slot) {
 		return
 	}
 	msg := "视频暂时无法播放"
-	if errors.Is(err, dy.ErrLiveEnded) {
+	switch {
+	case errors.Is(err, dy.ErrLiveEnded):
 		msg = "主播已下播"
+	case errors.Is(err, media.ErrNoSystemPlayer):
+		msg = "系统缺少媒体功能，Windows N 版需安装 Media Feature Pack"
 	}
 	ui.Column(c.Key("playback-status")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(12).PassThrough().Children(func() {
 		ui.Text(c, msg).FontSize(14).TextColor(white).PassThrough()
 		if ui.Button(c.Key("retry-video"), "重新加载").Clicked() {
-			s.liveFreshAt = time.Time{}
+			s.liveFreshAt, s.liveFrom = time.Time{}, 0
 			a.release(s)
 			a.prepare(s)
 		}
@@ -2533,6 +2569,7 @@ var (
 	iconZoomOut    = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/>`)
 	iconCopy       = strokeIcon(`<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`)
 	iconSmile      = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.5 2.2 2.2 3.5 2.2s2.5-.7 3.5-2.2"/><circle cx="9" cy="9.5" r=".8" fill="currentColor"/><circle cx="15" cy="9.5" r=".8" fill="currentColor"/>`)
-	iconImage      = strokeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5-6 6-2-2-5 5"/>`)
-	iconPlus       = strokeIcon(`<path d="M12 5v14"/><path d="M5 12h14"/>`)
+	iconImage       = strokeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5-6 6-2-2-5 5"/>`)
+	iconPlus        = strokeIcon(`<path d="M12 5v14"/><path d="M5 12h14"/>`)
+	iconChevronDown = strokeIcon(`<path d="m6 9 6 6 6-6"/>`)
 )

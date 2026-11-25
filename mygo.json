@@ -1,10 +1,11 @@
 {
   "name": "MyDouyin",
   "identifier": "dev.margbug.mydouyin",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "out": "build.noindex",
   "updates": {
     "publicKey": "B7L0fiMl3NgA3GUVbRP8BQpLcQ2dQRgQYgwPjEd2164=",
-    "github": "margbug01/MyDouyin"
+    "github": "margbug01/MyDouyin",
+    "deltas": 1
   }
 }

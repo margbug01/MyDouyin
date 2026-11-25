@@ -261,6 +261,10 @@ func (a *app) cycleOrbit() {
 	if nextOff+orbitRing <= len(src.list) {
 		a.orbit.offset = nextOff
 		a.orbit.pendingAdvance = false
+		a.prefetchOrbitCovers()
+		if src == a.orbitPicks {
+			a.saveOrbitCache()
+		}
 		return
 	}
 	if !src.done && src.next != nil {
@@ -308,9 +312,33 @@ func (a *app) handleOrbitScroll(ev ui.InputEvent) bool {
 	return true
 }
 
+// prefetchOrbitCovers warms visible (and upcoming) orbital covers as soon as
+// videos arrive so covers render without waiting for an extra frame cycle.
+func (a *app) prefetchOrbitCovers() {
+	if a.img == nil {
+		return
+	}
+	src := a.orbitSourcePage(a.orbit.source)
+	if src == nil || len(src.list) == 0 {
+		return
+	}
+	n := len(src.list)
+	start := a.orbit.offset % n
+	count := min(n, orbitRing)
+	for i := range count {
+		a.img.getSized(src.list[(start+i)%n].v.Cover, coverEdge)
+	}
+}
+
 // onOrbitSourceLoaded completes a pending 「换一批」 advance once fresh videos arrive.
 func (a *app) onOrbitSourceLoaded(p *page, added int) {
-	if p == nil || p != a.orbitSourcePage(a.orbit.source) {
+	if p == nil {
+		return
+	}
+	if p == a.orbitPicks && added > 0 {
+		a.saveOrbitCache()
+	}
+	if p != a.orbitSourcePage(a.orbit.source) {
 		return
 	}
 	if a.orbit.pendingAdvance {
@@ -319,6 +347,9 @@ func (a *app) onOrbitSourceLoaded(p *page, added int) {
 		case nextOff+orbitRing <= len(p.list):
 			a.orbit.offset = nextOff
 			a.orbit.pendingAdvance = false
+			if p == a.orbitPicks {
+				a.saveOrbitCache()
+			}
 		case p.done || added == 0:
 			if nextOff < len(p.list) {
 				a.orbit.offset = nextOff
@@ -329,6 +360,9 @@ func (a *app) onOrbitSourceLoaded(p *page, added int) {
 		default:
 			a.more(p)
 		}
+	}
+	if added > 0 {
+		a.prefetchOrbitCovers()
 	}
 	if a.isHome(a.cur()) && added > 0 && len(p.list)-a.orbit.offset < 2*orbitRing && !p.done && !p.fetching && p.next != nil {
 		a.more(p)
@@ -426,9 +460,8 @@ func (a *app) orbitView(c *ui.Context) {
 			if runtime.GOOS == "windows" {
 				brandLeft = 20
 			}
-			ui.Row(c.Key("orbit-brand")).Absolute().Top(15).Left(brandLeft).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Image(c, logo).Size(22, 22)
-				ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
+			ui.Box(c.Key("orbit-brand")).Absolute().Top(11).Left(brandLeft).ZIndex(30).Children(func() {
+				a.brandSwitcher(c)
 			})
 			a.orbitCenterHub(c, w, h)
 		})
@@ -464,52 +497,54 @@ func (a *app) topRight(c *ui.Context) {
 		if iconButton(c.Key("theme"), themeIcon, 16, pal.muted, themeLabel).Clicked() {
 			a.toggleOrbitTheme()
 		}
-		if iconButton(c.Key("dm"), iconChat, 16, onOff(a.dms != nil, pal.strong, pal.muted), onOff(a.dms != nil, "收起私信", "私信")).Clicked() {
-			if a.dms != nil {
-				a.dms = nil
-			} else {
-				a.openDMs()
-			}
-		}
-		ui.Box(c.Key("bell-wrap")).Children(func() {
-			if iconButton(c.Key("bell"), iconBell, 16, onOff(a.notes != nil, pal.strong, pal.muted), onOff(a.notes != nil, "收起通知", "通知")).Clicked() {
-				if a.notes != nil {
-					a.notes = nil
+		if a.mode == modeDouyin {
+			if iconButton(c.Key("dm"), iconChat, 16, onOff(a.dms != nil, pal.strong, pal.muted), onOff(a.dms != nil, "收起私信", "私信")).Clicked() {
+				if a.dms != nil {
+					a.dms = nil
 				} else {
-					a.openNotes()
+					a.openDMs()
 				}
 			}
-			if a.unread > 0 {
-				ui.Box(c).Absolute().Top(3).Right(2).MinWidth(15).Height(15).PaddingX(4).Radius(8).
-					Background(pal.accent).Center().
-					HitTest(func(float32, float32, ui.Rect) bool { return false }). // the bell under it takes the click
-					Children(func() {
-						ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(9.5).FontWeight(700).TextColor(white)
-					})
-			}
-		})
-		switch {
-		case a.signedIn || a.me.Name != "":
-			mine := a.mine[a.mineTab]
-			on := a.isMine(a.pages[0])
-			b := ui.ButtonBase(c.Key("account")).Height(32).Padding(0, 11, 0, 5).Gap(7).Radius(16).
-				AlignItems(ui.Center).FocusRing(false).Label(onOff(mine != nil, "我的", a.me.Name)) // 我的 once it can open
-			b.Background(onOff(on || b.Hovered(), pal.pillHoverBg, pal.pillBg)).Border(1, onOff(on, pal.tabActiveBd, pal.pillBorder)).Children(func() {
-				a.avatar(c, pal, a.me.Avatar, a.me.Name, 22)
-				ui.Text(c, a.me.Name).FontSize(12.5).FontWeight(onOff(on, 600, 500)).TextColor(pal.text).SingleLine().MaxWidth(100)
+			ui.Box(c.Key("bell-wrap")).Children(func() {
+				if iconButton(c.Key("bell"), iconBell, 16, onOff(a.notes != nil, pal.strong, pal.muted), onOff(a.notes != nil, "收起通知", "通知")).Clicked() {
+					if a.notes != nil {
+						a.notes = nil
+					} else {
+						a.openNotes()
+					}
+				}
+				if a.unread > 0 {
+					ui.Box(c).Absolute().Top(3).Right(2).MinWidth(15).Height(15).PaddingX(4).Radius(8).
+						Background(pal.accent).Center().
+						HitTest(func(float32, float32, ui.Rect) bool { return false }). // the bell under it takes the click
+						Children(func() {
+							ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(9.5).FontWeight(700).TextColor(white)
+						})
+				}
 			})
-			if b.Clicked() && mine != nil {
-				a.showMine(a.mineTab)
-			}
-		case a.c != nil:
-			b := ui.ButtonBase(c.Key("login")).Height(32).PaddingX(12).Gap(6).Radius(16).
-				AlignItems(ui.Center).FocusRing(false).Label("登录")
-			b.Background(onOff(b.Hovered(), pal.pillHoverBg, pal.pillBg)).Border(1, pal.pillBorder).Children(func() {
-				ui.Icon(c, iconUser).Size(14, 14).TextColor(pal.text)
-				ui.Text(c, "登录").FontSize(12.5).FontWeight(500).TextColor(pal.text)
-			})
-			if b.Clicked() {
-				a.openLogin()
+			switch {
+			case a.signedIn || a.me.Name != "":
+				mine := a.mine[a.mineTab]
+				on := a.isMine(a.pages[0])
+				b := ui.ButtonBase(c.Key("account")).Height(32).Padding(0, 11, 0, 5).Gap(7).Radius(16).
+					AlignItems(ui.Center).FocusRing(false).Label(onOff(mine != nil, "我的", a.me.Name)) // 我的 once it can open
+				b.Background(onOff(on || b.Hovered(), pal.pillHoverBg, pal.pillBg)).Border(1, onOff(on, pal.tabActiveBd, pal.pillBorder)).Children(func() {
+					a.avatar(c, pal, a.me.Avatar, a.me.Name, 22)
+					ui.Text(c, a.me.Name).FontSize(12.5).FontWeight(onOff(on, 600, 500)).TextColor(pal.text).SingleLine().MaxWidth(100)
+				})
+				if b.Clicked() && mine != nil {
+					a.showMine(a.mineTab)
+				}
+			case a.c != nil:
+				b := ui.ButtonBase(c.Key("login")).Height(32).PaddingX(12).Gap(6).Radius(16).
+					AlignItems(ui.Center).FocusRing(false).Label("登录")
+				b.Background(onOff(b.Hovered(), pal.pillHoverBg, pal.pillBg)).Border(1, pal.pillBorder).Children(func() {
+					ui.Icon(c, iconUser).Size(14, 14).TextColor(pal.text)
+					ui.Text(c, "登录").FontSize(12.5).FontWeight(500).TextColor(pal.text)
+				})
+				if b.Clicked() {
+					a.openLogin()
+				}
 			}
 		}
 		ui.Box(c.Key("settings-wrap")).Children(func() {
@@ -784,7 +819,7 @@ func (a *app) orbitPopover(c *ui.Context, hw float32, q string, focused bool) {
 func orbitCardMotion(i int) ui.ElementTransition {
 	return ui.ElementTransition{
 		Position:     true,
-		Animation:    &ui.Animation{Spring: ui.Smooth.Spring, Delay: time.Duration(i) * 45 * time.Millisecond},
+		Animation:    &ui.Animation{Spring: ui.Smooth.Spring, Delay: time.Duration(i) * 20 * time.Millisecond},
 		Enter:        &ui.Motion{Opacity: 0, Scale: 0.94, Y: 10},
 		Exit:         &ui.Motion{Opacity: 0, Scale: 0.97},
 		ExitDuration: 160 * time.Millisecond,
@@ -792,7 +827,7 @@ func orbitCardMotion(i int) ui.ElementTransition {
 }
 
 // coverFade fades a cover in once loaded, rather than popping over its card.
-var coverFade = ui.ElementTransition{Duration: 180 * time.Millisecond, Enter: &ui.Motion{Opacity: 0}}
+var coverFade = ui.ElementTransition{Duration: 120 * time.Millisecond, Enter: &ui.Motion{Opacity: 0}}
 
 func (a *app) orbitCards(c *ui.Context, w, h float32) {
 	src := a.orbitSourcePage(a.orbit.source)

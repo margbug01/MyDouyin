@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"errors"
 	"image"
 	"io"
@@ -15,11 +16,15 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// PreferH264 prefers H.264 HLS live variants compatible with system decoders.
+const PreferH264 = true
+
 // Live plays HLS or an on-demand video with AVPlayer, which plays its
 // sound itself, and hands its pictures to ui.VideoPlayer as they come due:
 // both follow AVPlayer's clock, so they keep together.
 type Live struct {
 	player, item, out objc.ID
+	release           func()
 
 	mu       sync.Mutex // Close against a Next on the player's goroutine
 	closed   bool
@@ -50,27 +55,60 @@ func liveInit() {
 	clsItemOutput = objc.GetClass("AVPlayerItemVideoOutput")
 }
 
-// OpenLive starts the stream at url, playing silent: a player asks for its
-// first picture as it is made, which a paused stream never sends.
-func OpenLive(url string) (*Live, error) {
-	return openStream(url, nil, false, true)
-}
+// ErrNoSystemPlayer is Windows': AVFoundation comes with every macOS, and
+// nothing here returns it.
+var ErrNoSystemPlayer = errors.New("media: the system has no media framework that plays video")
 
-// OpenLiveHeaders starts the live stream at url with custom HTTP headers.
-func OpenLiveHeaders(url string, headers map[string]string) (*Live, error) {
+// The Open functions return at once, AVPlayer loading in the background,
+// but for a stream to decrypt, which waits for the loopback proxy's first
+// answer as long as ctx lets it.
+
+// OpenLiveHeaders starts the live stream at url with custom HTTP headers,
+// playing silent: a player asks for its first picture as it is made, which
+// a paused stream never sends.
+func OpenLiveHeaders(ctx context.Context, url string, headers map[string]string) (*Live, error) {
 	return openStream(url, headers, false, true)
 }
 
 // OpenVideo streams an MP4 using AVPlayer's range loading and audio clock.
-func OpenVideo(url string, headers map[string]string) (*Live, error) {
+func OpenVideo(ctx context.Context, url string, headers map[string]string) (*Live, error) {
 	return openStream(url, headers, true, true)
 }
 
 // OpenNative opens a stream for NewLayer without any pixel output: one attached
 // even briefly makes the decoder keep a BGRA pool (~120 MB at 1080p) for the
 // item's life. Wait with WaitReady instead of Next.
-func OpenNative(url string, headers map[string]string, vod bool) (*Live, error) {
+func OpenNative(ctx context.Context, url string, headers map[string]string, vod bool) (*Live, error) {
 	return openStream(url, headers, vod, false)
+}
+
+// OpenVideoWithOptions streams an MP4 with custom HTTP headers and optional
+// ISO-BMFF CENC streaming decryption.
+func OpenVideoWithOptions(ctx context.Context, url string, opts StreamOptions) (*Live, error) {
+	return openStreamOptions(ctx, url, opts, true, true)
+}
+
+// OpenNativeWithOptions opens a stream for NewLayer with custom HTTP headers
+// and optional ISO-BMFF CENC streaming decryption.
+func OpenNativeWithOptions(ctx context.Context, url string, opts StreamOptions, vod bool) (*Live, error) {
+	return openStreamOptions(ctx, url, opts, vod, false)
+}
+
+func openStreamOptions(ctx context.Context, url string, opts StreamOptions, vod, pixels bool) (*Live, error) {
+	if len(opts.DecryptKey) == 0 {
+		return openStream(url, opts.Headers, vod, pixels)
+	}
+	proxyURL, release, err := localProxy.registerOptions(ctx, url, opts, vod)
+	if err != nil {
+		return nil, err
+	}
+	l, err := openStream(proxyURL, nil, vod, pixels)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	l.release = release
+	return l, nil
 }
 
 func openStream(url string, headers map[string]string, vod, pixels bool) (*Live, error) {
@@ -308,6 +346,15 @@ func (l *Live) WaitReady() (int, int, error) {
 	return 0, 0, errLiveNoPicture
 }
 
+// Player returns nil on macOS, where Live presents through AVPlayerLayer or
+// AVPlayerItemVideoOutput rather than mygo/ui/video.
+func (l *Live) Player() *ui.VideoPlayer { return nil }
+func (l *Live) Sync()                   {}
+
+// SetLoop does nothing: AVPlayer's video loops as its streamPlayer rewinds
+// it at the end.
+func (l *Live) SetLoop(bool) {}
+
 func (l *Live) ready() (int, int, error) {
 	defer autorelease()()
 	l.mu.Lock()
@@ -354,11 +401,13 @@ func (l *Live) Rewind() error {
 func (l *Live) Close() error {
 	defer autorelease()()
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.closed {
+		l.mu.Unlock()
 		return nil
 	}
 	l.closed = true
+	rel := l.release
+	l.release = nil
 	l.player.Send(sel("pause"))
 	l.item.Send(sel("cancelPendingSeeks"))
 	l.item.Send(sel("asset")).Send(sel("cancelLoading"))
@@ -368,6 +417,10 @@ func (l *Live) Close() error {
 	l.out.Send(sel("release"))
 	l.item.Send(sel("release"))
 	l.frame = nil
+	l.mu.Unlock()
+	if rel != nil {
+		rel()
+	}
 	return nil
 }
 

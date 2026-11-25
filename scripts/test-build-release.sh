@@ -45,20 +45,13 @@ if [[ ${MOCK_GO_FAIL:-0} == 1 ]]; then
   echo partial >"$out/windows-amd64/partial.bin"
   exit 1
 fi
-# Verify Windows FFmpeg was staged into the temp snapshot before build.
-[[ -f resources/windows-amd64/ffmpeg.exe ]] || { echo "missing ffmpeg.exe in snapshot" >&2; exit 2; }
-[[ -f resources/windows-amd64/ffprobe.exe ]] || { echo "missing ffprobe.exe in snapshot" >&2; exit 2; }
-[[ -f resources/windows-amd64/BUILD-INFO.txt ]] || { echo "missing BUILD-INFO.txt in snapshot" >&2; exit 2; }
+# Verify no external FFmpeg binaries are staged for Windows builds.
+[[ ! -e resources/windows-amd64/ffmpeg.exe ]] || { echo "unexpected ffmpeg.exe in snapshot" >&2; exit 2; }
 mkdir -p "$out/windows-amd64" "$out/darwin-arm64"
 printf 'ok\n' >"$out/windows-amd64/MyDouyin.exe"
 printf 'ok\n' >"$out/darwin-arm64/MyDouyin.app"
 EOF
 chmod +x "$fake_bin/go"
-
-ffmpeg_cache="$tmp/win-ffmpeg"
-mkdir -p "$ffmpeg_cache"
-printf 'fake-ffmpeg' >"$ffmpeg_cache/ffmpeg.exe"
-printf 'fake-ffprobe' >"$ffmpeg_cache/ffprobe.exe"
 
 # Seed 3 old releases (one with a leftover src/ dir) plus an unrelated darwin-arm64 dir.
 mkdir -p "$repo/build.noindex/darwin-arm64" \
@@ -77,7 +70,7 @@ MYDOUYIN_REPO="$repo" "$build_script" --prune-only --keep 2
 [[ -d "$repo/build.noindex/darwin-arm64" ]] || { echo "darwin-arm64 must stay" >&2; exit 1; }
 
 # 2. Failed build cleans up its partial output dir and leaves existing releases intact.
-if PATH="$fake_bin:$PATH" MYDOUYIN_REPO="$repo" MYDOUYIN_WIN_FFMPEG_DIR="$ffmpeg_cache" NO_FETCH_FFMPEG=1 MOCK_GO_FAIL=1 \
+if PATH="$fake_bin:$PATH" MYDOUYIN_REPO="$repo" MOCK_GO_FAIL=1 \
     "$build_script" >/dev/null 2>&1; then
   echo "expected failed build to exit non-zero" >&2
   exit 1
@@ -86,7 +79,7 @@ count_after_fail=$(ls -d "$repo"/build.noindex/release-* | wc -l | tr -d ' ')
 [[ $count_after_fail == "2" ]] || { echo "expected 2 releases after failed build, got $count_after_fail" >&2; exit 1; }
 
 # 3. Successful build creates new release, prunes down to default KEEP_RELEASES=1, leaves no src/.
-PATH="$fake_bin:$PATH" MYDOUYIN_REPO="$repo" MYDOUYIN_WIN_FFMPEG_DIR="$ffmpeg_cache" NO_FETCH_FFMPEG=1 \
+PATH="$fake_bin:$PATH" MYDOUYIN_REPO="$repo" \
   "$build_script" >/dev/null
 releases=("$repo"/build.noindex/release-*)
 [[ ${#releases[@]} == 1 ]] || { echo "expected 1 release after build, got ${#releases[@]}" >&2; exit 1; }

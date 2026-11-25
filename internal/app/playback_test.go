@@ -181,7 +181,7 @@ func TestReleaseCancelsLoadingAndAllowsRetry(t *testing.T) {
 	if ctx.Err() == nil || s.loading || s.err != nil || s.loadGen != 5 || s.dmLoading {
 		t.Fatal("release left stale loading/error state")
 	}
-	if _, err := a.build(ctx, s.v, "", 0, nil); !errors.Is(err, context.Canceled) {
+	if _, err := a.build(ctx, s.v, "", 0, 0, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled build: %v", err)
 	}
 }
@@ -212,16 +212,17 @@ func TestPicturesBoundDecodedSizeAndMemory(t *testing.T) {
 func TestPicturesDoNotQueueOffscreenDownloads(t *testing.T) {
 	var calls atomic.Int32
 	gate := make(chan struct{})
-	done := make(chan func(), 6)
+	done := make(chan func(), 16)
 	im := newImages(func(string) ([]byte, error) { calls.Add(1); <-gate; return nil, errors.New("test") }, func(fn func()) { done <- fn })
+	limit := cap(im.slots)
 	for i := 0; i < 100; i++ {
 		im.get(string(rune(i + 1)))
 	}
-	if len(im.slots) != 6 {
-		t.Fatalf("active downloads %d", len(im.slots))
+	if len(im.slots) != limit {
+		t.Fatalf("active downloads %d, want %d", len(im.slots), limit)
 	}
 	close(gate)
-	for range 6 {
+	for range limit {
 		select {
 		case fn := <-done:
 			fn()
@@ -229,8 +230,8 @@ func TestPicturesDoNotQueueOffscreenDownloads(t *testing.T) {
 			t.Fatal("image load did not finish")
 		}
 	}
-	if calls.Load() != 6 {
-		t.Fatalf("downloads queued for hidden images: %d", calls.Load())
+	if int(calls.Load()) != limit {
+		t.Fatalf("downloads queued for hidden images: %d, want %d", calls.Load(), limit)
 	}
 }
 

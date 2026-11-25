@@ -20,3 +20,18 @@ var logo = func() *ui.Bitmap {
 	}
 	return b
 }()
+
+// hongguo_logo.png is the MyHongguo rounded-square badge at 128 pixels.
+//
+//go:embed hongguo_logo.png
+var hongguoLogoPNG []byte
+
+// hongguoLogo is the MyHongguo mode icon, shown in the top-left brand switcher
+// and MyHongguo views.
+var hongguoLogo = func() *ui.Bitmap {
+	b, err := ui.DecodeBitmap(hongguoLogoPNG)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}()

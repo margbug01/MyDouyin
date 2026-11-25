@@ -59,6 +59,9 @@ func nativePlayer(p videoPlayer) bool {
 
 func videoPictureReady(p videoPlayer) bool {
 	if s, ok := p.(*streamPlayer); ok {
+		if s.engine != nil {
+			return s.engine.Ready()
+		}
 		if s.native {
 			return s.layer != nil && s.layer.Ready()
 		}

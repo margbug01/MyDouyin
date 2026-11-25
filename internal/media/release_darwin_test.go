@@ -28,7 +28,7 @@ func TestStreamFreedOnClose(t *testing.T) {
 	path, _ := filepath.Abs("../../testdata/silent.mp4")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, path) }))
 	defer srv.Close()
-	l, err := OpenVideo(srv.URL+"/v.mp4", nil)
+	l, err := OpenVideo(t.Context(), srv.URL+"/v.mp4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

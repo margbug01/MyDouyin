@@ -14,7 +14,7 @@ func TestStreamPlayerDrawsAndLoops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := media.OpenVideo("file://"+path, nil)
+	live, err := media.OpenVideo(t.Context(), "file://"+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

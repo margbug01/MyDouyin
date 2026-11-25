@@ -25,7 +25,7 @@
 
 ## MyDouyin 是什么
 
-**MyDouyin** 是一款面向 macOS 和 Windows 用户的轻量级原生抖音桌面客户端（Douyin Desktop Client）。它使用 Go 语言与原生界面框架 [MyGo](https://github.com/egoist/mygo) 直接渲染 UI 与视频画面，不依赖 Electron 或常驻浏览器内核：macOS 端直接调用系统 AVFoundation 原生视频层硬件解码，Windows 端内置 FFmpeg 解码并以最高 60 fps 原生绘制。
+**MyDouyin** 是一款面向 macOS 和 Windows 用户的轻量级原生抖音桌面客户端（Douyin Desktop Client）。它使用 Go 语言与原生界面框架 [MyGo](https://github.com/egoist/mygo) 直接渲染 UI 与视频画面，不依赖 Electron 或常驻浏览器内核：macOS 端直接调用系统 AVFoundation 原生视频层硬件解码，Windows 端调用系统自带的 Media Foundation 硬件解码，画面以 GPU 纹理直接绘制。
 
 打开应用即可免登录浏览公开内容与「引力场」精选，需要点赞、收藏、关注、评论、同步观看历史或直播互动时，在应用内扫码登录即可。
 
@@ -35,7 +35,7 @@
 | --- | --- | --- | --- |
 | **界面与架构** | Go + MyGo 原生绘制，双主题与悬浮胶囊导航 | 依赖浏览器标签页，易被插件和标签打断 | 捆绑整套 Chromium，启动与切换较重 |
 | **打开即用体验** | 默认进入「引力场」搜索与精选卡片，不强制自动连播 | 打开首页直接自动播放推荐流 | 打开即播放，后台常驻多进程 |
-| **视频解码与写盘** | macOS 走 AVFoundation 原生层，**不写磁盘缓存**；Windows 内置 FFmpeg 60 fps | 浏览器缓存持续增长，多开标签内存飙升 | 渲染与媒体缓存占用较高 |
+| **视频解码与写盘** | macOS 走 AVFoundation 原生层，Windows 走系统 Media Foundation，均**不写磁盘缓存** | 浏览器缓存持续增长，多开标签内存飙升 | 渲染与媒体缓存占用较高 |
 | **内存控制** | 1080p 原生解码层约 **65 MB**；写操作签名页约 **80 MB**，闲置 10 秒自动释放 | 长时间刷视频易持续上涨 | 常驻内存普遍较高 |
 | **更新与维护** | 内置签名增量更新（Delta Update），顶部胶囊一键重启升级 | 无桌面独立形态 | 每次更新常需下载完整安装包 |
 
@@ -55,7 +55,7 @@
 | --- | --- |
 | **引力场首页（Orbit）** | 启动即进入居中搜索框与 8 张错落环绕的视频卡片，不再一打开就被推荐流强行抓走注意力。支持一键切换「精选 / 关注 / 稍后 / 历史」、无重复「换一批」、纯静搜索与抖音热搜。 |
 | **双主题与悬浮导航** | 内置「纯黑黑洞」与「极净瓷白」两套全页面主题，右上角一键切换并记住偏好。左侧悬浮胶囊导航静息态收起为极简图标，悬停展开完整频道（引力场、精选、推荐、关注、朋友、直播、短剧）。 |
-| **原生视频与直播** | macOS 采用系统 AVFoundation 原生视频层，支持预读下一条视频信息缩短起播等待；Windows 安装包自带 `ffmpeg.exe` / `ffprobe.exe`，开箱即播点播与 HLS 直播，最高 60 fps。 |
+| **原生视频与直播** | macOS 采用系统 AVFoundation 原生视频层，支持预读下一条视频信息缩短起播等待；Windows 使用系统 Media Foundation 播放点播与 HLS 直播，无需附带解码器；直播线路出不了画面时自动换下一条线路。 |
 | **评论区与带图互动** | 支持虚拟化滚动评论列表、楼中楼展开与回复、抖音官方表情面板、粘贴截图或拖拽发带图评论、点击评论图片查看大图（缩放/切换/保存），以及点头像、昵称与 `@` 提及直达作者主页。 |
 | **完整频道与账号同步** | 覆盖推荐、精选分区、关注、朋友、直播间（含实时弹幕、评论与礼物互动）、短剧、合集、作者主页、我的喜欢/收藏/稍后再看、私信（只读）与通知；观看满 2 秒自动攒批上报观看历史，刷推荐不再反复刷到看过的视频。 |
 | **轻量签名与隐私安全** | 仅在点赞、收藏、发评论、发弹幕等写操作时按需拉起约 80 MB 的轻量签名页，闲置 10 秒自动释放；单实例运行防止多开互踢登录；所有凭证与偏好仅保存在本机。 |
@@ -86,7 +86,7 @@ xattr -dr com.apple.quarantine /Applications/MyDouyin.app
 ### Windows 10 / 11（x64）
 
 1. 前往 [GitHub Releases](https://github.com/margbug01/MyDouyin/releases/latest) 下载 `mydouyin-setup-<版本>-amd64.exe` 安装程序（或免安装压缩包 `mydouyin-<版本>-windows-amd64.tar.gz`）。
-2. 安装包与压缩包均已内置 `ffmpeg.exe` 与 `ffprobe.exe` 及对应许可证说明，**无需额外安装 FFmpeg**（解压版请保持整个目录完整）。
+2. 视频由系统自带的 Media Foundation 播放，**无需额外安装解码器**。Windows N / KN 版默认不带媒体功能，需先在「设置 › 应用 › 可选功能」中安装 Media Feature Pack。
 3. 首次运行若触发 Windows SmartScreen 提示，点击「更多信息 › 仍要运行」即可，也可使用 Release 中的 `SHA256SUMS` 校验文件完整性。
 
 ### 常用快捷键
@@ -117,7 +117,7 @@ go test ./...
 ./scripts/build-release.sh
 ```
 
-脚本会在系统临时目录导出干净 Git 提交快照并在退出时自动删除，Windows 所需的 `ffmpeg.exe` / `ffprobe.exe` 单份缓存在 `~/Library/Caches/mydouyin-win-ffmpeg`（缺失时自动从最新 Release 补齐），构建完成后 `build.noindex/release-*` 默认只保留最新 **1** 份（可通过 `--keep N` 或 `KEEP_RELEASES=N` 调整，上传后运行 `./scripts/build-release.sh --prune-only --keep 0` 可清空）。
+脚本会在系统临时目录导出干净 Git 提交快照并在退出时自动删除，构建完成后 `build.noindex/release-*` 默认只保留最新 **1** 份（可通过 `--keep N` 或 `KEEP_RELEASES=N` 调整，上传后运行 `./scripts/build-release.sh --prune-only --keep 0` 可清空）。
 
 - **Windows（PowerShell 7）**：
 
@@ -125,14 +125,14 @@ go test ./...
 ./scripts/build-windows.ps1
 ```
 
-脚本自动打包本机 PATH 中的 `ffmpeg.exe` / `ffprobe.exe`（保留上游 `LICENSE` 与 `README.txt` 并生成 `BUILD-INFO.txt` 校验信息），默认同样只保留最新 1 份 `build.noindex/release-*`（`-KeepReleases` 可调）。
+默认同样只保留最新 1 份 `build.noindex/release-*`（`-KeepReleases` 可调）。
 
 ## 常见问题
 
 <details>
 <summary><strong>MyDouyin 支持哪些操作系统？</strong></summary>
 
-MyDouyin 目前稳定支持 **macOS（Apple Silicon / arm64）** 与 **Windows 10 / 11（x64）**。macOS 使用原生 AVFoundation 播放视频，Windows 使用安装包内置的 FFmpeg 进行解码与原生渲染。
+MyDouyin 目前稳定支持 **macOS（Apple Silicon / arm64）** 与 **Windows 10 / 11（x64）**。macOS 使用原生 AVFoundation 播放视频，Windows 使用系统自带的 Media Foundation（N / KN 版需安装 Media Feature Pack）。
 </details>
 
 <details>

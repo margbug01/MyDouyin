@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -316,9 +317,11 @@ func main() {
 		go func() {
 			open := media.OpenVideo
 			if *mode == "layer" { // as the app: no pixel output ever, or the decoder keeps a BGRA pool
-				open = func(u string, h map[string]string) (*media.Live, error) { return media.OpenNative(u, h, true) }
+				open = func(ctx context.Context, u string, h map[string]string) (*media.Live, error) {
+					return media.OpenNative(ctx, u, h, true)
+				}
 			}
-			live, err := open(address, nil)
+			live, err := open(context.Background(), address, nil)
 			if err != nil {
 				log.Fatal(err)
 			}

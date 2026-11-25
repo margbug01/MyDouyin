@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"douyin/internal/dy"
+	"douyin/internal/media"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -375,4 +376,89 @@ func TestLiveQualitySettingsPersistence(t *testing.T) {
 	if next.quality != "720P" || next.liveQuality != "蓝光" {
 		t.Fatalf("persisted settings: quality=%q liveQuality=%q", next.quality, next.liveQuality)
 	}
+}
+
+// A live room whose stream fails before its first picture plays the next
+// one, the failure not shown meanwhile; once none is left the failure
+// shows, and 重新加载 starts over from the first.
+func TestLiveRoomSwitchesStreamWithoutPicture(t *testing.T) {
+	path, err := filepath.Abs("../../testdata/silent.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const first, second = "https://cdn.test/origin.m3u8", "https://cdn.test/hd.m3u8"
+	p := stub("直播", 1)
+	s := p.list[0]
+	s.loading = false
+	s.v.Live = &dy.Live{Streams: []dy.LiveStream{
+		{Name: "原画", URL: first, H264: true},
+		{Name: "超清", URL: second, H264: true},
+	}}
+	var opened []string
+	bad := map[string]bool{first: true}
+	a := withRoots(&app{
+		pages:  []*page{p},
+		posted: make(chan func(), 64),
+		openLive: func(ctx context.Context, url string, native bool) (players, error) {
+			opened = append(opened, url)
+			if bad[url] { // opens, as a stream Media Foundation cannot decode does
+				live, err := media.OpenVideo(ctx, "file://"+path, nil)
+				if err != nil {
+					return players{}, err
+				}
+				return players{vp: &streamPlayer{live: live, err: errors.New("no decoder")}}, nil
+			}
+			vp, err := ui.NewVideoPlayer(still{})
+			return players{vp: vp}, err
+		},
+	})
+	settle := func(what string, done func() bool) {
+		t.Helper()
+		for end := time.Now().Add(2 * time.Second); !done(); {
+			select {
+			case fn := <-a.posted:
+				fn()
+			case <-time.After(time.Until(end)):
+				t.Fatalf("%s: opened=%v stream=%d err=%v", what, opened, s.stream, s.err)
+			}
+		}
+	}
+	a.prepare(s)
+	settle("first open", func() bool { return s.vp != nil })
+	tt := newTester(a)
+	if tt.HasText("视频暂时无法播放") {
+		t.Fatal("the failure showed before switching streams")
+	}
+	settle("switch", func() bool { return s.vp != nil && s.stream == 1 })
+	if !slices.Equal(opened, []string{first, second}) {
+		t.Fatalf("opened %v", opened)
+	}
+
+	bad[second] = true
+	s.liveFrom = 0
+	a.release(s)
+	opened = nil
+	a.prepare(s)
+	settle("reopen", func() bool { return s.vp != nil })
+	for end := time.Now().Add(2 * time.Second); s.err == nil && time.Now().Before(end); {
+		tt.Frame()
+		select {
+		case fn := <-a.posted:
+			fn()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	tt.Frame()
+	if !slices.Equal(opened, []string{first, second}) || s.err == nil || !tt.HasText("视频暂时无法播放") {
+		t.Fatalf("all streams failing: opened=%v err=%v texts=%v", opened, s.err, tt.Texts())
+	}
+	opened = nil
+	if err := tt.Click("重新加载"); err != nil {
+		t.Fatal(err)
+	}
+	settle("retry", func() bool { return len(opened) > 0 })
+	if opened[0] != first {
+		t.Fatalf("retry opened %v, want the first stream again", opened)
+	}
+	a.release(s)
 }

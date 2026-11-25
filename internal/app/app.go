@@ -23,6 +23,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"douyin/internal/dy"
+	"douyin/internal/hg"
 	"douyin/internal/media"
 )
 
@@ -31,11 +32,13 @@ type slot struct {
 	v dy.Video
 	players
 	loading bool
+	cached  bool // seeded from disk fast-start cache: refresh PlayURL before playing
 	cancel  context.CancelFunc
 	loadGen int
 	gone        bool // dropped while loading: close what arrives
 	err         error
 	liveFreshAt time.Time // when LiveRoom last refreshed this live slot's streams
+	liveFrom    int       // the first of liveCandidates to open: those before showed no picture
 	saved       string    // what saving to Downloads came to: "" before the click
 
 	liking, saving bool // a like or a save of it on its way to Douyin
@@ -66,6 +69,10 @@ type players struct {
 	dec  *paced        // vp's decoder for a file, whose clock stands in for a missing audio's
 	live *media.Live   // AVPlayer for a streamed video or live room
 	path string        // an optional local source, used by save
+	// stream is which of liveCandidates a live room plays, more whether
+	// others are left after it.
+	stream int
+	more   bool
 }
 
 // close stops and lets go of whatever of pl there is.
@@ -219,6 +226,7 @@ type app struct {
 	mainVideo, pipVideo nativeSurface
 	c                   *dy.Client
 	dir                 string
+	cacheDir            string // persistent cache root (empty in tests unless explicitly configured)
 	pages               []*page           // the window shows the last
 	stacks              map[*page][]*page // each root's pages, as they were when another root was shown, by root
 	query               string            // the search box
@@ -337,6 +345,22 @@ type app struct {
 	settingsOpen bool     // the settings dialog (settings.go)
 	settingsFile string   // where the settings are kept, "" not to keep them
 	saved        settings // as last written
+
+	mode                 appMode
+	brandMenuOpen        bool
+	hg                   *hgApp
+	hgDirect             bool
+	hgSignerURL          string
+	hgSignerToken        string
+	hgSignerURLBox       ui.Handle
+	hgSignerTokenBox     ui.Handle
+	hgSignerURLFocused   bool
+	hgSignerTokenFocused bool
+	hgSettingsWasOpen    bool
+	hgResetBusy          bool
+	douyinStarted        bool
+	newHGService         func(hg.Config) (hg.Service, error) // test hook for lazy Hongguo service creation
+	openHGStream         func(ctx context.Context, rawURL string, opts media.StreamOptions, native bool) (players, error)
 
 	web       web  // the app's Douyin page, which logs in and writes (web.go)
 	signedIn  bool // WebKit holds a login
@@ -720,11 +744,13 @@ func (a *app) setLiveQuality(q string) {
 	}
 	a.liveQuality = q
 	if a.held != nil && a.held.v.Live != nil {
+		a.held.liveFrom = 0 // the chosen stream comes first
 		a.release(a.held)
 	}
 	for _, p := range a.pages {
 		for _, s := range p.list {
 			if s.v.Live != nil {
+				s.liveFrom = 0
 				a.release(s)
 			}
 		}
@@ -765,6 +791,7 @@ func (a *app) setVolume(v float64, muted bool) {
 			}
 		}
 	}
+	a.hgApplyVolume(g, muted)
 }
 
 // toggleLater puts v in 稍后再看, or takes it out: at once on screen, then
@@ -881,6 +908,7 @@ func (a *app) setSpeed(s float64) {
 			}
 		}
 	}
+	a.hgApplySpeed(s)
 }
 
 func (s *slot) pruneDanmaku(at time.Duration) {
@@ -1127,12 +1155,38 @@ func (a *app) moreComments(sh *sheet) {
 // escape leaves a chat for the inbox, closes what is open beside the page,
 // or else the page on top.
 func (a *app) escape() {
+	if a.brandMenuOpen {
+		a.brandMenuOpen = false
+		return
+	}
 	if a.picViewer.open {
 		a.picViewer.open = false
 		return
 	}
 	if a.upd.dialogOpen {
 		a.upd.dialogOpen = false
+		return
+	}
+	if a.settingsOpen {
+		a.settingsOpen = false
+		return
+	}
+	if a.mode == modeHongguo {
+		if a.theater || a.fullScreen() {
+			a.setFullScreen(false)
+			return
+		}
+		if a.hg != nil && a.hg.player != nil {
+			hp := a.hg.player
+			if hp.qualityOpen || hp.speedOpen || hp.volumeOpen {
+				hp.qualityOpen, hp.speedOpen, hp.volumeOpen = false, false, false
+				return
+			}
+		}
+		a.hgPop()
+		return
+	}
+	if a.mode != modeDouyin {
 		return
 	}
 	if chat := a.liveChat; chat != nil && chat.gifts.open {
@@ -1239,6 +1293,9 @@ func (a *app) more(p *page) {
 // fill only opens the visible video. The next item can preload its track data
 // without creating another decoder.
 func (a *app) fill() {
+	if a.mode != modeDouyin {
+		return
+	}
 	p := a.cur()
 	if f := p.from; f != nil {
 		if f.gen == p.fromGen {
@@ -1475,7 +1532,7 @@ func (a *app) prepare(s *slot) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.loadGen++
-	gen, v, quality, resume := s.loadGen, s.v, a.quality, s.resume
+	gen, v, quality, resume, from, cached := s.loadGen, s.v, a.quality, s.resume, s.liveFrom, s.cached
 	var fetchLive func(context.Context, string) (dy.Video, error)
 	if v.Live != nil {
 		quality = a.liveQuality
@@ -1496,6 +1553,13 @@ func (a *app) prepare(s *slot) {
 	go func() {
 		var fresh *dy.Video
 		var freshAt time.Time
+		var refreshedVideo *dy.Video
+		if cached && v.Live == nil && v.ID != "" && a.c != nil {
+			if fv, ferr := a.c.Video(v.ID); ferr == nil && fv.PlayURL != "" {
+				v = fv
+				refreshedVideo = &fv
+			}
+		}
 		if fetchLive != nil {
 			rctx, rcancel := context.WithTimeout(ctx, 6*time.Second)
 			fv, ferr := fetchLive(rctx, v.Live.WebRID)
@@ -1524,7 +1588,7 @@ func (a *app) prepare(s *slot) {
 				v.Qualities = fv.Qualities
 			}
 		}
-		pl, err := a.build(ctx, v, quality, resume, preload)
+		pl, err := a.build(ctx, v, quality, resume, from, preload)
 		a.post(func() {
 			if gen != s.loadGen || s.gone {
 				pl.close()
@@ -1552,6 +1616,10 @@ func (a *app) prepare(s *slot) {
 					s.liveFreshAt = freshAt
 				}
 			}
+			if refreshedVideo != nil {
+				s.v = *refreshedVideo
+			}
+			s.cached = false
 			s.loading, s.cancel = false, nil
 			cancel()
 			s.players, s.err = pl, err
@@ -1718,21 +1786,21 @@ func (a *app) openLiveCandidate(ctx context.Context, url string, native bool) (p
 	var pl players
 	var err error
 	if native {
-		pl.live, err = media.OpenNative(url, liveHeaders, false)
+		pl.live, err = media.OpenNative(ctx, url, liveHeaders, false)
 	} else {
-		pl.live, err = media.OpenLiveHeaders(url, liveHeaders)
+		pl.live, err = media.OpenLiveHeaders(ctx, url, liveHeaders)
 	}
 	if err != nil {
 		return players{}, err
 	}
 	stream := pl.live
 	stop := context.AfterFunc(ctx, func() { stream.Close() })
-	defer stop()
 	newPlayer := newStreamPlayer
 	if native {
 		newPlayer = newNativePlayer
 	}
 	vp, err := newPlayer(stream, false)
+	stop() // a close it did not stop has begun: ctx is done
 	if err == nil {
 		pl.vp = vp
 		err = ctx.Err()
@@ -1750,7 +1818,8 @@ func (a *app) openLiveCandidate(ctx context.Context, url string, native bool) (p
 	return pl, nil
 }
 
-func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time.Duration, preload *media.WarmVideo) (pl players, err error) {
+// build opens v; a live room from the stream of its liveCandidates at from.
+func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time.Duration, from int, preload *media.WarmVideo) (pl players, err error) {
 	if preload != nil {
 		defer preload.Close()
 	}
@@ -1759,7 +1828,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	}
 	native := a.win != nil && media.NativeAvailable
 	if v.Live != nil {
-		candidates := liveCandidates(v, quality, media.NativeAvailable)
+		candidates := liveCandidates(v, quality, media.PreferH264)
 		if len(candidates) == 0 {
 			return players{}, errors.New("media: empty stream address")
 		}
@@ -1770,8 +1839,8 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 		if open == nil {
 			open = a.openLiveCandidate
 		}
-		var lastErr error
-		for i, u := range candidates {
+		lastErr := errors.New("media: no stream of the room showed a picture")
+		for i := from; i < len(candidates); i++ {
 			if err = ctx.Err(); err != nil {
 				return players{}, err
 			}
@@ -1780,11 +1849,12 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 			if i < len(candidates)-1 {
 				attemptCtx, attemptCancel = context.WithTimeout(ctx, 8*time.Second)
 			}
-			pl, err = open(attemptCtx, u, native)
+			pl, err = open(attemptCtx, candidates[i], native)
 			if attemptCancel != nil {
 				attemptCancel()
 			}
 			if err == nil {
+				pl.stream, pl.more = i, i < len(candidates)-1
 				return pl, nil
 			}
 			lastErr = err
@@ -1801,17 +1871,16 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 			pl.live, _ = preload.Open()
 		}
 		if pl.live == nil {
-			pl.live, err = media.OpenNative(url, headers, true)
+			pl.live, err = media.OpenNative(ctx, url, headers, true)
 		}
 	default:
-		pl.live, err = media.OpenVideo(url, headers)
+		pl.live, err = media.OpenVideo(ctx, url, headers)
 	}
 	if err != nil {
 		return players{}, err
 	}
 	stream := pl.live
 	stop := context.AfterFunc(ctx, func() { stream.Close() })
-	defer stop()
 	if resume > 0 {
 		stream.Seek(resume)
 	}
@@ -1820,6 +1889,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 		newPlayer = newNativePlayer
 	}
 	vp, err := newPlayer(stream, true)
+	stop() // a close it did not stop has begun: ctx is done
 	if err == nil {
 		pl.vp = vp
 		err = ctx.Err()
@@ -1831,6 +1901,26 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	pl.vp.Pause()
 	stream.Pause()
 	return pl, nil
+}
+
+// switchStream has a live room that shows no picture play the next of its
+// streams, once this frame is built: one whose player failed before its
+// first picture, or took over 8 s for it while others are left. It
+// reports whether it switches, so the failure does not show meanwhile.
+func (a *app) switchStream(s *slot) bool {
+	if s.v.Live == nil || s.vp == nil || videoPictureReady(s.vp) ||
+		s.vp.Err() == nil && !(s.more && pictureWait(s.vp) > 8*time.Second) {
+		return false
+	}
+	vp := s.vp
+	a.post(func() {
+		if s.vp == vp {
+			s.liveFrom = s.stream + 1
+			a.release(s)
+			a.prepare(s)
+		}
+	})
+	return true
 }
 
 // release remembers progress and cancels work that can no longer be shown.
@@ -1865,6 +1955,9 @@ func (a *app) release(s *slot) {
 // sync plays the current video and holds the others; 精选's covers play
 // their first video, silent.
 func (a *app) sync() {
+	if a.mode != modeDouyin {
+		return
+	}
 	p := a.cur()
 	for i, s := range p.list {
 		switch {
@@ -2094,6 +2187,23 @@ func (a *app) selfCheck(dir string) {
 	os.Exit(0)
 }
 
+func (a *app) startDouyinServices() {
+	if a.douyinStarted || a.win == nil || a.c == nil {
+		return
+	}
+	a.douyinStarted = true
+	if len(a.pages) > 0 && a.isHome(a.cur()) {
+		a.prefetchOrbitCovers()
+		a.ensureOrbitLoaded()
+	}
+	a.startLogin()
+	go func() {
+		if hot, err := a.c.HotSearch(); err == nil {
+			a.post(func() { a.hot = hot })
+		}
+	}()
+}
+
 // Run opens the window and blocks until it closes.
 func Run() error {
 	// One runs: two would share the login, and Douyin's scripts in each page
@@ -2113,19 +2223,21 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	a := &app{c: c, dir: filepath.Join(cache, "Douyin", "videos"),
+	a := &app{c: c, dir: filepath.Join(cache, "Douyin", "videos"), cacheDir: filepath.Join(cache, "Douyin"),
 		feed: &page{title: "推荐", next: c.Feed}, tabPages: map[int]*page{}}
 	a.picks = picksPage(c, "精选", 0)
 	a.tabPages[0] = a.picks
 	a.home = &page{title: "引力场", grid: true}
 	a.orbitPicks = a.orbitPicksPage(c)
 	a.orbit = orbitState{source: orbitPicks}
+	a.loadOrbitCache()
 	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true, restart: c.FollowFeed}
 	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true, restart: c.FriendFeed}
 	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true, restart: c.LiveRooms}
 	a.drama = picksPage(c, "短剧", 300214) // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.home}
 	a.img = newImages(c.Image, a.post)
+	a.img.cacheDir = a.coverCacheDir()
 	a.img.releasePixels = true
 	a.setLiked, a.setSaved, a.likeComment = c.SetLiked, c.SetSaved, c.SetCommentLiked
 	a.setFollowed = c.SetFollowed
@@ -2150,7 +2262,7 @@ func Run() error {
 	}
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
-			Title:     "MyDouyin",
+			Title:     a.windowTitle(),
 			Hidden:    os.Getenv("DY_LIVE_WRITE") != "",
 			Width:     1280,
 			Height:    820,
@@ -2165,6 +2277,7 @@ func Run() error {
 			Content:              ui.View(a.view),
 		})
 		a.win.OnClosed(func() {
+			a.hgClose()
 			a.keepWatched()
 			a.preload.close()
 			a.closeLiveRoom()
@@ -2181,14 +2294,14 @@ func Run() error {
 			}
 			a.setPip(false)
 		})
-		a.startLogin()
+		if a.mode == modeHongguo {
+			a.ensureHG()
+			a.hgEnsureActiveLoaded()
+		} else {
+			a.startDouyinServices()
+		}
 		a.watchUpdates()
 		mygo.Theme.OnUpdated(func() { a.post(func() {}) })
-		go func() {
-			if hot, err := c.HotSearch(); err == nil {
-				a.post(func() { a.hot = hot })
-			}
-		}()
 		if dir := os.Getenv("DY_SHOT"); dir != "" {
 			go a.selfCheck(dir)
 		}

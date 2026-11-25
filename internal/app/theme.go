@@ -124,6 +124,23 @@ var (
 	}
 )
 
+var (
+	douyinAccent  = ui.Hex("#fe2c55")
+	hongguoAccent = ui.Hex("#ff4d3d")
+)
+
+// paletteFor returns the window palette for the given appearance and app mode
+// without mutating lightPal or darkPal.
+func paletteFor(dark bool, mode appMode) palette {
+	p := onOff(dark, darkPal, lightPal)
+	if mode == modeHongguo {
+		p.accent = hongguoAccent
+	} else {
+		p.accent = douyinAccent
+	}
+	return p
+}
+
 // orbitIsDark reports whether the window is dark: as chosen, or as the system is.
 func (a *app) orbitIsDark() bool {
 	switch a.orbit.theme {

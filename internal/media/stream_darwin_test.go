@@ -41,7 +41,7 @@ func TestVideoStream(t *testing.T) {
 		http.ServeFile(w, r, path)
 	}))
 	defer srv.Close()
-	l, err := OpenVideo(srv.URL+"/v.mp4", map[string]string{"Referer": "https://www.douyin.com/"})
+	l, err := OpenVideo(t.Context(), srv.URL+"/v.mp4", map[string]string{"Referer": "https://www.douyin.com/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestVideoStreamSkipsDiskCache(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, path) }))
 	defer srv.Close()
-	l, err := OpenVideo(srv.URL+"/disk.mp4", nil)
+	l, err := OpenVideo(t.Context(), srv.URL+"/disk.mp4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestDiscardedPreloadCancelsRequest(t *testing.T) {
 
 func TestVideoLoopsAndRecoversAfterHiddenGap(t *testing.T) {
 	path, _ := filepath.Abs("../../testdata/silent.mp4")
-	l, err := OpenVideo("file://"+path, nil)
+	l, err := OpenVideo(t.Context(), "file://"+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestCloseWaitingStream(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(finish)
-	l, err := OpenVideo(srv.URL+"/v.mp4", nil)
+	l, err := OpenVideo(t.Context(), srv.URL+"/v.mp4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestVideoStartsBeforeFullTransfer(t *testing.T) {
 	}))
 	defer srv.Close()
 	start := time.Now()
-	l, err := OpenVideo(srv.URL+"/v.mp4", nil)
+	l, err := OpenVideo(t.Context(), srv.URL+"/v.mp4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestCDNStart(t *testing.T) {
 		t.Fatal("no video")
 	}
 	start := time.Now()
-	l, err := OpenVideo(v.PlayURL, map[string]string{"Referer": "https://www.douyin.com/", "User-Agent": "Mozilla/5.0"})
+	l, err := OpenVideo(t.Context(), v.PlayURL, map[string]string{"Referer": "https://www.douyin.com/", "User-Agent": "Mozilla/5.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
