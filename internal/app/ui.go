@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -710,37 +711,24 @@ func (a *app) stage(c *ui.Context, p *page) {
 		bounds := box.Bounds()
 		now := c.Now()
 		px, py, over := box.PointerPosition()
-		if a.stageSlot != s {
-			a.stageSlot = s
-			a.stageActiveAt = now
-		}
-		switch {
-		case over && (!a.stageWasOver || px != a.stagePointerX || py != a.stagePointerY):
-			a.stageActiveAt = now
-			a.stagePointerX, a.stagePointerY = px, py
-		case !over && a.stageWasOver:
-			a.stageActiveAt = time.Time{}
-		}
-		a.stageWasOver = over
-
 		overBar := over && bounds.H > 0 && py >= bounds.H-68
+		overOverlay := over && !a.clear && a.stageHUD.overlayHovered
 		pinned := a.paused || a.dragging || a.listen || a.pipOn ||
-			a.qualityOpen || a.speedOpen || a.volumeOpen || a.moreOpen ||
-			c.Focused(a.dmBox) || overBar
-		wantControls := pinned
-		if !wantControls && !a.stageActiveAt.IsZero() {
-			elapsed := now.Sub(a.stageActiveAt)
-			if elapsed < controlsHideAfter {
-				wantControls = true
-				c.After(controlsHideAfter - elapsed)
-			}
+			a.qualityOpen || a.speedOpen || a.volumeOpen || a.moreOpen || a.shareOpen ||
+			c.Focused(a.dmBox) || overBar || overOverlay
+		wantControls, hideIn := a.stageHUD.want(s, now, px, py, over, pinned)
+		if hideIn > 0 {
+			c.After(hideIn)
 		}
 		targetAlpha := float32(0)
 		if wantControls {
 			targetAlpha = 1
 		}
 		alpha := box.AnimateTo("controls-alpha", targetAlpha, ui.Animation{Duration: 200 * time.Millisecond})
-		a.controlsAlpha = alpha
+		if !wantControls {
+			box.Cursor(ui.CursorNone)
+			picture.Cursor(ui.CursorNone)
+		}
 
 		picture.Children(func() {
 			if s.vp != nil && a.listen { // 听抖音: the sound goes on, the picture gives way to the cover
@@ -805,9 +793,18 @@ func (a *app) stage(c *ui.Context, p *page) {
 		} else if s.vp != nil && !a.paused {
 			c.After(500 * time.Millisecond) // the time moves on
 		}
+		overlayHovered := false
 		if !a.clear { // 清屏: the video alone, the bar left to bring the rest back
-			a.caption(c, p, s, alpha)
-			a.rail(c, p, s, bounds.H)
+			if a.caption(c, p, s, alpha, wantControls) {
+				overlayHovered = true
+			}
+			if a.rail(c, p, s, bounds.H, alpha, wantControls) {
+				overlayHovered = true
+			}
+		}
+		a.stageHUD.overlayHovered = overlayHovered
+		if overOverlay && !overlayHovered {
+			c.After(controlsHideAfter)
 		}
 		a.controls(c, s, at, bounds.W, alpha, wantControls)
 	})
@@ -890,9 +887,14 @@ func (a *app) playbackStatus(c *ui.Context, s *slot) {
 	if err == nil {
 		return
 	}
+	msg := "视频暂时无法播放"
+	if errors.Is(err, dy.ErrLiveEnded) {
+		msg = "主播已下播"
+	}
 	ui.Column(c.Key("playback-status")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(12).PassThrough().Children(func() {
-		ui.Text(c, "视频暂时无法播放").FontSize(14).TextColor(white).PassThrough()
+		ui.Text(c, msg).FontSize(14).TextColor(white).PassThrough()
 		if ui.Button(c.Key("retry-video"), "重新加载").Clicked() {
+			s.liveFreshAt = time.Time{}
 			a.release(s)
 			a.prepare(s)
 		}
@@ -1008,15 +1010,26 @@ func (a *app) danmakuLayer(c *ui.Context, s *slot, w float32, at time.Duration) 
 }
 
 // caption is the author, the day and the text, over the foot of the video;
-// the fade keeps it readable over a bright frame. It glides down when the
-// bottom playback bar auto-hides.
-func (a *app) caption(c *ui.Context, p *page, s *slot, controlsAlpha float32) {
-	ui.Column(c.Key("caption")).Absolute().Left(0).Right(0).Bottom(0).Padding(64, 96, 44+18+6, 18).Gap(6). // clear of the bar and its progress
-														Translate(0, (1-controlsAlpha)*44).
-														Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180).Children(func() {
+// the fade keeps it readable over a bright frame. It fades with the controls
+// and reports whether an interactive button inside it is hovered.
+func (a *app) caption(c *ui.Context, p *page, s *slot, alpha float32, active bool) bool {
+	if alpha <= 0.01 && !active {
+		return false
+	}
+	col := ui.Column(c.Key("caption")).Absolute().Left(0).Right(0).Bottom(0).Padding(64, 96, 44+18+6, 18).Gap(6). // clear of the bar and its progress
+															Opacity(alpha).Translate(0, (1-alpha)*8).
+															Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.55), 180)
+	if !active {
+		col.PassThrough()
+	}
+	hovered := false
+	col.Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			name := "@" + s.v.Author
 			b := ui.ButtonBase(c.Key("author")).FocusRing(false).Label(name)
+			if b.Hovered() {
+				hovered = true
+			}
 			b.Children(func() {
 				t := ui.Text(c, name).FontSize(16).FontWeight(700).TextColor(white).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.4))
 				if b.Hovered() {
@@ -1044,6 +1057,7 @@ func (a *app) caption(c *ui.Context, p *page, s *slot, controlsAlpha float32) {
 			b := ui.ButtonBase(c.Key("mix")).AlignSelf(ui.Start).Height(30).PaddingX(12).Gap(6).Radius(8).AlignItems(ui.Center).FocusRing(false).Label("合集："+m.Name).Margin(4, 0, 0, 0)
 			bg := ui.RGBA(255, 255, 255, 0.14)
 			if b.Hovered() {
+				hovered = true
 				bg = ui.RGBA(255, 255, 255, 0.22)
 			}
 			b.Background(bg).Children(func() {
@@ -1055,6 +1069,7 @@ func (a *app) caption(c *ui.Context, p *page, s *slot, controlsAlpha float32) {
 			}
 		}
 	})
+	return hovered
 }
 
 // controls is the bar under the video, as Douyin's: play, the time, the
@@ -1131,7 +1146,7 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 			if show[barClear] && toggleChip(c.Key("clear"), "清屏", a.clear).Clicked() {
 				a.clear = !a.clear
 			}
-			if !live && show[barQuality] {
+			if show[barQuality] && (!live || len(s.v.Qualities) > 0) {
 				a.qualityMenu(c, s)
 			}
 			if !live && show[barSpeed] {
@@ -1197,7 +1212,7 @@ func barFit(w float32, live bool) (show [barItems]bool) {
 	}
 	room := w - base
 	for it := range barItems {
-		if live && it != barClear && it != barPip {
+		if live && it != barQuality && it != barClear && it != barPip {
 			continue
 		}
 		if w > 0 && room < barWidth[it] {
@@ -1406,14 +1421,31 @@ func choice(c *ui.Context, label string, on bool) ui.Element {
 }
 
 // qualityMenu chooses the definition: Douyin's pick (智能), or one the
-// video comes in.
+// video or live room comes in.
 func (a *app) qualityMenu(c *ui.Context, s *slot) {
+	live := s.v.Live != nil
 	cur := a.quality
+	if live {
+		cur = a.liveQuality
+	}
 	if cur == "" {
 		cur = "智能"
 	}
-	b := chip(c.Key("quality"), cur, cur != "智能")
-	b.Label("清晰度：" + cur)
+	shown := cur
+	if live && cur != "智能" && len(s.v.Qualities) > 0 {
+		found := false
+		for _, q := range s.v.Qualities {
+			if q.Name == cur {
+				found = true
+				break
+			}
+		}
+		if !found {
+			shown = "智能"
+		}
+	}
+	b := chip(c.Key("quality"), shown, shown != "智能")
+	b.Label("清晰度：" + shown)
 	if b.Clicked() {
 		a.qualityOpen = !a.qualityOpen
 	}
@@ -1423,10 +1455,14 @@ func (a *app) qualityMenu(c *ui.Context, s *slot) {
 			names = append(names, q.Name)
 		}
 		for _, n := range names {
-			if choice(c, n, n == cur).Clicked() {
+			if choice(c, n, n == shown).Clicked() {
 				a.qualityOpen = false
-				if n != cur {
-					a.setQuality(n)
+				if n != shown || (live && n != cur) {
+					if live {
+						a.setLiveQuality(n)
+					} else {
+						a.setQuality(n)
+					}
 					a.toast = "清晰度：" + n
 				}
 			}
@@ -1501,14 +1537,21 @@ func (a *app) volumeButton(c *ui.Context) {
 // the likes, the comments, the saves, sharing, listening, and more. A like
 // or a save shows at once and goes to Douyin through the app's page, a
 // moment on (some seconds the first time); the button is dimmed till then. On a short stage the column shrinks
-// to fit.
-func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
+// to fit. It fades with the controls and reports whether the column is hovered.
+func (a *app) rail(c *ui.Context, p *page, s *slot, height, alpha float32, active bool) bool {
+	if alpha <= 0.01 && !active {
+		return false
+	}
 	icon, gap := float32(34), float32(14)
 	if height > 0 && height < 680 {
 		icon, gap = 28, 8
 	}
 	shadow := ui.RGBA(0, 0, 0, 0.45)
-	ui.Column(c.Key("rail")).Absolute().Right(14).Bottom(64).Gap(gap).AlignItems(ui.Center).Children(func() {
+	col := ui.Column(c.Key("rail")).Absolute().Right(14).Bottom(64).Gap(gap).AlignItems(ui.Center).Opacity(alpha)
+	if !active {
+		col.PassThrough()
+	}
+	col.Children(func() {
 		avatarSize := icon + 16
 		canFollow := s.v.AuthorID != "" && s.v.AuthorID != a.me.ID
 		ui.Box(c.Key("author-wrap")).Size(avatarSize, avatarSize+onOff(canFollow, float32(10), float32(0))).Margin(0, 0, 2, 0).Children(func() {
@@ -1611,6 +1654,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height float32) {
 		}
 		a.moreMenu(c, more, s)
 	})
+	return col.Hovered()
 }
 
 // sharePanel opens beside the rail's 分享, as Douyin's: a search, the

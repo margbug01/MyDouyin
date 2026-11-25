@@ -33,9 +33,10 @@ type slot struct {
 	loading bool
 	cancel  context.CancelFunc
 	loadGen int
-	gone    bool // dropped while loading: close what arrives
-	err     error
-	saved   string // what saving to Downloads came to: "" before the click
+	gone        bool // dropped while loading: close what arrives
+	err         error
+	liveFreshAt time.Time // when LiveRoom last refreshed this live slot's streams
+	saved       string    // what saving to Downloads came to: "" before the click
 
 	liking, saving bool // a like or a save of it on its way to Douyin
 
@@ -173,6 +174,45 @@ type page struct {
 	users []dy.User // a search's: the accounts found, atop the videos
 }
 
+// stageHUD tracks auto-hide state for the video stage overlays (controls,
+// caption, rail) and cursor.
+type stageHUD struct {
+	slot           *slot
+	activeAt       time.Time
+	pointerX       float32
+	pointerY       float32
+	wasOver        bool
+	overlayHovered bool
+}
+
+// want updates stage pointer activity for s and reports whether the HUD should
+// be visible and how long until it should auto-hide.
+func (h *stageHUD) want(s *slot, now time.Time, px, py float32, over, pinned bool) (show bool, hideIn time.Duration) {
+	if h.slot != s {
+		h.slot = s
+		h.activeAt = now
+	}
+	switch {
+	case over && (!h.wasOver || px != h.pointerX || py != h.pointerY):
+		h.activeAt = now
+		h.pointerX, h.pointerY = px, py
+	case !over && h.wasOver:
+		h.activeAt = time.Time{}
+	}
+	h.wasOver = over
+	if pinned {
+		return true, 0
+	}
+	if h.activeAt.IsZero() {
+		return false, 0
+	}
+	elapsed := now.Sub(h.activeAt)
+	if elapsed < controlsHideAfter {
+		return true, controlsHideAfter - elapsed
+	}
+	return false, 0
+}
+
 // app is read and changed on the main thread: by the view, and by goroutines through post.
 type app struct {
 	win                 *mygo.Window
@@ -234,6 +274,7 @@ type app struct {
 	dmOff     bool          // bullet comments hidden
 
 	quality     string  // the definition chosen, "" or "智能" for Douyin's pick
+	liveQuality string  // the live room definition chosen, "" or "智能" for live default
 	volume      float64 // 0 to 1
 	muted       bool
 	clear       bool // 清屏: the video alone, without its text, rail or bullet comments
@@ -253,13 +294,7 @@ type app struct {
 	dragging    bool    // the progress pressed, being dragged
 	dragAt      float32 // where along it, 0 to 1
 
-	// Stage control bar auto-hide state (ui.go).
-	stageSlot      *slot
-	stageActiveAt  time.Time
-	stagePointerX  float32
-	stagePointerY  float32
-	stageWasOver   bool
-	controlsAlpha  float32
+	stageHUD stageHUD // Stage HUD (controls, caption, rail, cursor) auto-hide state (ui.go).
 
 	posted chan func() // what post runs, in a test without a window
 
@@ -284,8 +319,10 @@ type app struct {
 	// uploadCommentImage uploads a comment image to ImageX; a test puts its own.
 	uploadCommentImage func(data []byte, fileName, userID string, measured dy.CommentImage) (dy.CommentImage, error)
 	// replies pages through a comment's replies; a test puts its own.
-	replies      func(videoID, commentID string) dy.Pager[dy.Comment]
-	openAuthorFn func(p *page, name, id string) // test override for openAuthor
+	replies       func(videoID, commentID string) dy.Pager[dy.Comment]
+	openAuthorFn  func(p *page, name, id string) // test override for openAuthor
+	fetchLiveRoom func(ctx context.Context, webRID string) (dy.Video, error)
+	openLive      func(ctx context.Context, url string, native bool) (players, error)
 	listen   bool    // 听抖音: the cover in the picture's place, the sound on
 	moreOpen bool    // the rail's 更多 menu
 	upd      updates // checking for new versions and installing them (update.go)
@@ -669,6 +706,25 @@ func (a *app) setQuality(q string) {
 	for _, p := range a.pages {
 		for _, s := range p.list {
 			if s.v.Live == nil {
+				a.release(s)
+			}
+		}
+	}
+	a.fill()
+}
+
+// setLiveQuality reopens live rooms in q, keeping fresh room streams intact.
+func (a *app) setLiveQuality(q string) {
+	if q == a.liveQuality {
+		return
+	}
+	a.liveQuality = q
+	if a.held != nil && a.held.v.Live != nil {
+		a.release(a.held)
+	}
+	for _, p := range a.pages {
+		for _, s := range p.list {
+			if s.v.Live != nil {
 				a.release(s)
 			}
 		}
@@ -1420,18 +1476,81 @@ func (a *app) prepare(s *slot) {
 	s.cancel = cancel
 	s.loadGen++
 	gen, v, quality, resume := s.loadGen, s.v, a.quality, s.resume
+	var fetchLive func(context.Context, string) (dy.Video, error)
+	if v.Live != nil {
+		quality = a.liveQuality
+		lv := *v.Live
+		v.Live = &lv
+		if v.Live.WebRID != "" && (s.liveFreshAt.IsZero() || time.Since(s.liveFreshAt) > 2*time.Minute) {
+			fetchLive = a.fetchLiveRoom
+			if fetchLive == nil && a.c != nil {
+				fetchLive = a.c.LiveRoom
+			}
+		}
+	}
 	var preload *media.WarmVideo
-	if a.preload.slot == s && a.preload.url == videoSource(v, quality) {
+	if v.Live == nil && a.preload.slot == s && a.preload.url == videoSource(v, quality) {
 		preload = a.preload.asset
 		a.preload = nextVideo{}
 	}
 	go func() {
+		var fresh *dy.Video
+		var freshAt time.Time
+		if fetchLive != nil {
+			rctx, rcancel := context.WithTimeout(ctx, 6*time.Second)
+			fv, ferr := fetchLive(rctx, v.Live.WebRID)
+			rcancel()
+			if errors.Is(ferr, dy.ErrLiveEnded) {
+				a.post(func() {
+					if gen != s.loadGen || s.gone {
+						cancel()
+						return
+					}
+					s.loading, s.cancel = false, nil
+					cancel()
+					if s.v.Live != nil {
+						s.v.Live.Ended = true
+					}
+					s.err = dy.ErrLiveEnded
+					a.fill()
+				})
+				return
+			}
+			if ferr == nil && fv.Live != nil {
+				fresh = &fv
+				freshAt = time.Now()
+				lv := *fv.Live
+				v.Live = &lv
+				v.Qualities = fv.Qualities
+			}
+		}
 		pl, err := a.build(ctx, v, quality, resume, preload)
 		a.post(func() {
 			if gen != s.loadGen || s.gone {
 				pl.close()
 				cancel()
 				return
+			}
+			if fresh != nil && s.v.Live != nil && fresh.Live != nil {
+				// Update Live fields in place so a.liveChat.room == s.v.Live stays intact.
+				if fresh.Live.RoomID != "" {
+					s.v.Live.RoomID = fresh.Live.RoomID
+				}
+				if fresh.Live.OwnerID != "" {
+					s.v.Live.OwnerID = fresh.Live.OwnerID
+				}
+				if fresh.Live.Viewers != "" {
+					s.v.Live.Viewers = fresh.Live.Viewers
+				}
+				s.v.Live.HLS = fresh.Live.HLS
+				s.v.Live.H264HLS = fresh.Live.H264HLS
+				s.v.Live.DefaultQuality = fresh.Live.DefaultQuality
+				s.v.Live.Ended = fresh.Live.Ended
+				s.v.Live.Streams = fresh.Live.Streams
+				s.v.Qualities = fresh.Qualities
+				if err == nil {
+					s.liveFreshAt = freshAt
+				}
 			}
 			s.loading, s.cancel = false, nil
 			cancel()
@@ -1524,6 +1643,113 @@ func videoSource(v dy.Video, quality string) string {
 	return v.PlayURL
 }
 
+func liveCandidates(v dy.Video, quality string, preferH264 bool) []string {
+	if v.Live == nil {
+		return nil
+	}
+	var out []string
+	seen := make(map[string]bool)
+	add := func(u string) bool {
+		if u == "" || seen[u] {
+			return false
+		}
+		seen[u] = true
+		out = append(out, u)
+		return true
+	}
+	addStream := func(st dy.LiveStream) bool {
+		a := add(st.URL)
+		b := add(st.BackupURL)
+		return a || b
+	}
+	if quality != "" && quality != "智能" {
+		for _, st := range v.Live.Streams {
+			if st.Name == quality {
+				addStream(st)
+				break
+			}
+		}
+	}
+	hasH264 := false
+	if preferH264 {
+		if def := v.Live.DefaultQuality; def != "" {
+			for _, st := range v.Live.Streams {
+				if st.Name == def && st.H264 {
+					if addStream(st) || st.URL != "" || st.BackupURL != "" {
+						hasH264 = true
+					}
+					break
+				}
+			}
+		}
+		for _, st := range v.Live.Streams {
+			if st.H264 {
+				if addStream(st) || st.URL != "" || st.BackupURL != "" {
+					hasH264 = true
+				}
+			}
+		}
+		if add(v.Live.H264HLS) || v.Live.H264HLS != "" {
+			hasH264 = true
+		}
+	} else {
+		if def := v.Live.DefaultQuality; def != "" {
+			for _, st := range v.Live.Streams {
+				if st.Name == def {
+					addStream(st)
+					break
+				}
+			}
+		}
+		for _, st := range v.Live.Streams {
+			addStream(st)
+		}
+	}
+	add(v.Live.HLS)
+	if !preferH264 || !hasH264 {
+		for _, st := range v.Live.Streams {
+			addStream(st)
+		}
+	}
+	return out
+}
+
+func (a *app) openLiveCandidate(ctx context.Context, url string, native bool) (players, error) {
+	var pl players
+	var err error
+	if native {
+		pl.live, err = media.OpenNative(url, liveHeaders, false)
+	} else {
+		pl.live, err = media.OpenLiveHeaders(url, liveHeaders)
+	}
+	if err != nil {
+		return players{}, err
+	}
+	stream := pl.live
+	stop := context.AfterFunc(ctx, func() { stream.Close() })
+	defer stop()
+	newPlayer := newStreamPlayer
+	if native {
+		newPlayer = newNativePlayer
+	}
+	vp, err := newPlayer(stream, false)
+	if err == nil {
+		pl.vp = vp
+		err = ctx.Err()
+	} else if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		pl.close()
+		return players{}, err
+	}
+	pl.vp.Pause()
+	if !native {
+		stream.Pause()
+	}
+	return pl, nil
+}
+
 func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time.Duration, preload *media.WarmVideo) (pl players, err error) {
 	if preload != nil {
 		defer preload.Close()
@@ -1531,24 +1757,52 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	if err = ctx.Err(); err != nil {
 		return
 	}
-	url, headers := videoSource(v, quality), videoHeaders
-	if v.Live != nil {
-		url, headers = v.Live.HLS, nil
-		if media.NativeAvailable && v.Live.H264HLS != "" {
-			url = v.Live.H264HLS
-		}
-	}
 	native := a.win != nil && media.NativeAvailable
+	if v.Live != nil {
+		candidates := liveCandidates(v, quality, media.NativeAvailable)
+		if len(candidates) == 0 {
+			return players{}, errors.New("media: empty stream address")
+		}
+		if len(candidates) > 4 {
+			candidates = candidates[:4]
+		}
+		open := a.openLive
+		if open == nil {
+			open = a.openLiveCandidate
+		}
+		var lastErr error
+		for i, u := range candidates {
+			if err = ctx.Err(); err != nil {
+				return players{}, err
+			}
+			attemptCtx := ctx
+			var attemptCancel context.CancelFunc
+			if i < len(candidates)-1 {
+				attemptCtx, attemptCancel = context.WithTimeout(ctx, 8*time.Second)
+			}
+			pl, err = open(attemptCtx, u, native)
+			if attemptCancel != nil {
+				attemptCancel()
+			}
+			if err == nil {
+				return pl, nil
+			}
+			lastErr = err
+			if ctx.Err() != nil {
+				return players{}, ctx.Err()
+			}
+		}
+		return players{}, lastErr
+	}
+	url, headers := videoSource(v, quality), videoHeaders
 	switch {
 	case native:
 		if preload != nil {
 			pl.live, _ = preload.Open()
 		}
 		if pl.live == nil {
-			pl.live, err = media.OpenNative(url, headers, v.Live == nil)
+			pl.live, err = media.OpenNative(url, headers, true)
 		}
-	case v.Live != nil:
-		pl.live, err = media.OpenLive(url)
 	default:
 		pl.live, err = media.OpenVideo(url, headers)
 	}
@@ -1565,7 +1819,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 	if native {
 		newPlayer = newNativePlayer
 	}
-	vp, err := newPlayer(stream, v.Live == nil)
+	vp, err := newPlayer(stream, true)
 	if err == nil {
 		pl.vp = vp
 		err = ctx.Err()
@@ -1575,9 +1829,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 		return players{}, err
 	}
 	pl.vp.Pause()
-	if v.Live == nil || !native {
-		stream.Pause()
-	}
+	stream.Pause()
 	return pl, nil
 }
 

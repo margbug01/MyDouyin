@@ -3,6 +3,7 @@
 package dy
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,6 +129,19 @@ func (c *Client) cookies() login {
 	return login{}
 }
 
+// ErrLiveEnded reports that a live room is no longer on air.
+var ErrLiveEnded = errors.New("主播已下播")
+
+// LiveStream is one quality variant advertised for a live room.
+type LiveStream struct {
+	Name      string // e.g. "原画", "蓝光", "超清", "高清", "标清"
+	SDKKey    string // e.g. "origin", "uhd", "hd", "sd", "ld", "md"
+	URL       string // primary https HLS URL
+	BackupURL string // backup https HLS URL, if advertised
+	H264      bool
+	Level     int
+}
+
 // Live is a room broadcasting now: its stream as HLS, which AVFoundation
 // plays, over https, which an app's transport security allows.
 type Live struct {
@@ -134,7 +149,267 @@ type Live struct {
 	OwnerID        string // numeric account ID of the host
 	HLS            string
 	H264HLS        string // AVPlayer-compatible HLS variant, when advertised
-	Viewers        string // as Douyin says it, 41 or 1.2万
+	DefaultQuality string
+	Ended          bool
+	Streams        []LiveStream // finest first
+	Viewers        string       // as Douyin says it, 41 or 1.2万
+}
+
+type rawStreamURL struct {
+	HLS            string            `json:"hls_pull_url"`
+	HLSMap         map[string]string `json:"hls_pull_url_map"`
+	ResolutionName map[string]string `json:"resolution_name"`
+	SDK            struct {
+		Pull struct {
+			Options struct {
+				DefaultQuality struct {
+					Name   string `json:"name"`
+					SDKKey string `json:"sdk_key"`
+				} `json:"default_quality"`
+				Qualities []struct {
+					Name   string `json:"name"`
+					SDKKey string `json:"sdk_key"`
+					Level  int    `json:"level"`
+				} `json:"qualities"`
+			} `json:"options"`
+			Data string `json:"stream_data"`
+		} `json:"pull_data"`
+	} `json:"live_core_sdk_data"`
+}
+
+func httpsURL(u string) string {
+	if strings.HasPrefix(u, "http://") {
+		return "https://" + u[len("http://"):]
+	}
+	return u
+}
+
+func liveKeyRank(key string) int {
+	switch strings.ToLower(key) {
+	case "origin", "origion":
+		return 6
+	case "uhd", "full_hd1":
+		return 5
+	case "hd", "hd1":
+		return 4
+	case "sd", "sd2":
+		return 3
+	case "ld", "sd1":
+		return 2
+	case "md":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func liveSDKName(key string) string {
+	switch strings.ToLower(key) {
+	case "origin":
+		return "原画"
+	case "uhd":
+		return "蓝光"
+	case "hd":
+		return "超清"
+	case "sd":
+		return "高清"
+	case "ld":
+		return "标清"
+	case "md":
+		return "流畅"
+	default:
+		return ""
+	}
+}
+
+func liveMapName(key string, res map[string]string) string {
+	if name := res[key]; name != "" {
+		return name
+	}
+	switch strings.ToUpper(key) {
+	case "ORIGION", "ORIGIN":
+		return "原画"
+	case "FULL_HD1":
+		return "蓝光"
+	case "HD1":
+		return "超清"
+	case "SD2":
+		return "高清"
+	case "SD1":
+		return "标清"
+	default:
+		return ""
+	}
+}
+
+func sdkParamsH264(paramsJSON string) bool {
+	var params struct{ VCodec string }
+	return json.Unmarshal([]byte(paramsJSON), &params) == nil && strings.EqualFold(params.VCodec, "h264")
+}
+
+func parseLiveStreams(stream rawStreamURL) (streams []LiveStream, qualities []Quality, defaultQuality, hls, h264 string) {
+	type rawVariant struct {
+		HLS    string `json:"hls"`
+		Params string `json:"sdk_params"`
+	}
+	var sdk struct {
+		Data map[string]struct {
+			Main   rawVariant `json:"main"`
+			Backup rawVariant `json:"backup"`
+		} `json:"data"`
+	}
+	if stream.SDK.Pull.Data != "" {
+		_ = json.Unmarshal([]byte(stream.SDK.Pull.Data), &sdk)
+	}
+	makeStream := func(name, key string, level int, main, backup rawVariant) (LiveStream, bool) {
+		primary, secondary := httpsURL(main.HLS), httpsURL(backup.HLS)
+		if primary == "" && secondary == "" {
+			return LiveStream{}, false
+		}
+		isH264 := sdkParamsH264(main.Params)
+		if primary == "" {
+			primary, secondary = secondary, ""
+			if !isH264 {
+				isH264 = sdkParamsH264(backup.Params)
+			}
+		} else if secondary == primary {
+			secondary = ""
+		}
+		return LiveStream{
+			Name:      name,
+			SDKKey:    key,
+			URL:       primary,
+			BackupURL: secondary,
+			H264:      isH264,
+			Level:     level,
+		}, true
+	}
+
+	if len(stream.SDK.Pull.Options.Qualities) > 0 && len(sdk.Data) > 0 {
+		for _, q := range stream.SDK.Pull.Options.Qualities {
+			if strings.EqualFold(q.SDKKey, "ao") {
+				continue
+			}
+			d, ok := sdk.Data[q.SDKKey]
+			if !ok {
+				continue
+			}
+			name := q.Name
+			if name == "" {
+				name = liveSDKName(q.SDKKey)
+			}
+			if name == "" {
+				name = q.SDKKey
+			}
+			if st, ok := makeStream(name, q.SDKKey, q.Level, d.Main, d.Backup); ok {
+				streams = append(streams, st)
+			}
+		}
+	}
+	if len(streams) == 0 && len(sdk.Data) > 0 {
+		for key, d := range sdk.Data {
+			if strings.EqualFold(key, "ao") {
+				continue
+			}
+			name := liveSDKName(key)
+			if name == "" {
+				name = key
+			}
+			if st, ok := makeStream(name, key, liveKeyRank(key), d.Main, d.Backup); ok {
+				streams = append(streams, st)
+			}
+		}
+	}
+	if len(streams) == 0 && len(stream.HLSMap) > 0 {
+		for key, u := range stream.HLSMap {
+			if u == "" || strings.EqualFold(key, "ao") {
+				continue
+			}
+			name := liveMapName(key, stream.ResolutionName)
+			if name == "" {
+				name = key
+			}
+			streams = append(streams, LiveStream{
+				Name:   name,
+				SDKKey: key,
+				URL:    httpsURL(u),
+				Level:  liveKeyRank(key),
+			})
+		}
+	}
+
+	sort.SliceStable(streams, func(i, j int) bool {
+		if streams[i].Level != streams[j].Level {
+			return streams[i].Level > streams[j].Level
+		}
+		ri, rj := liveKeyRank(streams[i].SDKKey), liveKeyRank(streams[j].SDKKey)
+		if ri != rj {
+			return ri > rj
+		}
+		return streams[i].Name < streams[j].Name
+	})
+
+	dedup := streams[:0]
+	seen := make(map[string]int, len(streams))
+	for _, st := range streams {
+		if idx, ok := seen[st.Name]; ok {
+			if !dedup[idx].H264 && st.H264 {
+				dedup[idx] = st
+			}
+			continue
+		}
+		seen[st.Name] = len(dedup)
+		dedup = append(dedup, st)
+	}
+	streams = dedup
+
+	if len(streams) > 0 {
+		qualities = make([]Quality, len(streams))
+		for i, st := range streams {
+			qualities[i] = Quality{Name: st.Name, URL: st.URL}
+		}
+	}
+
+	defOpt := stream.SDK.Pull.Options.DefaultQuality
+	if defOpt.Name != "" || defOpt.SDKKey != "" {
+		for _, st := range streams {
+			if (defOpt.Name != "" && st.Name == defOpt.Name) || (defOpt.SDKKey != "" && st.SDKKey == defOpt.SDKKey) {
+				defaultQuality = st.Name
+				hls = st.URL
+				break
+			}
+		}
+		if defaultQuality == "" {
+			defaultQuality = defOpt.Name
+		}
+	}
+
+	for _, st := range streams {
+		if st.H264 && st.URL != "" {
+			h264 = st.URL
+			break
+		}
+	}
+	if h264 == "" {
+		h264 = liveH264(stream.SDK.Pull.Data)
+	}
+
+	if hls == "" {
+		hls = stream.HLS
+		for _, q := range []string{"SD2", "HD1"} { // HD1 last: the finest a 1080p screen needs
+			if u := stream.HLSMap[q]; u != "" {
+				hls = u
+			}
+		}
+		hls = httpsURL(hls)
+	}
+	if hls == "" && len(streams) > 0 {
+		hls = streams[0].URL
+	}
+	if hls == "" {
+		hls = h264
+	}
+	return streams, qualities, defaultQuality, hls, h264
 }
 
 // room decodes a live room. A feed's entry may be a room that has ended,
@@ -155,42 +430,29 @@ func room(raw []byte, onAir bool) (v Video, ok bool) {
 		Stats struct {
 			Viewers string `json:"user_count_str"`
 		}
-		Stream struct {
-			HLS    string            `json:"hls_pull_url"`
-			HLSMap map[string]string `json:"hls_pull_url_map"`
-			SDK    struct {
-				Pull struct {
-					Data string `json:"stream_data"`
-				} `json:"pull_data"`
-			} `json:"live_core_sdk_data"`
-		} `json:"stream_url"`
+		Stream rawStreamURL `json:"stream_url"`
 	}
 	if json.Unmarshal(raw, &r) != nil || !onAir && r.Status != 2 { // 2: on air
 		return v, false
 	}
-	hls := r.Stream.HLS
-	for _, q := range []string{"SD2", "HD1"} { // HD1 last: the finest a 1080p screen needs
-		if u := r.Stream.HLSMap[q]; u != "" {
-			hls = u
-		}
-	}
-	h264 := liveH264(r.Stream.SDK.Pull.Data)
-	if hls == "" {
-		hls = h264
-	}
+	streams, qualities, defaultQuality, hls, h264 := parseLiveStreams(r.Stream)
 	if hls == "" {
 		return v, false
 	}
 	return Video{ID: "live:" + r.ID, Desc: r.Title, Author: r.Owner.Nickname, AuthorID: r.Owner.SecUID,
-		Cover: r.Cover.first(), Avatar: r.Owner.Avatar.first(),
+		Cover: r.Cover.first(), Avatar: r.Owner.Avatar.first(), Qualities: qualities,
 		Live: &Live{RoomID: r.ID, WebRID: r.Owner.WebRID, OwnerID: r.Owner.ID,
-			HLS: strings.Replace(hls, "http://", "https://", 1), H264HLS: h264, Viewers: r.Stats.Viewers}}, true
+			HLS: hls, H264HLS: h264, DefaultQuality: defaultQuality, Streams: streams, Viewers: r.Stats.Viewers}}, true
 }
 
 func liveH264(streamData string) string {
 	var sdk struct {
 		Data map[string]struct {
 			Main struct {
+				HLS    string
+				Params string `json:"sdk_params"`
+			}
+			Backup struct {
 				HLS    string
 				Params string `json:"sdk_params"`
 			}
@@ -201,14 +463,16 @@ func liveH264(streamData string) string {
 	}
 	// Douyin often sends HEVC in MPEG-TS, which AVPlayer treats as audio-only.
 	// The SDK lists the video codec per quality. The "ao" variant is audio-only.
-	for _, q := range []string{"hd", "sd", "ld", "md", "uhd", "origin"} {
-		variant := sdk.Data[q].Main
-		if variant.HLS == "" {
+	for _, q := range []string{"origin", "uhd", "hd", "sd", "ld", "md"} {
+		d, ok := sdk.Data[q]
+		if !ok {
 			continue
 		}
-		var params struct{ VCodec string }
-		if json.Unmarshal([]byte(variant.Params), &params) == nil && strings.EqualFold(params.VCodec, "h264") {
-			return strings.Replace(variant.HLS, "http://", "https://", 1)
+		if d.Main.HLS != "" && sdkParamsH264(d.Main.Params) {
+			return httpsURL(d.Main.HLS)
+		}
+		if d.Backup.HLS != "" && (sdkParamsH264(d.Backup.Params) || sdkParamsH264(d.Main.Params)) {
+			return httpsURL(d.Backup.HLS)
 		}
 	}
 	return ""
@@ -1433,6 +1697,76 @@ func (c *Client) History() Pager[Video] {
 		cursor = r.Cursor
 		return videos(r.List), more, nil
 	})
+}
+
+// LiveRoom fetches fresh live room details and H.264 HLS streams for webRID
+// from live.douyin.com/webcast/room/web/enter/.
+func (c *Client) LiveRoom(ctx context.Context, webRID string) (Video, error) {
+	if webRID == "" {
+		return Video{}, errors.New("dy: empty live web_rid")
+	}
+	encoded := "aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&enter_from=web_live&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=MacIntel&browser_name=Chrome&browser_version=131.0.0.0&web_rid=" + url.QueryEscape(webRID)
+	address := "https://live.douyin.com/webcast/room/web/enter/?" + encoded + "&a_bogus=" + url.QueryEscape(c.signer.Sign(encoded, ""))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return Video{}, err
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Referer", "https://live.douyin.com/"+webRID)
+	if ck := c.cookies().cookie; ck != "" {
+		req.Header.Set("Cookie", ck)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Video{}, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Video{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Video{}, fmt.Errorf("dy: /webcast/room/web/enter/ %s", resp.Status)
+	}
+	if len(b) == 0 {
+		return Video{}, errors.New("dy: /webcast/room/web/enter/: empty reply")
+	}
+	var r struct {
+		StatusCode int `json:"status_code"`
+		Data       struct {
+			RoomStatus int               `json:"room_status"`
+			Data       []json.RawMessage `json:"data"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return Video{}, fmt.Errorf("dy: /webcast/room/web/enter/: %w", err)
+	}
+	if r.StatusCode != 0 {
+		return Video{}, fmt.Errorf("dy: /webcast/room/web/enter/: status %d", r.StatusCode)
+	}
+	if r.Data.RoomStatus != 0 {
+		return Video{Live: &Live{WebRID: webRID, Ended: true}}, ErrLiveEnded
+	}
+	if len(r.Data.Data) == 0 {
+		return Video{}, errors.New("dy: /webcast/room/web/enter/: missing room data")
+	}
+	var st struct {
+		Status int `json:"status"`
+	}
+	if err := json.Unmarshal(r.Data.Data[0], &st); err != nil {
+		return Video{}, fmt.Errorf("dy: /webcast/room/web/enter/: %w", err)
+	}
+	if st.Status != 2 {
+		return Video{Live: &Live{WebRID: webRID, Ended: true}}, ErrLiveEnded
+	}
+	v, ok := room(r.Data.Data[0], true)
+	if !ok {
+		return Video{}, errors.New("dy: /webcast/room/web/enter/: no playable stream")
+	}
+	if v.Live.WebRID == "" {
+		v.Live.WebRID = webRID
+	}
+	return v, nil
 }
 
 // LiveRooms pages through the rooms on air that the live list recommends.

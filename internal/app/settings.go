@@ -15,13 +15,14 @@ import (
 // (连播, the bullet comments, the definition, the volume). They live beside
 // the login's cookies, and are saved as soon as one changes.
 type settings struct {
-	AutoNext   bool    `json:"autoNext"`
-	Danmaku    bool    `json:"danmaku"`
-	Quality    string  `json:"quality"` // "" or 智能 for Douyin's pick
-	Volume     float64 `json:"volume"`
-	Muted      bool    `json:"muted"`
-	AutoUpdate bool    `json:"autoUpdate"`
-	Theme      string  `json:"theme,omitempty"` // "", "light", or "dark"
+	AutoNext    bool    `json:"autoNext"`
+	Danmaku     bool    `json:"danmaku"`
+	Quality     string  `json:"quality"`               // "" or 智能 for Douyin's pick
+	LiveQuality string  `json:"liveQuality,omitempty"` // "" or 智能 for live default
+	Volume      float64 `json:"volume"`
+	Muted       bool    `json:"muted"`
+	AutoUpdate  bool    `json:"autoUpdate"`
+	Theme       string  `json:"theme,omitempty"` // "", "light", or "dark"
 }
 
 // defaultSettings are a first launch's.
@@ -47,7 +48,7 @@ func (a *app) loadSettings(file string) {
 		a.toast = "设置没读出来：" + err.Error()
 	}
 	a.settingsFile, a.saved = file, s
-	a.autoNext, a.dmOff, a.quality, a.upd.auto = s.AutoNext, !s.Danmaku, s.Quality, s.AutoUpdate
+	a.autoNext, a.dmOff, a.quality, a.liveQuality, a.upd.auto = s.AutoNext, !s.Danmaku, s.Quality, s.LiveQuality, s.AutoUpdate
 	a.orbit.theme = s.Theme
 	a.applyThemeSource()
 	a.setVolume(s.Volume, s.Muted)
@@ -55,7 +56,7 @@ func (a *app) loadSettings(file string) {
 
 // current is the settings as they are now.
 func (a *app) current() settings {
-	return settings{AutoNext: a.autoNext, Danmaku: !a.dmOff, Quality: a.quality,
+	return settings{AutoNext: a.autoNext, Danmaku: !a.dmOff, Quality: a.quality, LiveQuality: a.liveQuality,
 		Volume: a.volume, Muted: a.muted, AutoUpdate: a.upd.auto, Theme: a.orbit.theme}
 }
 

@@ -113,6 +113,9 @@ func (*WarmVideo) Close()                               {}
 func (*WarmVideo) Open() (*Live, error)                 { return nil, errors.New("media: video preload unavailable") }
 
 func OpenLive(source string) (*Live, error) { return openStream(source, nil, false) }
+func OpenLiveHeaders(source string, headers map[string]string) (*Live, error) {
+	return openStream(source, headers, false)
+}
 func OpenNative(source string, headers map[string]string, vod bool) (*Live, error) {
 	return openStream(source, headers, vod)
 }

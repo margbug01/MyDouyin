@@ -40,12 +40,14 @@ var orbitSources = []orbitSourceSpec{
 // orbitState holds all UI state for the Orbital Home (引力场).
 type orbitState struct {
 	source         orbitSource
-	userPicked     bool   // true once the user explicitly chooses a source pill
-	hidden         bool   // 「收起周围画面」 pure-search mode
-	hotOpen        bool   // 「热搜潜望」 opt-in hot-search popover
-	offset         int    // starting index for 「换一批」 cycling
-	pendingAdvance bool   // waiting for a freshly fetched ring before advancing
-	theme          string // "", "light", or "dark"; "" follows system appearance
+	userPicked     bool      // true once the user explicitly chooses a source pill
+	hidden         bool      // 「收起周围画面」 pure-search mode
+	hotOpen        bool      // 「热搜潜望」 opt-in hot-search popover
+	offset         int       // starting index for 「换一批」 cycling
+	pendingAdvance bool      // waiting for a freshly fetched ring before advancing
+	theme          string    // "", "light", or "dark"; "" follows system appearance
+	swipeAt        time.Time // last precise trackpad scroll event time
+	scrollAt       time.Time // last committed scroll refresh time
 }
 
 // orbitCardRect is one card's placed rectangle on the orbital canvas.
@@ -274,6 +276,38 @@ func (a *app) cycleOrbit() {
 	a.orbit.pendingAdvance = false
 }
 
+func (a *app) prevOrbit() {
+	if a.orbit.offset <= 0 {
+		return
+	}
+	a.orbit.offset = max(0, a.orbit.offset-orbitRing)
+	a.orbit.pendingAdvance = false
+}
+
+func (a *app) handleOrbitScroll(ev ui.InputEvent) bool {
+	if ev.Kind != ui.InputScroll || ev.Momentum || ev.DY == 0 || a.orbit.hidden {
+		return false
+	}
+	if ev.Precise {
+		same := !a.orbit.swipeAt.IsZero() && ev.Time.Sub(a.orbit.swipeAt) < 200*time.Millisecond
+		a.orbit.swipeAt = ev.Time
+		if same {
+			return true
+		}
+	}
+	if !a.orbit.scrollAt.IsZero() && ev.Time.Sub(a.orbit.scrollAt) < 400*time.Millisecond {
+		return true
+	}
+	if ev.DY > 0 {
+		a.orbit.scrollAt = ev.Time
+		a.cycleOrbit()
+	} else if a.orbit.offset > 0 {
+		a.orbit.scrollAt = ev.Time
+		a.prevOrbit()
+	}
+	return true
+}
+
 // onOrbitSourceLoaded completes a pending 「换一批」 advance once fresh videos arrive.
 func (a *app) onOrbitSourceLoaded(p *page, added int) {
 	if p == nil || p != a.orbitSourcePage(a.orbit.source) {
@@ -370,32 +404,34 @@ func orbitLayout(w, h float32) []orbitCardRect {
 // buttons at the top right are chrome's, over it as over every page.
 func (a *app) orbitView(c *ui.Context) {
 	w, h := c.Size()
-	canvas := ui.Box(c.Key("orbit-canvas")).Fill().DragWindow()
-	switch {
-	case a.web.v != nil && a.web.layout, pal.dark:
-		canvas.Background(pal.bg)
-	default:
-		canvas.RadialGradient(ui.RadialGradient{Center: ui.Point{X: 0.5, Y: 0.46}, Oklab: true, Stops: pal.veil})
-	}
-	canvas.Children(func() {
-		if pal.dark && !(a.web.v != nil && a.web.layout) {
-			// A faint sheen ringing the black center.
-			ui.Box(c.Key("orbit-singularity")).Absolute().Top(0).Left(0).Right(0).Bottom(0).
-				RadialGradient(ui.RadialGradient{Center: ui.Point{X: 0.5, Y: 0.5}, Radius: min(w, h) * 0.62, Oklab: true, Stops: pal.veil}).
-				HitTest(func(float32, float32, ui.Rect) bool { return false })
+	ui.Box(c.Key("orbit-root")).Fill().Children(func() {
+		canvas := ui.Box(c.Key("orbit-canvas")).Fill().DragWindow().HandleInput(a.handleOrbitScroll)
+		switch {
+		case a.web.v != nil && a.web.layout, pal.dark:
+			canvas.Background(pal.bg)
+		default:
+			canvas.RadialGradient(ui.RadialGradient{Center: ui.Point{X: 0.5, Y: 0.46}, Oklab: true, Stops: pal.veil})
 		}
-		if !a.orbit.hidden {
-			a.orbitCards(c, w, h)
-		}
-		brandLeft := float32(94)
-		if runtime.GOOS == "windows" {
-			brandLeft = 20
-		}
-		ui.Row(c.Key("orbit-brand")).Absolute().Top(15).Left(brandLeft).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Image(c, logo).Size(22, 22)
-			ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
+		canvas.Children(func() {
+			if pal.dark && !(a.web.v != nil && a.web.layout) {
+				// A faint sheen ringing the black center.
+				ui.Box(c.Key("orbit-singularity")).Absolute().Top(0).Left(0).Right(0).Bottom(0).
+					RadialGradient(ui.RadialGradient{Center: ui.Point{X: 0.5, Y: 0.5}, Radius: min(w, h) * 0.62, Oklab: true, Stops: pal.veil}).
+					HitTest(func(float32, float32, ui.Rect) bool { return false })
+			}
+			if !a.orbit.hidden {
+				a.orbitCards(c, w, h)
+			}
+			brandLeft := float32(94)
+			if runtime.GOOS == "windows" {
+				brandLeft = 20
+			}
+			ui.Row(c.Key("orbit-brand")).Absolute().Top(15).Left(brandLeft).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Image(c, logo).Size(22, 22)
+				ui.Text(c, "MyDouyin").FontSize(16).FontWeight(700).TextColor(pal.text)
+			})
+			a.orbitCenterHub(c, w, h)
 		})
-		a.orbitCenterHub(c, w, h)
 		if a.notes != nil || a.dms != nil {
 			ui.Box(c.Key("orbit-side-panel")).Absolute().Top(60).Right(18).Bottom(18).ZIndex(40).Children(func() {
 				if a.notes != nil {

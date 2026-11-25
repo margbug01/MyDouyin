@@ -288,3 +288,160 @@ func TestCycleOrbitWaitsForFreshBatchInsteadOfWrapping(t *testing.T) {
 		t.Fatalf("new ring starts at %s, want fresh1", got)
 	}
 }
+
+func newOrbitScrollTestApp(n int) (*app, *ui.Tester) {
+	picks := &page{title: "精选", grid: true, done: true}
+	for i := range n {
+		picks.list = append(picks.list, &slot{
+			v: dy.Video{
+				ID:     fmt.Sprintf("v%d", i),
+				Desc:   fmt.Sprintf("环视频 %d 号", i),
+				Author: fmt.Sprintf("作者%d", i),
+			},
+			loading: true,
+		})
+	}
+	home := &page{title: "引力场", grid: true}
+	a := &app{
+		home:  home,
+		picks: picks,
+		pages: []*page{home},
+		orbit: orbitState{source: orbitPicks},
+	}
+	tt := ui.NewTester(a.view, 1280, 820)
+	tt.Frame()
+	return a, tt
+}
+
+func TestOrbitWheelCyclesAndRespectsCooldown(t *testing.T) {
+	a, tt := newOrbitScrollTestApp(24)
+	if !tt.HasText("环视频 0 号") || tt.HasText("环视频 8 号") {
+		t.Fatalf("expected ring 0 visible initially")
+	}
+
+	// Wheel down advances from ring 0 to ring 1.
+	tt.Wheel(400, 300, 0, 40)
+	tt.Frame()
+	if a.orbit.offset != orbitRing || !tt.HasText("环视频 8 号") {
+		t.Fatalf("wheel down did not advance to ring 1: offset=%d has8=%v", a.orbit.offset, tt.HasText("环视频 8 号"))
+	}
+
+	// Rapid wheel notches inside the 400ms cooldown only advance once.
+	tt.Advance(100 * time.Millisecond)
+	tt.Wheel(400, 300, 0, 40)
+	tt.Advance(100 * time.Millisecond)
+	tt.Wheel(400, 300, 0, 40)
+	tt.Frame()
+	if a.orbit.offset != orbitRing || tt.HasText("环视频 16 号") {
+		t.Fatalf("rapid notches inside cooldown should not advance: offset=%d has16=%v", a.orbit.offset, tt.HasText("环视频 16 号"))
+	}
+
+	// After cooldown elapses, next wheel notch advances to ring 2.
+	tt.Advance(450 * time.Millisecond)
+	tt.Wheel(400, 300, 0, 40)
+	tt.Frame()
+	if a.orbit.offset != 2*orbitRing || !tt.HasText("环视频 16 号") {
+		t.Fatalf("wheel down after cooldown did not advance to ring 2: offset=%d has16=%v", a.orbit.offset, tt.HasText("环视频 16 号"))
+	}
+}
+
+func TestOrbitWheelUpReturnsAndZeroDoesNotBurnCooldown(t *testing.T) {
+	a, tt := newOrbitScrollTestApp(24)
+
+	// Advance to ring 1 first.
+	tt.Wheel(400, 300, 0, 40)
+	tt.Frame()
+	if a.orbit.offset != orbitRing {
+		t.Fatalf("expected offset %d, got %d", orbitRing, a.orbit.offset)
+	}
+
+	// Wait past cooldown, then wheel up to return to ring 0.
+	tt.Advance(450 * time.Millisecond)
+	tt.Wheel(400, 300, 0, -40)
+	tt.Frame()
+	if a.orbit.offset != 0 || !tt.HasText("环视频 0 号") {
+		t.Fatalf("wheel up did not return to ring 0: offset=%d has0=%v", a.orbit.offset, tt.HasText("环视频 0 号"))
+	}
+
+	// Wait past cooldown, wheel up at ring 0 -> stays at ring 0 and must not burn cooldown.
+	tt.Advance(450 * time.Millisecond)
+	tt.Wheel(400, 300, 0, -40)
+	tt.Frame()
+	if a.orbit.offset != 0 {
+		t.Fatalf("wheel up at ring 0 moved offset to %d", a.orbit.offset)
+	}
+
+	// Immediate wheel down right after must advance immediately.
+	tt.Wheel(400, 300, 0, 40)
+	tt.Frame()
+	if a.orbit.offset != orbitRing || !tt.HasText("环视频 8 号") {
+		t.Fatalf("wheel up at ring 0 burned cooldown: offset=%d has8=%v", a.orbit.offset, tt.HasText("环视频 8 号"))
+	}
+}
+
+func TestOrbitTrackpadSwipeAdvancesOncePerSwipe(t *testing.T) {
+	a, tt := newOrbitScrollTestApp(24)
+	swipe := func() {
+		for range 40 {
+			tt.Scroll(400, 300, 0, 6)
+			tt.Advance(16 * time.Millisecond)
+		}
+		tt.Frame()
+	}
+
+	swipe()
+	if a.orbit.offset != orbitRing || !tt.HasText("环视频 8 号") || tt.HasText("环视频 16 号") {
+		t.Fatalf("first swipe should advance one ring: offset=%d has8=%v has16=%v", a.orbit.offset, tt.HasText("环视频 8 号"), tt.HasText("环视频 16 号"))
+	}
+
+	// Pause 300ms (>= 200ms swipe gap; total since commit is > 400ms cooldown).
+	tt.Advance(300 * time.Millisecond)
+	swipe()
+	if a.orbit.offset != 2*orbitRing || !tt.HasText("环视频 16 号") {
+		t.Fatalf("second swipe should advance one more ring: offset=%d has16=%v", a.orbit.offset, tt.HasText("环视频 16 号"))
+	}
+}
+
+func TestOrbitScrollIgnoredWhenHiddenOrOverSidePanel(t *testing.T) {
+	a, tt := newOrbitScrollTestApp(24)
+
+	// Hidden pure-search mode ignores canvas scrolling.
+	a.orbit.hidden = true
+	tt.Frame()
+	tt.Wheel(400, 300, 0, 40)
+	tt.Frame()
+	if a.orbit.offset != 0 {
+		t.Fatalf("scroll should be ignored when orbit cards are hidden: offset=%d", a.orbit.offset)
+	}
+
+	// Restore cards and open notification side panel on the right.
+	a.orbit.hidden = false
+	var items []dy.Notice
+	for i := range 20 {
+		items = append(items, dy.Notice{
+			User:   dy.User{ID: fmt.Sprintf("u%d", i), Name: fmt.Sprintf("通知用户%d", i)},
+			Action: "赞了你的作品",
+			Text:   fmt.Sprintf("通知内容 %d", i),
+			Time:   time.Now().Add(-time.Duration(i+1) * time.Minute),
+		})
+	}
+	a.notes = &notes{items: items, done: true}
+	tt.Frame()
+	if !tt.HasText("通知用户0") {
+		t.Fatal("notification side panel did not render")
+	}
+
+	// Scroll over the side panel (top=60..802, right=18, width=360 -> x in 902..1262).
+	tt.Wheel(1080, 400, 0, 120)
+	tt.Frame()
+	if a.orbit.offset != 0 || tt.HasText("环视频 8 号") {
+		t.Fatalf("scrolling over side panel cycled background orbit: offset=%d has8=%v", a.orbit.offset, tt.HasText("环视频 8 号"))
+	}
+
+	// Scrolling over the open canvas still cycles the orbit.
+	tt.Wheel(400, 300, 0, 40)
+	tt.Frame()
+	if a.orbit.offset != orbitRing || !tt.HasText("环视频 8 号") {
+		t.Fatalf("scrolling on orbit canvas with side panel open did not cycle: offset=%d has8=%v", a.orbit.offset, tt.HasText("环视频 8 号"))
+	}
+}

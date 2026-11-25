@@ -11,6 +11,11 @@ var videoHeaders = map[string]string{
 	"User-Agent": "Mozilla/5.0",
 }
 
+var liveHeaders = map[string]string{
+	"Referer":    "https://live.douyin.com/",
+	"User-Agent": "Mozilla/5.0",
+}
+
 type nextVideo struct {
 	slot  *slot
 	url   string

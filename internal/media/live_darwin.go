@@ -56,6 +56,11 @@ func OpenLive(url string) (*Live, error) {
 	return openStream(url, nil, false, true)
 }
 
+// OpenLiveHeaders starts the live stream at url with custom HTTP headers.
+func OpenLiveHeaders(url string, headers map[string]string) (*Live, error) {
+	return openStream(url, headers, false, true)
+}
+
 // OpenVideo streams an MP4 using AVPlayer's range loading and audio clock.
 func OpenVideo(url string, headers map[string]string) (*Live, error) {
 	return openStream(url, headers, true, true)
@@ -249,7 +254,7 @@ func (l *Live) poll(deadline *time.Time) (ui.VideoFrame, error, bool) {
 		return ui.VideoFrame{}, io.EOF, true
 	}
 	if objc.Send[int](l.item, sel("status")) == 2 { // failed
-		return ui.VideoFrame{}, errors.New("media: the stream failed to play"), true
+		return ui.VideoFrame{}, itemError(l.item), true
 	}
 	if l.seekDone != nil && l.seekDone.Load() {
 		l.seekDone = nil
@@ -312,7 +317,7 @@ func (l *Live) ready() (int, int, error) {
 	}
 	switch objc.Send[int](l.item, sel("status")) {
 	case 2:
-		return 0, 0, errors.New("media: the stream failed to play")
+		return 0, 0, itemError(l.item)
 	case 1:
 		sz := objc.Send[struct {
 			_    structs.HostLayout
@@ -321,6 +326,19 @@ func (l *Live) ready() (int, int, error) {
 		return int(sz.W), int(sz.H), nil
 	}
 	return 0, 0, nil
+}
+
+func itemError(item objc.ID) error {
+	if item != 0 {
+		if nserr := item.Send(sel("error")); nserr != 0 {
+			if desc := nserr.Send(sel("localizedDescription")); desc != 0 {
+				if msg := objc.Send[string](desc, sel("UTF8String")); msg != "" {
+					return errors.New("media: " + msg)
+				}
+			}
+		}
+	}
+	return errors.New("media: the stream failed to play")
 }
 
 // Rewind loops a video; live rooms have no start to go back to.
