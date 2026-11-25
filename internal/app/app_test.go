@@ -239,14 +239,13 @@ func TestGrid(t *testing.T) {
 	}
 }
 
-// The comments open from the rail and close with their button, the rail
-// again, Escape and moving to another video, none of which pauses or closes
-// the page; a click in them leaves them open.
 func TestComments(t *testing.T) {
 	feed := stub("推荐", 3)
 	ready(t, feed.list[0])
 	a := withRoots(&app{pages: []*page{feed, stub("@作者", 3)}})
 	a.pages[1].list[0] = feed.list[0]
+	a.pages[1].list[1].v = dy.Video{ID: "v2", Author: "作者", Comments: 5}
+	a.pages[1].list[1].comments = &sheet{v: a.pages[1].list[1].v, total: 5, done: true, items: []dy.Comment{{Author: "丙", Text: "下个视频的评论"}}}
 	tt := newTester(a)
 	open := func() {
 		a.sheet = &sheet{total: 2, done: true, items: []dy.Comment{{Author: "甲", Text: "第一条", Replies: 3}, {Author: "乙", Text: "第二条"}}}
@@ -282,7 +281,53 @@ func TestComments(t *testing.T) {
 		t.Fatal("a click in the comments closed them or paused")
 	}
 	tt.Key(0, ui.KeyDown)
-	check("the next video")
+	tt.Frame()
+	if a.pages[1].idx != 1 || a.sheet != a.pages[1].list[1].comments || !tt.HasText("下个视频的评论") || tt.HasText("第一条") || a.paused || len(a.pages) != 2 {
+		t.Fatalf("after the next video: idx=%d sheet=%v paused=%v pages=%d texts=%q", a.pages[1].idx, a.sheet != nil, a.paused, len(a.pages), tt.Texts())
+	}
+}
+
+func TestStepFollowsCommentsDrawer(t *testing.T) {
+	p := &page{
+		title: "推荐",
+		done:  true,
+		list: []*slot{
+			{v: dy.Video{ID: "v0", Author: "甲", Comments: 1}, loading: true},
+			{v: dy.Video{ID: "v1", Author: "乙", Comments: 2}, loading: true},
+			{v: dy.Video{ID: "v2", Author: "丙", Comments: 3}, loading: true},
+			{v: dy.Video{ID: "live1", Author: "丁", Live: &dy.Live{RoomID: "r1"}}, loading: true},
+		},
+	}
+	p.list[0].comments = &sheet{v: p.list[0].v, total: 1, done: true, items: []dy.Comment{{ID: "c0", Text: "评论0"}}}
+	prefetched := &sheet{v: p.list[1].v, total: 2, done: true, items: []dy.Comment{{ID: "c1", Text: "预拉评论1"}}}
+	p.list[1].comments = prefetched
+
+	a := withRoots(&app{pages: []*page{p}, sheet: p.list[0].comments})
+
+	a.step(1)
+	if p.idx != 1 || a.sheet != prefetched || p.list[0].comments != nil {
+		t.Fatalf("step to v1: idx=%d reused=%v prevReleased=%v", p.idx, a.sheet == prefetched, p.list[0].comments == nil)
+	}
+
+	a.sheet.related = true
+	a.lastNav = time.Time{}
+	a.step(1)
+	if p.idx != 2 || a.sheet == nil || a.sheet.v.ID != "v2" || !a.sheet.related || p.list[1].comments != nil {
+		t.Fatalf("step to v2 with related tab: idx=%d sheet=%+v prevReleased=%v", p.idx, a.sheet, p.list[1].comments == nil)
+	}
+
+	a.lastNav = time.Time{}
+	a.step(-1)
+	if p.idx != 1 || a.sheet == nil || a.sheet.v.ID != "v1" || !a.sheet.related || p.list[2].comments != nil {
+		t.Fatalf("step back to v1: idx=%d sheet=%+v prevReleased=%v", p.idx, a.sheet, p.list[2].comments == nil)
+	}
+
+	p.idx = 2
+	a.lastNav = time.Time{}
+	a.step(1)
+	if p.idx != 3 || a.sheet != nil {
+		t.Fatalf("step onto live room should close comments: idx=%d sheet=%v", p.idx, a.sheet != nil)
+	}
 }
 
 // A video saves under a clean name with its bytes intact and no .part left;

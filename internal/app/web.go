@@ -250,6 +250,29 @@ func (w *web) Eval(ctx context.Context, js string) ([]byte, error) {
 	return []byte(s), err
 }
 
+func (w *web) evalFullPageNow(ctx context.Context, js string) ([]byte, error) {
+	defer w.use()()
+	var p *mygo.Page
+	var err error
+	w.a.call(func() {
+		switch {
+		case w.v == nil:
+			err = errors.New("抖音页面没打开")
+		case w.signOnly:
+			err = errors.New("当前为轻量签名页")
+		default:
+			w.touch()
+			p = w.v.Page()
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	v, err := p.EvalContext(ctx, "return JSON.stringify(await (async () => {\n"+js+"\n})())")
+	s, _ := v.(string)
+	return []byte(s), err
+}
+
 func (w *web) Load(ctx context.Context, url string, layout bool) error {
 	defer w.use()()
 	var err error
@@ -281,37 +304,79 @@ func (w *web) Cookies() ([]dy.Cookie, error) {
 	return cs, nil
 }
 
+type loginCheck uint8
+
+const (
+	loginCheckUnknown loginCheck = iota
+	loginCheckValid
+	loginCheckInvalid
+)
+
+type startupLoginAction uint8
+
+const (
+	startupLoginKeep startupLoginAction = iota
+	startupLoginSignedIn
+	startupLoginLoggedOut
+)
+
+func resolveStartupLogin(
+	cs []dy.Cookie,
+	cookieErr error,
+	httpCheck func([]dy.Cookie) (bool, error),
+	pageCheck func() loginCheck,
+) startupLoginAction {
+	if cookieErr != nil {
+		return startupLoginKeep
+	}
+	if !dy.LoggedIn(cs) {
+		return startupLoginLoggedOut
+	}
+	if httpCheck != nil {
+		if ok, err := httpCheck(cs); err == nil && ok {
+			return startupLoginSignedIn
+		}
+	}
+	if pageCheck != nil && pageCheck() == loginCheckInvalid {
+		return startupLoginLoggedOut
+	}
+	return startupLoginSignedIn
+}
+
 // startLogin follows the login WebKit keeps: logged in, the client reads
 // with its cookies; not, the client goes on anonymous and the login shows,
 // the first time and after a logout.
 func (a *app) startLogin() {
 	go func() {
 		cs, err := a.web.Cookies()
-		in := err == nil && dy.LoggedIn(cs)
-		if in { // a session cookie Douyin may have let go since: ask over HTTP first
-			if ok, cerr := a.c.CheckLogin(cs); cerr == nil {
-				in = ok
-			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				in = a.web.pageSignedIn(ctx)
-				cancel()
-			}
-		}
-		if in {
+		action := resolveStartupLogin(cs, err, a.c.CheckLogin, func() loginCheck {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return a.web.checkSignedIn(ctx)
+		})
+		switch action {
+		case startupLoginSignedIn:
 			err = a.c.SaveCookies(cs)
-		} else {
+		case startupLoginLoggedOut:
 			err = a.c.Logout() // cookies.json from elsewhere: no login of this device
 		}
 		a.post(func() {
-			a.signedIn = in
 			if err != nil {
 				a.toast = "登录状态没读到：" + err.Error()
 			}
-			a.fill()
-			if in {
+			switch action {
+			case startupLoginKeep:
+				a.fill()
+			case startupLoginSignedIn:
+				a.signedIn = true
+				a.fill()
 				a.loadAccount()
-			} else if a.mode == modeDouyin {
-				a.openLogin()
+			case startupLoginLoggedOut:
+				a.signedIn = false
+				a.fill()
+				if a.mode == modeDouyin {
+					a.openLogin()
+				}
 			}
 		})
 	}()
@@ -323,6 +388,7 @@ type login struct {
 	src    string     // the code's data URL, as the page shows it
 	qr     *ui.Bitmap // the code, drawn
 	status string     // what the scan is at, for the panel
+	qrSlow bool
 	verify bool       // Douyin asks more than the scan: its page shows instead
 	stop   func()     // ends what waits for the verification (verifyFor), if any
 	retry  []func()   // what runs once Douyin's verification is passed
@@ -332,9 +398,11 @@ type login struct {
 // whether Douyin asks to verify more than the scan. A code that expired is
 // renewed, as its 刷新 does.
 const loginJS = `
-const img = [...document.querySelectorAll("img")].find(e => { const r = e.getBoundingClientRect(); return r.width >= 100 && Math.abs(r.width - r.height) < 8 && e.src.startsWith("data:image/"); });
+if (window.__mdSignPage) return { src: "", scanned: false, expired: false, verify: false, signedIn: false };
+const vis = e => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+const img = [...document.querySelectorAll("img")].find(e => { const r = e.getBoundingClientRect(); return r.width >= 100 && Math.abs(r.width - r.height) < 8 && e.src && e.src.startsWith("data:image/"); });
 let near = "";
-if (img) { let p = img; for (let i = 0; i < 4 && p.parentElement; i++) p = p.parentElement; near = p.innerText; }
+if (img) { let p = img; for (let i = 0; i < 4 && p.parentElement; i++) p = p.parentElement; near = p.innerText || ""; }
 if (!window.__mdQR) {
   window.__mdQR = { status: 0 };
   const seen = (u, t) => { if (/check_qrconnect/.test(String(u))) { try { window.__mdQR.status = Number(JSON.parse(t).data.status) || 0; } catch {} } };
@@ -345,8 +413,16 @@ if (!window.__mdQR) {
 }
 const body = document.body ? document.body.innerText : "";
 const expired = /失效|过期/.test(near);
-if (expired) { const r = [...document.querySelectorAll("*")].find(e => e.children.length === 0 && /刷新/.test(e.textContent) && e.getBoundingClientRect().width > 0); if (r) r.click(); }
-return { src: img ? img.src : "", scanned: window.__mdQR.status === 2 || /扫码成功|确认登录|手机上确认/.test(near), expired, verify: /身份验证|安全验证|短信验证|二次验证/.test(body) && !img };`
+if (expired) { const r = [...document.querySelectorAll("*")].find(e => e.children.length === 0 && /刷新/.test(e.textContent || "") && vis(e)); if (r) r.click(); }
+const hasCaptcha = [...document.querySelectorAll(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper")].some(vis)
+  || [...document.querySelectorAll("#captcha_container > *")].some(e => e.id !== "nocaptcha-container" && !e.classList.contains("nocaptcha-container") && vis(e));
+const verify = !img && (/身份验证|安全验证|短信验证|二次验证/.test(body) || hasCaptcha);
+const signedIn = !img && !verify && document.readyState === "complete" && /抖音号/.test(body) && !/未登录|扫码登录/.test(body);
+if (!img && !verify && !signedIn && !window.__mdNoTabClick && !window.__mdQRTabClicked) {
+  const tab = [...document.querySelectorAll("button, div, span, li, a")].find(e => e.children.length === 0 && (e.textContent || "").trim() === "扫码登录" && vis(e));
+  if (tab) { window.__mdQRTabClicked = true; tab.click(); }
+}
+return { src: img ? img.src : "", scanned: window.__mdQR.status === 2 || /扫码成功|确认登录|手机上确认/.test(near), expired, verify, signedIn };`
 
 // sessionID is the session cookie of cs, or "".
 func sessionID(cs []dy.Cookie) string {
@@ -358,12 +434,33 @@ func sessionID(cs []dy.Cookie) string {
 	return ""
 }
 
-// pageSignedIn asks Douyin, from the page, whether its login holds.
-func (w *web) pageSignedIn(ctx context.Context) bool {
-	b, err := w.Eval(ctx, `const r = await (await fetch("/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&channel=channel_pc_web", { credentials: "include" })).json();
-return r.status_code === 0 && !!r.user;`)
+func (w *web) checkSignedIn(ctx context.Context) loginCheck {
+	b, err := w.Eval(ctx, `try {
+	const resp = await fetch("/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&channel=channel_pc_web", { credentials: "include" });
+	const r = await resp.json();
+	if (!r || typeof r.status_code !== "number") return "unknown";
+	if (r.status_code === 0 && r.user && r.user.sec_uid) return "valid";
+	if (r.status_code === 8 || (r.status_code === 0 && (!r.user || !r.user.sec_uid))) return "invalid";
+	return "unknown";
+} catch {
+	return "unknown";
+}`)
 	// The reply nests other status codes (user_collect_count's is 0 logged out): only its own counts.
-	return err == nil && string(b) == "true"
+	if err != nil {
+		return loginCheckUnknown
+	}
+	var res string
+	if json.Unmarshal(b, &res) != nil {
+		return loginCheckUnknown
+	}
+	switch res {
+	case "valid":
+		return loginCheckValid
+	case "invalid":
+		return loginCheckInvalid
+	default:
+		return loginCheckUnknown
+	}
 }
 
 // openLogin shows the login: the code of Douyin's login page, which loads
@@ -380,10 +477,29 @@ func (a *app) openLogin() {
 	a.loginOpen, a.web.layout = true, true
 	a.login = login{status: "二维码载入中…"}
 	a.loginGen++
-	gen := a.loginGen
+	a.pollLogin(a.loginGen)
+}
+
+func (a *app) reloadLogin() {
+	if !a.loginOpen {
+		return
+	}
+	if err := a.web.open(douyinHome); err != nil {
+		a.toast = "登录页打不开：" + err.Error()
+		return
+	}
+	a.web.layout = true
+	a.login = login{status: "二维码载入中…"}
+	a.loginGen++
+	a.pollLogin(a.loginGen)
+}
+
+func (a *app) pollLogin(gen int) {
 	go func() {
 		was, _ := a.web.Cookies() // a session Douyin let go may linger: the login is a new one
 		old := sessionID(was)
+		started := time.Now()
+		checkedExisting := false
 		defer a.post(func() {
 			if a.loginGen == gen {
 				a.web.layout = false
@@ -391,8 +507,12 @@ func (a *app) openLogin() {
 		})
 		for {
 			time.Sleep(400 * time.Millisecond)
-			var open bool
-			a.call(func() { open = a.loginOpen && a.loginGen == gen })
+			var open, hasQR, inVerify bool
+			a.call(func() {
+				open = a.loginOpen && a.loginGen == gen
+				hasQR = a.login.qr != nil
+				inVerify = a.login.verify
+			})
 			if !open {
 				return
 			}
@@ -410,13 +530,44 @@ func (a *app) openLogin() {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			var st struct {
-				Src                      string
-				Scanned, Expired, Verify bool
+				Src                                string
+				Scanned, Expired, Verify, SignedIn bool
 			}
-			if b, err := a.web.Eval(ctx, loginJS); err == nil {
+			js := loginJS
+			if inVerify {
+				js = "window.__mdNoTabClick = true;\n" + loginJS
+			}
+			if b, err := a.web.evalFullPageNow(ctx, js); err == nil {
 				json.Unmarshal(b, &st)
 			}
 			cancel()
+			if st.SignedIn {
+				a.post(func() {
+					if a.loginGen == gen {
+						a.loginOpen, a.login.status = false, ""
+						a.toast = "已检测到登录状态，正在恢复…"
+					}
+				})
+				a.finishLogin(gen)
+				return
+			}
+			if !checkedExisting && old != "" && !hasQR && !inVerify && !st.Verify && time.Since(started) >= 4*time.Second {
+				checkedExisting = true
+				cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
+				valid := a.web.checkSignedIn(cctx) == loginCheckValid
+				ccancel()
+				if valid {
+					a.post(func() {
+						if a.loginGen == gen {
+							a.loginOpen, a.login.status = false, ""
+							a.toast = "已检测到登录状态，正在恢复…"
+						}
+					})
+					a.finishLogin(gen)
+					return
+				}
+			}
+			slow := time.Since(started) >= 10*time.Second
 			a.post(func() {
 				if a.loginGen != gen {
 					return
@@ -425,11 +576,13 @@ func (a *app) openLogin() {
 				if st.Src != "" && st.Src != l.src {
 					if data, err := base64.StdEncoding.DecodeString(st.Src[strings.IndexByte(st.Src, ',')+1:]); err == nil {
 						if bmp, err := ui.DecodeBitmap(data); err == nil {
-							l.src, l.qr = st.Src, bmp
+							l.src, l.qr, l.qrSlow = st.Src, bmp, false
 						}
 					}
 				}
-				l.verify = st.Verify
+				if st.Verify {
+					l.verify, l.qrSlow = true, false
+				}
 				switch {
 				case st.Expired:
 					l.status = "二维码过期了，正在换一张"
@@ -437,6 +590,9 @@ func (a *app) openLogin() {
 					l.status = "已扫码，请在手机上确认登录"
 				case l.qr != nil:
 					l.status = "打开抖音 App，点左上角的扫一扫"
+				case slow && !l.verify:
+					l.qrSlow = true
+					l.status = "二维码加载较慢，可重试或改用网页登录"
 				}
 			})
 		}
@@ -452,7 +608,7 @@ func (a *app) finishLogin(gen int) {
 	deadline := time.Now().Add(25 * time.Second)
 	for !in && time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		in = a.web.pageSignedIn(ctx)
+		in = a.web.checkSignedIn(ctx) == loginCheckValid
 		cancel()
 		if !in {
 			time.Sleep(500 * time.Millisecond)
@@ -534,7 +690,7 @@ func (a *app) loginPanel(c *ui.Context) {
 			w, h := c.Size()
 			panel.Width(min(960, w-48)).Height(min(660, h-48))
 			ui.Row(c).Height(52).PaddingX(18).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "抖音要求验证身份，请按页面提示完成").FontSize(14).FontWeight(600).TextColor(pal.strong).Grow(1)
+				ui.Text(c, "请在下方完成登录或身份验证").FontSize(14).FontWeight(600).TextColor(pal.strong).Grow(1)
 				if ui.Button(c.Key("later"), "以后再说").Clicked() {
 					a.loginOpen = false
 				}
@@ -553,14 +709,24 @@ func (a *app) loginPanel(c *ui.Context) {
 				if l.qr != nil {
 					ui.Image(c, l.qr).Size(196, 196).Opacity(onOff(strings.HasPrefix(l.status, "已扫码"), float32(0.25), 1))
 				} else {
-					ui.Spinner(c)
+					ui.Spinner(c).TextColor(ui.Hex("#6b7280"))
 				}
 			})
 			ui.Text(c, l.status).FontSize(13.5).TextColor(pal.text)
 			ui.Text(c, "登录后可以点赞、收藏、发弹幕，看关注和我的").FontSize(11.5).TextColor(pal.faint)
-			if ui.Button(c.Key("later"), "以后再说").Clicked() {
-				a.loginOpen = false
-			}
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if l.qrSlow && l.qr == nil {
+					if ui.Button(c.Key("retry"), "重试").Clicked() {
+						a.reloadLogin()
+					}
+					if ui.Button(c.Key("weblogin"), "网页登录").Clicked() {
+						l.verify = true
+					}
+				}
+				if ui.Button(c.Key("later"), "以后再说").Clicked() {
+					a.loginOpen = false
+				}
+			})
 		})
 	})
 	if wasOpen && !a.loginOpen {

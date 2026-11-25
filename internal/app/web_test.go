@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -138,5 +139,124 @@ func TestSignPageStateResetOnDestroy(t *testing.T) {
 func TestFullPageCheckRejectsSignPage(t *testing.T) {
 	if !strings.Contains(fullPageCheckJS, `if (window.__mdSignPage) return "wait"`) {
 		t.Fatalf("fullPageCheckJS must wait while signPage is still mounted: %s", fullPageCheckJS)
+	}
+}
+
+func TestResolveStartupLogin(t *testing.T) {
+	signedCookies := []dy.Cookie{{Name: "sessionid", Value: "abc"}}
+
+	t.Run("http valid skips page check", func(t *testing.T) {
+		pageCalled := false
+		got := resolveStartupLogin(signedCookies, nil,
+			func([]dy.Cookie) (bool, error) { return true, nil },
+			func() loginCheck { pageCalled = true; return loginCheckInvalid },
+		)
+		if got != startupLoginSignedIn || pageCalled {
+			t.Fatalf("got=%v pageCalled=%v", got, pageCalled)
+		}
+	})
+
+	t.Run("http false negative confirmed valid by page", func(t *testing.T) {
+		pageCalled := false
+		got := resolveStartupLogin(signedCookies, nil,
+			func([]dy.Cookie) (bool, error) { return false, nil },
+			func() loginCheck { pageCalled = true; return loginCheckValid },
+		)
+		if got != startupLoginSignedIn || !pageCalled {
+			t.Fatalf("got=%v pageCalled=%v", got, pageCalled)
+		}
+	})
+
+	t.Run("inconclusive page check with sessionid keeps login", func(t *testing.T) {
+		got := resolveStartupLogin(signedCookies, nil,
+			func([]dy.Cookie) (bool, error) { return false, errors.New("timeout") },
+			func() loginCheck { return loginCheckUnknown },
+		)
+		if got != startupLoginSignedIn {
+			t.Fatalf("got=%v want startupLoginSignedIn", got)
+		}
+	})
+
+	t.Run("explicit invalid logs out", func(t *testing.T) {
+		got := resolveStartupLogin(signedCookies, nil,
+			func([]dy.Cookie) (bool, error) { return false, nil },
+			func() loginCheck { return loginCheckInvalid },
+		)
+		if got != startupLoginLoggedOut {
+			t.Fatalf("got=%v want startupLoginLoggedOut", got)
+		}
+	})
+
+	t.Run("missing session cookie logs out without checks", func(t *testing.T) {
+		httpCalled, pageCalled := false, false
+		got := resolveStartupLogin(nil, nil,
+			func([]dy.Cookie) (bool, error) { httpCalled = true; return true, nil },
+			func() loginCheck { pageCalled = true; return loginCheckValid },
+		)
+		if got != startupLoginLoggedOut || httpCalled || pageCalled {
+			t.Fatalf("got=%v http=%v page=%v", got, httpCalled, pageCalled)
+		}
+	})
+
+	t.Run("cookie read error keeps existing state", func(t *testing.T) {
+		httpCalled, pageCalled := false, false
+		got := resolveStartupLogin(nil, errors.New("cookie store busy"),
+			func([]dy.Cookie) (bool, error) { httpCalled = true; return false, nil },
+			func() loginCheck { pageCalled = true; return loginCheckInvalid },
+		)
+		if got != startupLoginKeep || httpCalled || pageCalled {
+			t.Fatalf("got=%v http=%v page=%v", got, httpCalled, pageCalled)
+		}
+	})
+}
+
+func TestLoginLostKeepsLoginUnlessInvalid(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		check        loginCheck
+		wantSignedIn bool
+	}{
+		{name: "unknown", check: loginCheckUnknown, wantSignedIn: true},
+		{name: "valid", check: loginCheckValid, wantSignedIn: true},
+		{name: "invalid", check: loginCheckInvalid, wantSignedIn: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &app{signedIn: true}
+			a.web.a = a
+			a.applyLoginRecheck("点赞", tc.check)
+			if a.signedIn != tc.wantSignedIn {
+				t.Fatalf("signedIn=%v want=%v toast=%q", a.signedIn, tc.wantSignedIn, a.toast)
+			}
+			if tc.wantSignedIn && !strings.Contains(a.toast, "登录还在") {
+				t.Fatalf("expected keep-login toast, got %q", a.toast)
+			}
+		})
+	}
+}
+
+func TestLoginPanelSlowFallback(t *testing.T) {
+	a := &app{
+		loginOpen: true,
+		login:     login{status: "二维码载入中…"},
+	}
+	a.web.a, a.web.v = a, &mygo.WebView{}
+	tt := ui.NewTester(func(c *ui.Context) { a.loginPanel(c) }, 960, 700)
+	tt.Frame()
+	if tt.HasText("重试") || tt.HasText("网页登录") {
+		t.Fatalf("slow controls shown before timeout: %q", tt.Texts())
+	}
+
+	a.login.qrSlow = true
+	a.login.status = "二维码加载较慢，可重试或改用网页登录"
+	tt.Frame()
+	if !tt.HasText("重试") || !tt.HasText("网页登录") || !tt.HasText("以后再说") {
+		t.Fatalf("slow login panel missing fallback actions: %q", tt.Texts())
+	}
+	if err := tt.Click("网页登录"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.login.verify || !tt.HasText("请在下方完成登录或身份验证") {
+		t.Fatalf("clicking 网页登录 did not enter web view: verify=%v texts=%q", a.login.verify, tt.Texts())
 	}
 }

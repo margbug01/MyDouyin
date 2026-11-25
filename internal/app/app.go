@@ -538,7 +538,7 @@ func (a *app) toggleFollow(secUID, uid, name string, fallback int) {
 				a.adjustProfileFollowers(secUID, -step)
 				a.toast = onOff(want, "关注", "取消关注") + "没成功：" + err.Error()
 				if errors.Is(err, dy.ErrNeedLogin) {
-					a.loginLost(onOff(want, "关注", "取消关注"))
+					a.recheckLogin(onOff(want, "关注", "取消关注"))
 				}
 				return
 			}
@@ -592,7 +592,7 @@ func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) err
 				*on, *n = !want, *n-step
 				a.toast = onOff(want, "", "取消") + what + "没成功：" + err.Error()
 				if errors.Is(err, dy.ErrNeedLogin) {
-					a.loginLost(onOff(want, "", "取消") + what)
+					a.recheckLogin(onOff(want, "", "取消") + what)
 				}
 			}
 		})
@@ -646,30 +646,30 @@ func (a *app) toggleCommentLike(sh *sheet, id string, reply bool) {
 			}
 			a.toast = onOff(want, "", "取消") + "赞评论没成功：" + err.Error()
 			if errors.Is(err, dy.ErrNeedLogin) {
-				a.loginLost(onOff(want, "", "取消") + "赞评论")
+				a.recheckLogin(onOff(want, "", "取消") + "赞评论")
 			}
 		})
 	}()
 }
 
-// loginLost follows a write Douyin refused as 用户未登录: it asks Douyin,
-// from the page, whether the login holds, and only if not shows the login
-// to scan again; holding, the write was refused on its own (what is the
-// toast's), and the login stays.
-func (a *app) loginLost(what string) {
+func (a *app) recheckLogin(what string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		in := a.web.pageSignedIn(ctx)
+		st := a.web.checkSignedIn(ctx)
 		cancel()
 		a.post(func() {
-			if in {
-				a.toast = what + "没成功：抖音没接受，登录还在，请稍后再试"
-				return
-			}
-			a.signedIn = false
-			a.openLogin()
+			a.applyLoginRecheck(what, st)
 		})
 	}()
+}
+
+func (a *app) applyLoginRecheck(what string, st loginCheck) {
+	if st != loginCheckInvalid {
+		a.toast = what + "没成功：抖音没接受，登录还在，请稍后再试"
+		return
+	}
+	a.signedIn = false
+	a.openLogin()
 }
 
 // shareTo sends v to u in a direct message, the panel's button showing how
@@ -1008,14 +1008,30 @@ type thread struct {
 func (a *app) comments(s *slot) {
 	a.notes, a.dms = nil, nil
 	if s.comments == nil {
-		s.comments = &sheet{total: s.v.Comments, next: a.c.Comments(s.v.ID), v: s.v}
+		var next dy.Pager[dy.Comment]
+		if a.c != nil {
+			next = a.c.Comments(s.v.ID)
+		}
+		s.comments = &sheet{total: s.v.Comments, next: next, done: next == nil, v: s.v}
 	}
 	a.sheet = s.comments
-	if len(a.sheet.items) == 0 { // not fetched ahead, or that failed: again
+	if len(a.sheet.items) == 0 && a.sheet.next != nil { // not fetched ahead, or that failed: again
 		a.moreComments(a.sheet)
 	}
 	if a.signedIn {
 		a.web.warm() // for the replies, which Douyin gives only the page, and the likes
+	}
+}
+
+func (a *app) followSheet(s *slot, related bool) {
+	if s == nil || s.v.Live != nil {
+		a.sheet = nil
+		return
+	}
+	a.comments(s)
+	a.sheet.related = related
+	if related && len(a.sheet.rel) == 0 && a.c != nil {
+		a.moreRelated()
 	}
 }
 
@@ -1085,6 +1101,10 @@ func (a *app) moreRelated() {
 		return
 	}
 	if sh.relNext == nil {
+		if a.c == nil {
+			sh.relDone = true
+			return
+		}
 		sh.relNext = a.c.Related(sh.v.ID)
 	}
 	sh.relBusy = true
@@ -2028,12 +2048,17 @@ func (a *app) step(d int) {
 		return
 	}
 	a.lastNav = now
+	keepSheet, relatedTab := a.sheet != nil, a.sheet != nil && a.sheet.related
 	if p.idx < len(p.list) { // past the end, 载入中… shows: nothing slides away
 		a.slides++
 		a.slide = &slide{n: a.slides, from: p.list[p.idx].v.Cover, to: p.list[i], dir: d}
 	}
 	p.idx, a.paused = i, false
-	a.sheet = nil // the comments were the last video's
+	if keepSheet {
+		a.followSheet(p.list[i], relatedTab)
+	} else {
+		a.sheet = nil
+	}
 	a.fill()
 }
 
