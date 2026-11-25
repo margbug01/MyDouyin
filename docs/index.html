@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MyDouyin · MyHongguo — 开源原生抖音桌面客户端 &amp; 红果短剧电脑版（macOS / Windows）</title>
-  <meta name="description" content="MyDouyin 是基于 Go 与 MyGo 构建的开源原生桌面客户端，在一个窗口内同时提供抖音（MyDouyin）与红果短剧（MyHongguo）双模式，支持 macOS Apple Silicon 与 Windows 10/11 x64，无 Electron、无安卓模拟器、无 FFmpeg。">
-  <meta name="keywords" content="MyDouyin, MyHongguo, 抖音桌面客户端, Mac 抖音客户端, 红果短剧电脑版, 红果短剧桌面端, 不用安卓模拟器看红果短剧, Douyin desktop client, Hongguo short drama, Go, MyGo, AVFoundation, Media Foundation, HEIC">
+  <title>抖音电脑版 &amp; 红果短剧电脑版免费下载（macOS / Windows）— MyDouyin · MyHongguo</title>
+  <meta name="description" content="MyDouyin · MyHongguo 是开源原生抖音电脑版与红果短剧电脑版客户端，支持 macOS（Apple Silicon）与 Windows 10/11。不用安卓模拟器即可在电脑免登录免费看红果短剧、漫剧，并支持抖音引力场刷视频、看直播、弹幕与带图评论。">
+  <meta name="keywords" content="红果短剧电脑版,红果短剧Mac版,红果短剧Windows版,不用安卓模拟器看红果短剧,抖音电脑版,Mac抖音客户端,抖音桌面客户端,MyDouyin,MyHongguo,Douyin desktop client,Hongguo short drama desktop">
   <meta name="theme-color" content="#f6f7fb">
   <link rel="canonical" href="https://margbug01.github.io/MyDouyin/">
   <link rel="icon" type="image/png" href="douyin-icon.png">
@@ -14,18 +14,18 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="MyDouyin · MyHongguo">
-  <meta property="og:title" content="MyDouyin · MyHongguo — 开源原生抖音桌面客户端 &amp; 红果短剧电脑版">
-  <meta property="og:description" content="一个轻量原生窗口，同时刷抖音与看红果免费短剧/漫剧。macOS 约 65 MB 零写盘硬解，Windows 原生 Media Foundation + 纯 Go HEIC 封面解码。">
+  <meta property="og:title" content="抖音电脑版 &amp; 红果短剧电脑版免费下载（macOS / Windows）— MyDouyin · MyHongguo">
+  <meta property="og:description" content="一个原生桌面客户端同时满足电脑刷抖音与免费追红果短剧、漫剧。无需安卓模拟器、免登录即看，支持 macOS Apple Silicon 与 Windows 10/11。">
   <meta property="og:url" content="https://margbug01.github.io/MyDouyin/">
   <meta property="og:image" content="https://margbug01.github.io/MyDouyin/screenshots/hero.webp">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="MyDouyin · MyHongguo — Native Douyin &amp; Hongguo Short Drama Desktop Client">
-  <meta name="twitter:description" content="Open-source Go + MyGo native desktop client for Douyin and Hongguo Short Dramas on macOS (Apple Silicon) and Windows 10/11 (x64). No Electron, no Android emulators, no FFmpeg.">
+  <meta name="twitter:title" content="MyDouyin · MyHongguo — Douyin &amp; Hongguo Short Dramas Desktop Client">
+  <meta name="twitter:description" content="Free open-source desktop app for Douyin and Hongguo Short Dramas on macOS (Apple Silicon) and Windows 10/11. Watch short dramas without Android emulators or login.">
   <meta name="twitter:image" content="https://margbug01.github.io/MyDouyin/screenshots/hero.webp">
 
-  <!-- Structured Data: SoftwareApplication + FAQPage -->
+  <!-- Structured Data: SoftwareApplication + HowTo + FAQPage -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -33,10 +33,11 @@
       {
         "@type": "SoftwareApplication",
         "name": "MyDouyin · MyHongguo",
-        "alternateName": ["MyDouyin", "MyHongguo", "红果短剧电脑版", "抖音原生桌面客户端"],
+        "alternateName": ["MyDouyin", "MyHongguo", "红果短剧电脑版", "抖音桌面客户端", "Mac 抖音客户端"],
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "macOS (Apple Silicon), Windows 10, Windows 11 (x64)",
         "softwareVersion": "0.2.26",
+        "isAccessibleForFree": true,
         "offers": {
           "@type": "Offer",
           "price": "0",
@@ -45,13 +46,43 @@
         "url": "https://margbug01.github.io/MyDouyin/",
         "downloadUrl": "https://github.com/margbug01/MyDouyin/releases/latest",
         "codeRepository": "https://github.com/margbug01/MyDouyin",
+        "featureList": [
+          "抖音电脑端刷视频、看直播、发弹幕与带图评论",
+          "红果短剧电脑版免登录看免费真人短剧、漫剧与AI剧",
+          "无需安卓模拟器原生支持 macOS Apple Silicon 与 Windows 10/11",
+          "快捷键一键切换抖音与红果短剧双模式",
+          "本地追剧收藏、断点续播与零遥测隐私保护"
+        ],
         "screenshot": [
           "https://margbug01.github.io/MyDouyin/screenshots/hero.webp",
           "https://margbug01.github.io/MyDouyin/screenshots/hongguo-orbit.webp",
           "https://margbug01.github.io/MyDouyin/screenshots/player.webp",
+          "https://margbug01.github.io/MyDouyin/screenshots/hongguo-detail.webp",
           "https://margbug01.github.io/MyDouyin/screenshots/hongguo-player.webp"
         ],
-        "description": "开源轻量原生桌面客户端，基于 Go 与 MyGo 构建，在单窗口内提供抖音桌面端（MyDouyin）与红果短剧电脑版（MyHongguo）双模式，无需 Electron、安卓模拟器、FFmpeg 或微软商店 HEVC 扩展。"
+        "description": "MyDouyin · MyHongguo 是支持 macOS（Apple Silicon）与 Windows 10/11（x64）的开源原生桌面客户端，在一个窗口内同时提供抖音桌面端与红果短剧电脑版功能，无需安卓模拟器，打开即可免登录浏览抖音公开内容与红果免费短剧、漫剧。"
+      },
+      {
+        "@type": "HowTo",
+        "name": "如何在 macOS 和 Windows 电脑上免费看抖音与红果短剧",
+        "description": "无需安卓模拟器，3 步在 Mac 或 Windows 电脑上安装并使用 MyDouyin · MyHongguo。",
+        "step": [
+          {
+            "@type": "HowToStep",
+            "name": "下载对应系统安装包",
+            "text": "macOS（Apple Silicon）下载 arm64.dmg 镜像并拖入应用程序；Windows 10/11 下载 setup-amd64.exe 安装程序或绿色压缩包。"
+          },
+          {
+            "@type": "HowToStep",
+            "name": "直接打开免登录浏览",
+            "text": "首次启动无需强制登录即可浏览抖音引力场精选、公开直播间与红果全部免费短剧和漫剧。"
+          },
+          {
+            "@type": "HowToStep",
+            "name": "一键切换抖音与红果短剧模式",
+            "text": "点击左上角品牌胶囊，或按 Cmd+1 / Cmd+2（Windows 为 Ctrl+1 / Ctrl+2）在抖音与红果短剧之间自由切换。"
+          }
+        ]
       },
       {
         "@type": "FAQPage",
@@ -61,31 +92,55 @@
             "name": "红果短剧有电脑版吗？如何在 Mac 和 Windows 上不用安卓模拟器看红果短剧？",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11（x64）上，不需要安卓模拟器或手机投屏。点击左上角品牌胶囊或按 Cmd+2 / Ctrl+2 即可切换进入，支持双星引力场、发现、榜单、分类、上新、搜索、剧集详情、弹幕、评论与本地断点续播。"
+              "text": "有。MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11 电脑上，不需要安卓模拟器或手机投屏。打开软件后点击左上角品牌切换胶囊或按 Cmd+2 / Ctrl+2，即可免费观看真人短剧、漫剧与 AI 剧，支持榜单、分类、搜索、全集选集、剧评、实时弹幕与本地断点续播。"
             }
           },
           {
             "@type": "Question",
-            "name": "不登录抖音或红果账号可以直接使用吗？",
+            "name": "Mac 电脑上怎么刷抖音、看抖音直播和发评论？",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "可以。MyHongguo 红果短剧模式全程免登录匿名运行，追剧收藏与播放断点仅保存在本机。MyDouyin 抖音模式免登录即可浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间，仅在点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。"
+              "text": "在 macOS（Apple Silicon）上安装 MyDouyin 即可原生浏览抖音引力场首页、推荐、关注、朋友、直播、短剧与合集，支持多清晰度直播间、实时弹幕、带图评论、画中画小窗、全屏播放，以及扫码登录同步点赞收藏与观看历史。"
             }
           },
           {
             "@type": "Question",
-            "name": "Windows 上看红果短剧需要额外安装 FFmpeg 或微软商店 HEIF/HEVC 扩展吗？",
+            "name": "不登录抖音或红果账号可以直接看吗？",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "不需要。Windows 版视频直接走系统原生 Media Foundation 硬件解码，不含 FFmpeg；红果短剧的签名 HEIC 封面通过内置纯 Go h265/heic 解码器直接解码并转存本地 JPEG 缓存，无需微软商店 HEIF/HEVC 扩展。仅 Windows N/KN 精简版需安装系统可选功能 Media Feature Pack。"
+              "text": "可以。红果短剧模式（MyHongguo）全程免登录使用，追剧收藏和播放进度保存在本机。抖音模式（MyDouyin）不登录即可看引力场精选、推荐、分类、搜索、作者主页和公开直播间，仅在点赞、收藏、关注、发评论、发弹幕或同步账号历史时需要扫码登录。"
             }
           },
           {
             "@type": "Question",
-            "name": "Mac 长时间刷抖音会把视频缓存写满硬盘吗？",
+            "name": "Windows 电脑上看红果短剧需要额外安装插件、FFmpeg 或微软商店 HEVC 扩展吗？",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "不会。MyDouyin 在 macOS 上对 AVFoundation 显式启用 AVURLAssetUsesNoPersistentCacheKey，消除临时 MP4 写盘，实测 1080p 解码进程物理内存约 65 MB。"
+              "text": "不需要。MyDouyin 的 Windows 版开箱即用，直接支持抖音与红果视频播放以及红果短剧封面显示，无需额外安装 FFmpeg 或微软商店付费 HEIF/HEVC 扩展。仅 Windows N / KN 精简版需安装系统自带可选功能 Media Feature Pack。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "红果短剧遇到地区限制、代理异常或加载不出来怎么办？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "打开右上角「设置 › 红果短剧 (MyHongguo)」，确认「绕过系统代理直连」已开启（默认开启）。若遇到匿名限流，点击「重置匿名设备」即可恢复访问。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "macOS 首次打开提示「无法验证开发者」或「已损坏」怎么办？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "由于开源个人构建尚未经过 Apple 官方公证，将 MyDouyin.app 拖入「应用程序」后，可在「系统设置 › 隐私与安全性」底部点击「仍要打开」，或在终端执行 xattr -dr com.apple.quarantine /Applications/MyDouyin.app 即可正常打开。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "使用 MyDouyin 安全吗？登录信息和追剧记录存在哪里？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "项目代码完全开源，零遥测、不收集任何使用统计。所有登录凭证、红果追剧列表与播放进度只保存在你的本机应用配置目录中，覆盖安装和应用内升级都会完整保留数据。"
             }
           }
         ]
@@ -97,19 +152,18 @@
   <style>
     :root {
       --bg: #f6f7fb;
-      --bg-elev: rgba(255, 255, 255, 0.78);
+      --bg-elev: rgba(255, 255, 255, 0.8);
       --surface: #ffffff;
       --surface-2: #eff1f7;
-      --surface-3: #e7eaf3;
+      --surface-3: #e6e9f2;
       --ink: #0e1117;
-      --ink-2: #4c5568;
-      --ink-3: #7c8599;
+      --ink-2: #4b5568;
+      --ink-3: #7a8398;
       --border: rgba(14, 17, 23, 0.085);
       --border-strong: rgba(14, 17, 23, 0.15);
       --shadow-sm: 0 2px 8px rgba(14, 17, 23, 0.04);
       --shadow-md: 0 14px 40px rgba(14, 17, 23, 0.08);
       --shadow-lg: 0 30px 90px rgba(14, 17, 23, 0.13);
-      --void-slice: #08090f;
       --accent: #fe2c55;
       --accent-2: #08c5c4;
       --accent-soft: rgba(254, 44, 85, 0.10);
@@ -126,7 +180,7 @@
 
     html[data-theme="dark"] {
       --bg: #07080d;
-      --bg-elev: rgba(16, 18, 26, 0.78);
+      --bg-elev: rgba(16, 18, 26, 0.8);
       --surface: #11131c;
       --surface-2: #171a26;
       --surface-3: #1f2333;
@@ -138,7 +192,6 @@
       --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
       --shadow-md: 0 18px 46px rgba(0, 0, 0, 0.45);
       --shadow-lg: 0 36px 100px rgba(0, 0, 0, 0.65);
-      --void-slice: #10131e;
     }
 
     html[data-mode="hongguo"] {
@@ -157,7 +210,7 @@
       font-family: var(--font-sans);
       background: var(--bg);
       color: var(--ink);
-      line-height: 1.6;
+      line-height: 1.62;
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
       transition: background 0.45s var(--ease), color 0.35s var(--ease);
@@ -185,7 +238,7 @@
       max-height: 780px;
       border-radius: 50%;
       filter: blur(110px);
-      transition: background 0.7s var(--ease), transform 0.9s var(--ease);
+      transition: background 0.7s var(--ease);
     }
     .ambient::before {
       top: -22vw;
@@ -198,7 +251,7 @@
       background: radial-gradient(circle, var(--glow-2), transparent 68%);
     }
 
-    /* Subtle Diagonal Porcelain / Void Architectural Ribbon */
+    /* Subtle Diagonal Porcelain / Void Ribbon */
     .hero-diagonal {
       position: absolute;
       inset: 0;
@@ -225,7 +278,7 @@
 
     .container {
       width: 100%;
-      max-width: 1160px;
+      max-width: 1140px;
       margin: 0 auto;
       padding: 0 24px;
     }
@@ -254,7 +307,6 @@
       box-shadow: var(--shadow-sm);
     }
 
-    /* Interactive Dual Brand Switcher Pill */
     .brand-switcher {
       position: relative;
       display: inline-flex;
@@ -355,25 +407,19 @@
       border-color: var(--border-strong);
       transform: translateY(-1px);
     }
-    .icon-pill.icon-only {
-      width: 34px;
-      padding: 0;
-    }
+    .icon-pill.icon-only { width: 34px; padding: 0; }
     .icon-pill.gh-link {
       background: var(--ink);
       color: var(--bg);
       border-color: transparent;
       padding: 0 13px;
     }
-    .icon-pill.gh-link:hover {
-      color: var(--bg);
-      opacity: 0.9;
-    }
+    .icon-pill.gh-link:hover { color: var(--bg); opacity: 0.9; }
 
-    /* Hero Section */
+    /* Hero */
     .hero {
       position: relative;
-      padding: 36px 0 42px;
+      padding: 34px 0 42px;
       text-align: center;
     }
     .release-pill {
@@ -388,7 +434,7 @@
       font-size: 12.5px;
       font-weight: 600;
       color: var(--ink-2);
-      margin-bottom: 22px;
+      margin-bottom: 20px;
       transition: border-color 0.25s, transform 0.25s var(--ease);
     }
     .release-pill:hover {
@@ -414,10 +460,10 @@
 
     .hero h1 {
       margin: 0 auto 18px;
-      max-width: 880px;
-      font-size: clamp(2.15rem, 4.9vw, 4.05rem);
-      font-weight: 800;
-      line-height: 1.1;
+      max-width: 900px;
+      font-size: clamp(2.1rem, 4.7vw, 3.85rem);
+      font-weight: 820;
+      line-height: 1.12;
       letter-spacing: -0.035em;
     }
     .hero h1 .accent-word {
@@ -425,15 +471,14 @@
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
-      transition: filter 0.35s;
     }
 
     .hero-sub {
-      max-width: 690px;
+      max-width: 720px;
       margin: 0 auto 28px;
-      font-size: clamp(0.98rem, 1.45vw, 1.12rem);
+      font-size: clamp(0.98rem, 1.4vw, 1.1rem);
       color: var(--ink-2);
-      line-height: 1.68;
+      line-height: 1.72;
     }
 
     .hero-ctas {
@@ -484,7 +529,7 @@
       gap: 8px 18px;
       font-size: 12.5px;
       color: var(--ink-3);
-      margin-bottom: 36px;
+      margin-bottom: 34px;
     }
     .hero-badges span {
       display: inline-flex;
@@ -525,10 +570,7 @@
       border: 1px solid var(--border);
       transition: all 0.25s var(--ease);
     }
-    .stage-tab:hover {
-      color: var(--ink);
-      border-color: var(--border-strong);
-    }
+    .stage-tab:hover { color: var(--ink); border-color: var(--border-strong); }
     .stage-tab.active {
       background: var(--ink);
       color: var(--bg);
@@ -542,10 +584,7 @@
       background: currentColor;
       opacity: 0.45;
     }
-    .stage-tab.active .tab-dot {
-      background: var(--accent);
-      opacity: 1;
-    }
+    .stage-tab.active .tab-dot { background: var(--accent); opacity: 1; }
 
     .stage-viewport {
       position: relative;
@@ -559,7 +598,6 @@
       -webkit-user-select: none;
       touch-action: pan-y;
     }
-
     .stage-panel {
       position: absolute;
       inset: 0;
@@ -567,10 +605,7 @@
       pointer-events: none;
       transition: opacity 0.38s var(--ease);
     }
-    .stage-panel.active {
-      opacity: 1;
-      pointer-events: auto;
-    }
+    .stage-panel.active { opacity: 1; pointer-events: auto; }
     .stage-panel > img,
     .split-base img,
     .split-overlay img {
@@ -589,10 +624,7 @@
       cursor: ew-resize;
     }
     .split-base,
-    .split-overlay {
-      position: absolute;
-      inset: 0;
-    }
+    .split-overlay { position: absolute; inset: 0; }
     .split-overlay {
       clip-path: inset(0 calc(100% - var(--split, 50%)) 0 0);
       will-change: clip-path;
@@ -627,9 +659,7 @@
       pointer-events: none;
       transition: transform 0.2s var(--ease);
     }
-    .split-wrap.dragging .split-handle {
-      transform: translate(-50%, -50%) scale(1.1);
-    }
+    .split-wrap.dragging .split-handle { transform: translate(-50%, -50%) scale(1.1); }
     .split-tag {
       position: absolute;
       bottom: 16px;
@@ -640,7 +670,7 @@
       border-radius: 999px;
       font-size: 12px;
       font-weight: 650;
-      background: rgba(10, 12, 18, 0.72);
+      background: rgba(10, 12, 18, 0.74);
       color: #ffffff;
       border: 1px solid rgba(255, 255, 255, 0.18);
       backdrop-filter: blur(12px);
@@ -658,8 +688,8 @@
       border-radius: 999px;
       font-size: 11.5px;
       font-weight: 600;
-      background: rgba(10, 12, 18, 0.7);
-      color: rgba(255, 255, 255, 0.9);
+      background: rgba(10, 12, 18, 0.72);
+      color: rgba(255, 255, 255, 0.92);
       border: 1px solid rgba(255, 255, 255, 0.16);
       backdrop-filter: blur(10px);
       pointer-events: none;
@@ -667,7 +697,7 @@
     }
     .split-wrap.interacted .split-hint { opacity: 0; }
 
-    /* Interactive Danmaku Overlay on Player Tab */
+    /* Interactive Danmaku Overlay */
     .danmaku-layer {
       position: absolute;
       inset: 15% 4% 52% 9.5%;
@@ -685,7 +715,7 @@
       font-weight: 650;
       color: rgba(255, 255, 255, 0.94);
       text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
-      animation: dm-fly var(--dur, 9s) linear infinite;
+      animation: dm-fly var(--dur, 9.5s) linear infinite;
       animation-delay: var(--delay, 0s);
     }
     @keyframes dm-fly {
@@ -693,7 +723,6 @@
       to { transform: translateX(-140vw); }
     }
 
-    /* Telemetry HUD Chips inside Stage */
     .stage-hud {
       position: absolute;
       left: 16px;
@@ -706,13 +735,9 @@
       gap: 8px;
       pointer-events: none;
     }
-    .hud-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
+    .hud-chips { display: flex; flex-wrap: wrap; gap: 8px; }
     .hud-chip {
-      padding: 6px 11px;
+      padding: 6px 12px;
       border-radius: 999px;
       font-size: 12px;
       font-weight: 600;
@@ -748,12 +773,7 @@
       border: 1px solid var(--border);
       box-shadow: var(--shadow-sm);
     }
-    .kbd-dock-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--ink-3);
-      margin-right: 4px;
-    }
+    .kbd-dock-label { font-size: 12px; font-weight: 600; color: var(--ink-3); margin-right: 4px; }
     .key-item {
       display: inline-flex;
       align-items: center;
@@ -766,10 +786,7 @@
       border: 1px solid var(--border);
       transition: transform 0.12s ease, border-color 0.2s, background 0.2s, color 0.2s;
     }
-    .key-item:hover {
-      color: var(--ink);
-      border-color: var(--border-strong);
-    }
+    .key-item:hover { color: var(--ink); border-color: var(--border-strong); }
     .key-item.pressed {
       transform: translateY(2px) scale(0.97);
       background: var(--accent-soft);
@@ -788,49 +805,85 @@
       box-shadow: 0 2px 0 var(--border-strong);
     }
 
-    /* Section Headings */
-    section.block {
-      padding: 68px 0;
-    }
+    /* Sections */
+    section.block { padding: 66px 0; scroll-margin-top: 72px; }
     .section-head {
-      max-width: 720px;
-      margin: 0 auto 38px;
+      max-width: 780px;
+      margin: 0 auto 36px;
       text-align: center;
     }
     .eyebrow {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
       font-family: var(--font-mono);
       font-size: 11.5px;
       font-weight: 700;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
       color: var(--accent);
       margin-bottom: 10px;
     }
+    .eyebrow img { width: 18px; height: 18px; border-radius: 5px; }
     .section-head h2 {
       margin: 0 0 12px;
-      font-size: clamp(1.65rem, 3.1vw, 2.5rem);
-      font-weight: 780;
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      font-weight: 800;
       letter-spacing: -0.03em;
-      line-height: 1.18;
+      line-height: 1.2;
     }
     .section-head p {
       margin: 0;
       color: var(--ink-2);
       font-size: 15.5px;
+      line-height: 1.72;
     }
 
-    /* Bento Grid: Measured Benchmarks */
-    .bento {
+    /* Entity Definition Spec Card */
+    .entity-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 30px;
+      box-shadow: var(--shadow-sm);
+    }
+    .spec-grid {
       display: grid;
-      grid-template-columns: repeat(12, 1fr);
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 20px;
+    }
+    .spec-item {
+      padding: 15px 16px;
+      border-radius: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+    .spec-item dt {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--ink-3);
+      margin: 0 0 5px;
+    }
+    .spec-item dd {
+      margin: 0;
+      font-size: 13.8px;
+      font-weight: 600;
+      color: var(--ink);
+      line-height: 1.55;
+    }
+
+    /* Feature Pillar Grid (6-Card Semantic Grid) */
+    .pillar-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
       gap: 16px;
     }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
-      padding: 26px;
+      padding: 24px;
       box-shadow: var(--shadow-sm);
       transition: transform 0.28s var(--ease), border-color 0.25s, box-shadow 0.28s;
     }
@@ -839,178 +892,69 @@
       border-color: var(--border-strong);
       box-shadow: var(--shadow-md);
     }
-    .span-7 { grid-column: span 7; }
-    .span-5 { grid-column: span 5; }
-    .span-4 { grid-column: span 4; }
-    .span-8 { grid-column: span 8; }
-    .span-6 { grid-column: span 6; }
-
-    .metric-tag {
+    .card-num {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
       font-family: var(--font-mono);
-      font-size: 11.5px;
-      font-weight: 600;
-      color: var(--ink-3);
-      margin-bottom: 12px;
+      font-size: 12px;
+      font-weight: 800;
+      background: var(--accent-soft);
+      color: var(--accent);
+      margin-bottom: 14px;
     }
-    .metric-value {
-      font-size: clamp(2rem, 3.6vw, 2.95rem);
-      font-weight: 820;
-      letter-spacing: -0.04em;
-      line-height: 1.05;
-      font-variant-numeric: tabular-nums;
-      margin-bottom: 10px;
-    }
-    .metric-value .unit {
-      font-size: 0.46em;
-      font-weight: 700;
-      color: var(--ink-2);
-      margin-left: 4px;
+    .card.alt-accent .card-num {
+      background: var(--accent-2-soft);
+      color: var(--accent-2);
     }
     .card h3 {
       margin: 0 0 8px;
-      font-size: 17px;
-      font-weight: 720;
+      font-size: 16.5px;
+      font-weight: 740;
       letter-spacing: -0.015em;
+      line-height: 1.35;
     }
     .card p {
       margin: 0;
       font-size: 14px;
       color: var(--ink-2);
-      line-height: 1.65;
+      line-height: 1.68;
     }
 
-    /* Bar Chart Comparison inside Card */
-    .bar-list {
+    /* Showcase Strip inside Pillars */
+    .pillar-shot {
+      margin-top: 20px;
       display: grid;
-      gap: 11px;
-      margin-top: 18px;
-    }
-    .bar-row {
-      display: grid;
-      grid-template-columns: 140px 1fr 98px;
-      align-items: center;
-      gap: 10px;
-      font-size: 12.5px;
-    }
-    .bar-label { color: var(--ink-2); font-weight: 600; }
-    .bar-track {
-      height: 10px;
-      border-radius: 999px;
-      background: var(--surface-2);
-      overflow: hidden;
-    }
-    .bar-fill {
-      height: 100%;
-      border-radius: 999px;
-      background: var(--ink-3);
-      opacity: 0.35;
-    }
-    .bar-fill.best {
-      background: linear-gradient(90deg, var(--accent), var(--accent-2));
-      opacity: 1;
-    }
-    .bar-num {
-      text-align: right;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--ink);
-      white-space: nowrap;
-    }
-
-    /* Dual-OS Architecture Schematic */
-    .arch-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: 1fr 1fr;
       gap: 16px;
     }
-    .arch-card {
-      position: relative;
-      overflow: hidden;
-    }
-    .arch-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-    .arch-badge {
-      font-family: var(--font-mono);
-      font-size: 11.5px;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      color: var(--ink);
-    }
-    .pipe-steps {
-      display: grid;
-      gap: 10px;
-    }
-    .pipe-node {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 12px 14px;
-      border-radius: 13px;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-    }
-    .pipe-icon {
-      width: 28px;
-      height: 28px;
-      flex: 0 0 28px;
-      border-radius: 8px;
-      display: grid;
-      place-items: center;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 800;
-      background: var(--surface);
-      color: var(--accent);
-      border: 1px solid var(--border);
-    }
-    .pipe-node strong {
-      display: block;
-      font-size: 13.5px;
-      margin-bottom: 2px;
-    }
-    .pipe-node span {
-      display: block;
-      font-size: 12.5px;
-      color: var(--ink-2);
-    }
-    .shared-core {
-      margin-top: 16px;
-      padding: 22px 26px;
+    .shot-frame {
       border-radius: var(--radius-md);
-      background: linear-gradient(125deg, var(--accent-soft), var(--accent-2-soft));
-      border: 1px solid var(--border-strong);
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-    }
-    .shared-core h3 { margin: 0 0 4px; font-size: 16px; }
-    .shared-core p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
-    .core-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .core-pill {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 650;
-      padding: 6px 11px;
-      border-radius: 999px;
+      overflow: hidden;
       background: var(--surface);
       border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+    .shot-img-wrap {
+      overflow: hidden;
+      aspect-ratio: 1480 / 977;
+      background: #090b12;
+    }
+    .shot-img-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scale(1.055);
+    }
+    .shot-cap {
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-2);
+      border-top: 1px solid var(--border);
     }
 
     /* Comparison Table */
@@ -1047,11 +991,7 @@
       color: var(--ink);
       font-weight: 600;
     }
-    table.cmp td:first-child {
-      font-weight: 700;
-      white-space: nowrap;
-      width: 145px;
-    }
+    table.cmp td:first-child { font-weight: 700; white-space: nowrap; width: 155px; }
 
     /* Install Section */
     .install-box {
@@ -1085,14 +1025,11 @@
     .os-pane { display: none; }
     .os-pane.active {
       display: grid;
-      grid-template-columns: 1.15fr 1fr;
+      grid-template-columns: 1.12fr 1fr;
       gap: 24px;
       align-items: start;
     }
-    .dl-list {
-      display: grid;
-      gap: 10px;
-    }
+    .dl-list { display: grid; gap: 10px; }
     .dl-card {
       display: flex;
       align-items: center;
@@ -1104,10 +1041,7 @@
       border: 1px solid var(--border);
       transition: border-color 0.2s, transform 0.2s var(--ease);
     }
-    .dl-card:hover {
-      border-color: var(--accent);
-      transform: translateY(-1px);
-    }
+    .dl-card:hover { border-color: var(--accent); transform: translateY(-1px); }
     .dl-card strong { display: block; font-size: 14px; }
     .dl-card span { display: block; font-size: 12px; color: var(--ink-3); font-family: var(--font-mono); }
     .dl-arrow {
@@ -1146,11 +1080,7 @@
       color: var(--ink);
       transition: background 0.2s, color 0.2s;
     }
-    .copy-btn.copied {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #fff;
-    }
+    .copy-btn.copied { background: var(--accent); border-color: var(--accent); color: #fff; }
     pre.code {
       margin: 0;
       padding: 10px 12px;
@@ -1162,18 +1092,19 @@
       overflow-x: auto;
       color: var(--ink);
     }
-    .install-note {
-      margin-top: 12px;
-      font-size: 12.5px;
+    .install-steps {
+      margin: 14px 0 0;
+      padding-left: 18px;
+      font-size: 13px;
       color: var(--ink-2);
-      line-height: 1.6;
+      line-height: 1.72;
     }
 
-    /* FAQ Accordion */
+    /* FAQ */
     .faq-grid {
       display: grid;
       gap: 10px;
-      max-width: 860px;
+      max-width: 880px;
       margin: 0 auto;
     }
     details.faq-item {
@@ -1202,22 +1133,12 @@
       color: var(--ink-3);
       transition: transform 0.25s var(--ease);
     }
-    details.faq-item[open] summary::after {
-      transform: rotate(45deg);
-      color: var(--accent);
-    }
+    details.faq-item[open] summary::after { transform: rotate(45deg); color: var(--accent); }
     details.faq-item p {
       margin: 12px 0 0;
       font-size: 14px;
       color: var(--ink-2);
-      line-height: 1.72;
-    }
-    details.faq-item code {
-      font-family: var(--font-mono);
-      font-size: 12.5px;
-      padding: 1px 6px;
-      border-radius: 6px;
-      background: var(--surface-2);
+      line-height: 1.75;
     }
 
     /* Footer */
@@ -1243,41 +1164,28 @@
       font-weight: 700;
     }
     .footer-brand img { width: 22px; height: 22px; border-radius: 6px; }
-    .footer-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 16px; }
     .footer-links a:hover { color: var(--ink); }
-    .disclaimer {
-      margin-top: 16px;
-      font-size: 12px;
-      color: var(--ink-3);
-      line-height: 1.6;
-    }
+    .disclaimer { margin-top: 16px; font-size: 12px; color: var(--ink-3); line-height: 1.65; }
 
-    /* Scroll reveal */
     .reveal {
       opacity: 0;
       transform: translateY(18px);
-      transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+      transition: opacity 0.55s var(--ease), transform 0.55s var(--ease);
     }
-    .reveal.in {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    .reveal.in { opacity: 1; transform: translateY(0); }
 
     @media (max-width: 960px) {
       .nav-links { display: none; }
-      .span-7, .span-5, .span-4, .span-8, .span-6 { grid-column: span 12; }
-      .arch-grid { grid-template-columns: 1fr; }
+      .spec-grid, .pillar-grid { grid-template-columns: repeat(2, 1fr); }
+      .pillar-shot { grid-template-columns: 1fr; }
       .os-pane.active { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
       .topbar { padding: 6px 8px; }
       .brand-btn { padding: 5px 9px; font-size: 12px; }
       .brand-btn .kbd-mini { display: none; }
-      .bar-row { grid-template-columns: 112px 1fr 64px; font-size: 12px; }
+      .spec-grid, .pillar-grid { grid-template-columns: 1fr; }
       .hero { padding-top: 20px; }
       .split-tag { font-size: 11px; padding: 4px 9px; bottom: 10px; }
       .stage-hud { display: none; }
@@ -1296,23 +1204,23 @@
       <div class="brand-switcher" role="tablist" aria-label="切换模式">
         <span class="brand-pill-bg" aria-hidden="true"></span>
         <button class="brand-btn" data-switch="douyin" role="tab" aria-selected="true">
-          <img src="douyin-icon.png" width="20" height="20" alt="MyDouyin">
+          <img src="douyin-icon.png" width="20" height="20" alt="MyDouyin 抖音桌面客户端图标">
           <span>MyDouyin</span>
           <span class="kbd-mini">⌘1</span>
         </button>
         <button class="brand-btn" data-switch="hongguo" role="tab" aria-selected="false">
-          <img src="hongguo-icon.png" width="20" height="20" alt="MyHongguo">
+          <img src="hongguo-icon.png" width="20" height="20" alt="MyHongguo 红果短剧电脑版图标">
           <span>MyHongguo</span>
           <span class="kbd-mini">⌘2</span>
         </button>
       </div>
 
       <nav class="nav-links" aria-label="主导航">
-        <a href="#stage" data-i18n="navStage">引力场演示</a>
-        <a href="#benchmarks" data-i18n="navBench">实测性能</a>
-        <a href="#architecture" data-i18n="navArch">双原生架构</a>
-        <a href="#compare" data-i18n="navCompare">方案对比</a>
-        <a href="#install" data-i18n="navInstall">下载安装</a>
+        <a href="#what-is" data-i18n="navWhat">产品简介</a>
+        <a href="#hongguo" data-i18n="navHg">红果短剧电脑版</a>
+        <a href="#douyin" data-i18n="navDy">抖音桌面端</a>
+        <a href="#compare" data-i18n="navCompare">对比方案</a>
+        <a href="#install" data-i18n="navInstall">免费下载</a>
         <a href="#faq">FAQ</a>
       </nav>
 
@@ -1330,55 +1238,55 @@
   </div>
 
   <main>
-    <!-- Hero + Interactive Dual-Orbit Stage -->
+    <!-- Hero + Interactive Dual-Star Stage -->
     <section class="hero">
       <div class="hero-diagonal" aria-hidden="true"></div>
       <div class="container">
         <a class="release-pill" id="releasePill" href="https://github.com/margbug01/MyDouyin/releases/latest" target="_blank" rel="noopener">
           <span class="pulse-dot"></span>
           <span class="release-tag" id="releaseTag">v0.2.26</span>
-          <span data-i18n="releaseDesc">双星引力场 · Windows 纯 Go HEIC 解码 · 原生硬解不写盘</span>
+          <span data-i18n="releaseDesc">开源免费 · 支持 macOS（Apple Silicon）与 Windows 10/11</span>
           <span aria-hidden="true">↗</span>
         </a>
 
         <h1 id="heroTitle" data-i18n-html="heroTitle">
-          一个原生窗口，同时装下<br><span class="accent-word">抖音</span>与<span class="accent-word">红果短剧</span>。
+          <span class="accent-word">抖音电脑版</span> &amp; <span class="accent-word">红果短剧电脑版</span><br>一个原生桌面软件搞定。
         </h1>
 
         <p class="hero-sub" data-i18n="heroSub">
-          基于 Go 与 MyGo 构建的开源桌面客户端，原生支持 macOS（Apple Silicon）与 Windows 10/11（x64）。无 Electron、无安卓模拟器、无 FFmpeg 或 HEVC 商店扩展，打开即可免登录浏览抖音与红果免费短剧、漫剧。
+          MyDouyin · MyHongguo 是一款同时集成抖音与红果短剧的开源原生桌面客户端，支持 macOS（Apple Silicon）与 Windows 10/11。无需安卓模拟器、无需浏览器多开，打开就能在电脑上刷抖音视频、看抖音直播，以及免登录免费追红果短剧与漫剧。
         </p>
 
         <div class="hero-ctas">
           <a class="btn btn-primary" id="primaryDl" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg">
-            <span id="primaryDlText" data-i18n="dlMac">下载 macOS（Apple Silicon）</span>
+            <span id="primaryDlText" data-i18n="dlMac">免费下载 macOS 版（Apple Silicon）</span>
           </a>
           <a class="btn btn-secondary" id="secondaryDl" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe">
-            <span id="secondaryDlText" data-i18n="dlWin">下载 Windows 10/11（x64）</span>
+            <span id="secondaryDlText" data-i18n="dlWin">免费下载 Windows 版（x64）</span>
           </a>
-          <a class="btn btn-ghost" href="#install" data-i18n="allInstall">安装指南 &amp; 校验 ↓</a>
+          <a class="btn btn-ghost" href="#install" data-i18n="allInstall">安装步骤 ↓</a>
         </div>
 
         <div class="hero-badges">
-          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge1">macOS 约 65 MB 原生硬解 · 零写盘</em></span>
-          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge2">Windows 原生 Media Foundation + 纯 Go HEIC</em></span>
-          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge3">红果免登录 · 512 KiB 单次 CENC 解密</em></span>
+          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge1">不用安卓模拟器，直接看红果短剧与漫剧</em></span>
+          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge2">红果免登录看全集 · 自动记住追剧进度</em></span>
+          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge3">⌘1 / ⌘2 一键在抖音与红果之间切换</em></span>
         </div>
 
         <!-- Interactive Stage -->
         <div class="stage-shell" id="stage">
-          <div class="stage-tabs" role="tablist" aria-label="实拍界面切换">
+          <div class="stage-tabs" role="tablist" aria-label="界面实拍预览">
             <button class="stage-tab active" data-stage="split" role="tab" aria-selected="true">
-              <span class="tab-dot"></span><span data-i18n="tabSplit">双星切幕对比</span>
+              <span class="tab-dot"></span><span data-i18n="tabSplit">抖音 / 红果切幕对比</span>
             </button>
             <button class="stage-tab" data-stage="player" role="tab" aria-selected="false">
-              <span class="tab-dot"></span><span data-i18n="tabPlayer">抖音原生播放</span>
+              <span class="tab-dot"></span><span data-i18n="tabPlayer">抖音电脑端播放与弹幕</span>
             </button>
             <button class="stage-tab" data-stage="hg-detail" role="tab" aria-selected="false">
-              <span class="tab-dot"></span><span data-i18n="tabHgDetail">红果选集详情</span>
+              <span class="tab-dot"></span><span data-i18n="tabHgDetail">红果短剧选集与剧评</span>
             </button>
             <button class="stage-tab" data-stage="hg-player" role="tab" aria-selected="false">
-              <span class="tab-dot"></span><span data-i18n="tabHgPlayer">红果流式解密播放</span>
+              <span class="tab-dot"></span><span data-i18n="tabHgPlayer">红果短剧连播与弹幕</span>
             </button>
           </div>
 
@@ -1387,240 +1295,231 @@
             <div class="stage-panel active" data-panel="split">
               <div class="split-wrap" id="splitWrap" style="--split: 50%;">
                 <div class="split-base">
-                  <img src="screenshots/hongguo-orbit.webp" alt="MyHongguo 红果短剧双星引力场首页实拍">
+                  <img src="screenshots/hongguo-orbit.webp" alt="MyHongguo 红果短剧电脑版双星引力场首页，左侧真人短剧、右侧漫剧与居中搜索栏">
                 </div>
                 <div class="split-overlay">
-                  <img src="screenshots/hero.webp" alt="MyDouyin 抖音引力场首页双主题实拍">
+                  <img src="screenshots/hero.webp" alt="MyDouyin 抖音电脑版引力场首页，浅色与深色双主题及左侧悬浮导航栏">
                 </div>
                 <div class="split-divider" aria-hidden="true"></div>
                 <div class="split-handle" aria-hidden="true">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/></svg>
                 </div>
-                <div class="split-hint" data-i18n="splitHint">↔ 左右拖动切幕，对比抖音与红果双模式</div>
+                <div class="split-hint" data-i18n="splitHint">↔ 左右拖动切幕，体验一个窗口里的抖音与红果短剧</div>
                 <div class="split-tag left">
-                  <img src="douyin-icon.png" alt=""><span>MyDouyin · <em style="font-style:normal" data-i18n="orbitLabel">引力场</em></span>
+                  <img src="douyin-icon.png" alt=""><span>MyDouyin · <em style="font-style:normal" data-i18n="orbitLabel">抖音引力场</em></span>
                 </div>
                 <div class="split-tag right">
-                  <img src="hongguo-icon.png" alt=""><span>MyHongguo · <em style="font-style:normal" data-i18n="dualOrbitLabel">双星引力场</em></span>
+                  <img src="hongguo-icon.png" alt=""><span>MyHongguo · <em style="font-style:normal" data-i18n="dualOrbitLabel">红果双星引力场</em></span>
                 </div>
               </div>
             </div>
 
-            <!-- Panel 2: Douyin Native Player + Interactive Danmaku -->
+            <!-- Panel 2: Douyin Player + Interactive Danmaku -->
             <div class="stage-panel" data-panel="player">
-              <img src="screenshots/player.webp" alt="MyDouyin 抖音原生 1080p 播放与弹幕互动界面">
+              <img src="screenshots/player.webp" alt="MyDouyin 抖音电脑版视频播放界面，支持高清画质、实时弹幕、点赞评论与收藏">
               <div class="danmaku-layer on" id="danmakuLayer" aria-hidden="true">
-                <span class="dm-item" data-i18n="dm1" style="top: 6%; --dur: 9.5s; --delay: -1s;">AVPlayerLayer 1080p 原生硬解，内存只有 65 MB！</span>
-                <span class="dm-item" data-i18n="dm2" style="top: 34%; --dur: 11.2s; --delay: -4.5s;">macOS 刷一整晚也不写盘，硬盘终于安静了</span>
-                <span class="dm-item" data-i18n="dm3" style="top: 62%; --dur: 8.8s; --delay: -2.2s;">⌘2 一秒切红果短剧，不用开安卓模拟器太爽了</span>
-                <span class="dm-item" data-i18n="dm4" style="top: 86%; --dur: 10.6s; --delay: -6.8s;">Windows 也无需 FFmpeg，直接 Media Foundation 硬解</span>
+                <span class="dm-item" data-i18n="dm1" style="top: 6%; --dur: 9.5s; --delay: -1s;">Mac 上终于有好用的原生抖音桌面客户端了！</span>
+                <span class="dm-item" data-i18n="dm2" style="top: 34%; --dur: 11.2s; --delay: -4.5s;">不用装安卓模拟器，直接按 ⌘2 就能追红果短剧全集</span>
+                <span class="dm-item" data-i18n="dm3" style="top: 62%; --dur: 8.8s; --delay: -2.2s;">带图评论、看直播、小窗摸鱼和清屏模式全都有</span>
+                <span class="dm-item" data-i18n="dm4" style="top: 86%; --dur: 10.6s; --delay: -6.8s;">Windows 开箱即用，封面和剧集都能正常秒播</span>
               </div>
               <div class="stage-hud">
                 <div class="hud-chips">
-                  <span class="hud-chip">AVPlayerLayer ~65 MB</span>
-                  <span class="hud-chip" data-i18n="hudZeroDisk">0 MB 持久写盘</span>
-                  <span class="hud-chip" data-i18n="hudPrewarm">下一条静默预热</span>
+                  <span class="hud-chip" data-i18n="hudDy1">高清画质与倍速连播</span>
+                  <span class="hud-chip" data-i18n="hudDy2">实时弹幕 &amp; 带图评论</span>
+                  <span class="hud-chip" data-i18n="hudDy3">画中画小窗 / 清屏 / 听抖音</span>
                 </div>
-                <button class="hud-btn" id="toggleDanmaku" data-i18n="hudToggleDm">隐藏预览弹幕</button>
+                <button class="hud-btn" id="toggleDanmaku" data-i18n="hudToggleDmOn">隐藏预览弹幕</button>
               </div>
             </div>
 
             <!-- Panel 3: Hongguo Detail -->
             <div class="stage-panel" data-panel="hg-detail">
-              <img src="screenshots/hongguo-detail.webp" alt="MyHongguo 红果短剧详情页、分组选集与剧评">
+              <img src="screenshots/hongguo-detail.webp" alt="MyHongguo 红果短剧电脑版详情页，展示全集分组选集、热度评分、主演与剧评">
               <div class="stage-hud">
                 <div class="hud-chips">
-                  <span class="hud-chip" data-i18n="hudDetailCache">近期 16 部剧 5 分钟缓存</span>
-                  <span class="hud-chip" data-i18n="hudTargetPrewarm">进详情即预热目标集</span>
-                  <span class="hud-chip">Pure-Go HEIC 封面</span>
+                  <span class="hud-chip" data-i18n="hudHgD1">全集分组选集 &amp; 多季切换</span>
+                  <span class="hud-chip" data-i18n="hudHgD2">主演主页直达</span>
+                  <span class="hud-chip" data-i18n="hudHgD3">完整剧评与楼中楼回复</span>
                 </div>
               </div>
             </div>
 
-            <!-- Panel 4: Hongguo Encrypted Player -->
+            <!-- Panel 4: Hongguo Player -->
             <div class="stage-panel" data-panel="hg-player">
-              <img src="screenshots/hongguo-player.webp" alt="MyHongguo 红果短剧流式 CENC 解密原生播放页">
+              <img src="screenshots/hongguo-player.webp" alt="MyHongguo 红果短剧电脑版播放页，支持实时弹幕、选集评论抽屉与自动连播">
               <div class="stage-hud">
                 <div class="hud-chips">
-                  <span class="hud-chip">ISO-BMFF CENC AES-128-CTR</span>
-                  <span class="hud-chip">512 KiB 1-RTT 探测</span>
-                  <span class="hud-chip" data-i18n="hudNextEp">75% 进度预热下集 · 2s 断点续播</span>
+                  <span class="hud-chip" data-i18n="hudHgP1">全程免登录免费看全集</span>
+                  <span class="hud-chip" data-i18n="hudHgP2">点击弹幕直达剧情时间点</span>
+                  <span class="hud-chip" data-i18n="hudHgP3">播完自动连播 · 本地断点续播</span>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Tactile Interactive Keyboard Dock -->
+          <!-- Tactile Keyboard Playground -->
           <div class="kbd-dock" aria-label="交互快捷键体验区">
-            <span class="kbd-dock-label" data-i18n="kbdLabel">试试直接敲键盘或点击按键：</span>
+            <span class="kbd-dock-label" data-i18n="kbdLabel">试试敲键盘或点击体验切换：</span>
             <button class="key-item" data-key="1">
-              <span class="keycap">1</span><span data-i18n="kbd1">切到抖音模式</span>
+              <span class="keycap">1</span><span data-i18n="kbd1">抖音模式</span>
             </button>
             <button class="key-item" data-key="2">
-              <span class="keycap">2</span><span data-i18n="kbd2">切到红果模式</span>
+              <span class="keycap">2</span><span data-i18n="kbd2">红果短剧模式</span>
             </button>
             <button class="key-item" data-key="ArrowLeft">
-              <span class="keycap">←</span><span data-i18n="kbdPrev">上一场景</span>
+              <span class="keycap">←</span><span data-i18n="kbdPrev">上一界面</span>
             </button>
             <button class="key-item" data-key="ArrowRight">
-              <span class="keycap">→</span><span data-i18n="kbdNext">下一场景</span>
+              <span class="keycap">→</span><span data-i18n="kbdNext">下一界面</span>
             </button>
             <button class="key-item" data-key="t">
-              <span class="keycap">T</span><span data-i18n="kbdTheme">瓷白 / 黑洞主题</span>
+              <span class="keycap">T</span><span data-i18n="kbdTheme">浅色 / 深色主题</span>
             </button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Measured Performance Bento Grid -->
-    <section class="block" id="benchmarks">
+    <!-- Entity Definition & Spec Table -->
+    <section class="block" id="what-is">
       <div class="container">
-        <div class="section-head reveal">
-          <span class="eyebrow">MEASURED TELEMETRY</span>
-          <h2 data-i18n="benchTitle">所有轻量承诺，都有实测数据背书</h2>
-          <p data-i18n="benchSub">拒绝「感觉很快」的空话。以下指标均来自本仓库实测记录与性能分析报告，对比传统网页端、Electron 套壳与安卓模拟器。</p>
-        </div>
+        <div class="entity-card reveal">
+          <div class="section-head" style="margin-bottom: 18px; text-align: left; max-width: none;">
+            <span class="eyebrow">ENTITY OVERVIEW</span>
+            <h2 data-i18n="whatTitle">MyDouyin · MyHongguo 是什么？</h2>
+            <p data-i18n="whatDesc">MyDouyin · MyHongguo 是一款面向 macOS（Apple Silicon）和 Windows 10/11 用户的开源原生桌面软件，在一个应用内同时提供「抖音桌面端（MyDouyin）」与「红果短剧电脑版（MyHongguo）」。它直接运行在电脑桌面，无需安卓模拟器或浏览器多标签，适合想在电脑大屏刷抖音、看直播以及免费追红果短剧和漫剧的用户。</p>
+          </div>
 
-        <div class="bento">
-          <article class="card span-7 reveal">
-            <div class="metric-tag">MACOS · AVPLAYERLAYER</div>
-            <div class="metric-value">~65<span class="unit">MB</span></div>
-            <h3 data-i18n="m1Title">1080p 原生硬件解码内存</h3>
-            <p data-i18n="m1Desc">改用系统原生 AVPlayerLayer 视频层，跳过逐帧像素拷贝，解码进程 VTDecoderXPCService 物理内存由 ~180 MB 降至 ~65 MB。</p>
-            <div class="bar-list">
-              <div class="bar-row">
-                <span class="bar-label">MyDouyin 原生硬解</span>
-                <div class="bar-track"><div class="bar-fill best" style="width: 11%;"></div></div>
-                <span class="bar-num">~65 MB</span>
-              </div>
-              <div class="bar-row">
-                <span class="bar-label" data-i18n="barOld">旧帧拷贝方案</span>
-                <div class="bar-track"><div class="bar-fill" style="width: 28%;"></div></div>
-                <span class="bar-num">~180 MB</span>
-              </div>
-              <div class="bar-row">
-                <span class="bar-label" data-i18n="barElec">Electron / 模拟器</span>
-                <div class="bar-track"><div class="bar-fill" style="width: 96%;"></div></div>
-                <span class="bar-num">500–2000 MB</span>
-              </div>
+          <dl class="spec-grid">
+            <div class="spec-item">
+              <dt data-i18n="s1k">核心用途</dt>
+              <dd data-i18n="s1v">电脑端刷抖音视频、看抖音直播 + 免登录免费追红果短剧与漫剧</dd>
             </div>
-          </article>
-
-          <article class="card span-5 reveal">
-            <div class="metric-tag">DISK I/O · ZERO CACHE</div>
-            <div class="metric-value">0<span class="unit">MB</span></div>
-            <h3 data-i18n="m2Title">macOS 刷视频零持久写盘</h3>
-            <p data-i18n="m2Desc">通过 AVURLAssetUsesNoPersistentCacheKey 禁用系统持久媒体磁盘缓存，彻底消除连看 8 条视频向 $TMPDIR/MediaCache 写入 ~300 MB 的损耗，保护 SSD 寿命。</p>
-          </article>
-
-          <article class="card span-4 reveal">
-            <div class="metric-tag">ON-DEMAND SIGNER</div>
-            <div class="metric-value">80<span class="unit">MB / 10s</span></div>
-            <h3 data-i18n="m3Title">按需签名，用完即焚</h3>
-            <p data-i18n="m3Desc">仅点赞、评论、关注、发弹幕等写操作时拉起轻量签名页（对比完整网页 340–520 MB），闲置 10 秒自动销毁。</p>
-          </article>
-
-          <article class="card span-4 reveal">
-            <div class="metric-tag">STREAMING CENC · 1-RTT</div>
-            <div class="metric-value">512<span class="unit">KiB</span></div>
-            <h3 data-i18n="m4Title">红果流式解密首包加速</h3>
-            <p data-i18n="m4Desc">首轮 512 KiB 单次探测一次覆盖实测 252 KiB 的 moov 盒并缓存前缀零等待吐出，配合 75% 进度预热下一集与 256 KiB Windows 点播头内存缓存。</p>
-          </article>
-
-          <article class="card span-4 reveal">
-            <div class="metric-tag">ZERO EXTRA RUNTIME</div>
-            <div class="metric-value">0<span class="unit" data-i18n="m5Unit">个外挂依赖</span></div>
-            <h3 data-i18n="m5Title">纯 Go HEIC · 无需 FFmpeg</h3>
-            <p data-i18n="m5Desc">Windows 播放直走系统 Media Foundation，红果签名 HEIC 封面内置纯 Go h265/heic 解码并转存 JPEG 缓存，告别微软商店付费 HEVC 扩展与模拟器。</p>
-          </article>
+            <div class="spec-item">
+              <dt data-i18n="s2k">支持平台</dt>
+              <dd data-i18n="s2v">macOS（Apple Silicon / M 系列）与 Windows 10 / 11（x64）</dd>
+            </div>
+            <div class="spec-item">
+              <dt data-i18n="s3k">登录要求</dt>
+              <dd data-i18n="s3v">红果短剧全程免登录；抖音免登录可看公开视频与直播，互动可扫码登录</dd>
+            </div>
+            <div class="spec-item">
+              <dt data-i18n="s4k">运行环境</dt>
+              <dd data-i18n="s4v">纯原生桌面应用，无需安卓模拟器、无需额外装 FFmpeg 或商店扩展</dd>
+            </div>
+            <div class="spec-item">
+              <dt data-i18n="s5k">费用与开源</dt>
+              <dd data-i18n="s5v">个人开源免费项目，无广告弹窗，支持应用内一键增量升级</dd>
+            </div>
+            <div class="spec-item">
+              <dt data-i18n="s6k">隐私与数据</dt>
+              <dd data-i18n="s6v">零遥测、不上传统计，登录态与红果追剧进度全部保存在本机</dd>
+            </div>
+          </dl>
         </div>
       </div>
     </section>
 
-    <!-- Dual-OS Native Architecture -->
-    <section class="block" id="architecture">
+    <!-- High-Intent Pillar 1: Hongguo Short Dramas on Desktop -->
+    <section class="block" id="hongguo">
       <div class="container">
         <div class="section-head reveal">
-          <span class="eyebrow">DUAL-OS NATIVE PIPELINE</span>
-          <h2 data-i18n="archTitle">一套 Go 代码，两边都吃满系统原生能力</h2>
-          <p data-i18n="archSub">不妥协于跨平台 WebView 最低公约数，在 macOS 与 Windows 上分别接入各自最轻量的硬件媒体管线。</p>
+          <span class="eyebrow"><img src="hongguo-icon.png" alt="">MYHONGGUO · 红果短剧电脑版</span>
+          <h2 data-i18n="hgTitle">红果短剧电脑版：Mac 和 Windows 不用安卓模拟器免费看短剧与漫剧</h2>
+          <p data-i18n="hgLead">想在电脑大屏看红果免费短剧却不想安装卡顿的安卓模拟器？在 MyDouyin 中点击左上角品牌胶囊或按 ⌘2 / Ctrl+2 进入 MyHongguo 模式，即可原生浏览真人剧、漫剧、AI剧和影视剧全集。</p>
         </div>
 
-        <div class="arch-grid">
-          <div class="card arch-card reveal">
-            <div class="arch-head">
-              <h3 style="margin:0">macOS（Apple Silicon）</h3>
-              <span class="arch-badge">darwin/arm64</span>
-            </div>
-            <div class="pipe-steps">
-              <div class="pipe-node">
-                <span class="pipe-icon">AV</span>
-                <div>
-                  <strong data-i18n="macP1T">AVFoundation + AVPlayerLayer 硬解</strong>
-                  <span data-i18n="macP1D">硬件直出合成图层，1080p 内存约 65 MB，支持原生画中画与无缝连播预热。</span>
-                </div>
-              </div>
-              <div class="pipe-node">
-                <span class="pipe-icon">0W</span>
-                <div>
-                  <strong data-i18n="macP2T">禁用持久媒体磁盘缓存</strong>
-                  <span data-i18n="macP2D">AVURLAssetUsesNoPersistentCacheKey 仅保留受控内存缓冲，不写盘。</span>
-                </div>
-              </div>
-              <div class="pipe-node">
-                <span class="pipe-icon">CG</span>
-                <div>
-                  <strong data-i18n="macP3T">系统 ImageIO 硬件 HEIC 解码</strong>
-                  <span data-i18n="macP3D">秒解红果签名 HEIC 海报并按显示尺寸缩放，上传 GPU 后即释放 CPU 内存。</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card arch-card reveal">
-            <div class="arch-head">
-              <h3 style="margin:0">Windows 10 / 11（x64）</h3>
-              <span class="arch-badge">windows/amd64</span>
-            </div>
-            <div class="pipe-steps">
-              <div class="pipe-node">
-                <span class="pipe-icon">MF</span>
-                <div>
-                  <strong data-i18n="winP1T">Media Foundation + D3D11 GPU 纹理</strong>
-                  <span data-i18n="winP1D">系统原生硬解，不再打包或依赖任何 FFmpeg 可执行文件与 DLL。</span>
-                </div>
-              </div>
-              <div class="pipe-node">
-                <span class="pipe-icon">256</span>
-                <div>
-                  <strong data-i18n="winP2T">内存回环代理 + 256 KiB 头缓存</strong>
-                  <span data-i18n="winP2D">预检 HEAD 与起播首段零等待返回，配合播放中预热下一条视频降低切集延迟。</span>
-                </div>
-              </div>
-              <div class="pipe-node">
-                <span class="pipe-icon">HE</span>
-                <div>
-                  <strong data-i18n="winP3T">内置纯 Go h265/heic 封面解码</strong>
-                  <span data-i18n="winP3D">不依赖微软商店 HEIF/HEVC 扩展，解码后自动落盘紧凑 JPEG 缓存实现秒开。</span>
-                </div>
-              </div>
-            </div>
-          </div>
+        <div class="pillar-grid">
+          <article class="card reveal">
+            <span class="card-num">01</span>
+            <h3 data-i18n="hg1t">双星引力场：真人剧与漫剧同屏发现</h3>
+            <p data-i18n="hg1d">首页以 3:4 竖版海报呈现左翼真人剧与右翼漫剧，支持「双星 / 真人剧 / 漫剧 / 追剧」四种视图、滚轮无限换批、搜索联想和短剧热搜榜。</p>
+          </article>
+          <article class="card reveal">
+            <span class="card-num">02</span>
+            <h3 data-i18n="hg2t">全频道找剧：发现、榜单、分类与上新</h3>
+            <p data-i18n="hg2d">完整覆盖剧集榜与演员榜、多条件分类筛选、按日期浏览每日上新，以及按真人剧、漫剧、AI剧、影视剧分类搜索，点演员即可直达全部作品主页。</p>
+          </article>
+          <article class="card reveal">
+            <span class="card-num">03</span>
+            <h3 data-i18n="hg3t">全集选集、多季切换与剧评互动</h3>
+            <p data-i18n="hg3d">剧集详情页展示评分、热度、状态标签、简介、多季切换、分组选集与相关推荐，完整支持查看剧评与楼中楼回复，点「开始播放」立刻起播。</p>
+          </article>
+          <article class="card reveal">
+            <span class="card-num">04</span>
+            <h3 data-i18n="hg4t">实时弹幕与点击时间点跳转</h3>
+            <p data-i18n="hg4d">播放页自带画面弹幕与右侧抽屉（集成选集、本集评论、剧评与弹幕列表），点击任意弹幕即可精准跳转对应剧情时间点，播完自动连播下一集。</p>
+          </article>
+          <article class="card reveal">
+            <span class="card-num">05</span>
+            <h3 data-i18n="hg5t">全程免登录，本地追剧与断点续播</h3>
+            <p data-i18n="hg5d">不需要注册或绑定手机号即可观看全集。软件会在本机自动保存「我的追剧」和「最近观看」，精确记住每集观看秒数，下次打开一键续播。</p>
+          </article>
+          <article class="card reveal">
+            <span class="card-num">06</span>
+            <h3 data-i18n="hg6t">Mac / Windows 开箱即看，封面与播放全正常</h3>
+            <p data-i18n="hg6d">Windows 上不用买微软商店 HEVC 扩展也能正常显示全部红果剧集封面；内置「绕过系统代理直连」（默认开启）与一键重置匿名设备，减少网络异常。</p>
+          </article>
         </div>
 
-        <div class="shared-core reveal">
-          <div>
-            <h3 data-i18n="coreTitle">Go + MyGo 共享核心引擎</h3>
-            <p data-i18n="coreDesc">统一承载抖音与红果双星引力场、流式加密解密、连接池复用与签名增量热更新。</p>
-          </div>
-          <div class="core-pills">
-            <span class="core-pill">ISO-BMFF CENC AES-128-CTR</span>
-            <span class="core-pill">MaxIdleConnsPerHost=16</span>
-            <span class="core-pill">16-Drama 5m Detail Cache</span>
-            <span class="core-pill">Signed Delta Update</span>
-            <span class="core-pill">Zero Telemetry</span>
-          </div>
+        <div class="pillar-shot reveal">
+          <figure class="shot-frame" style="margin:0">
+            <div class="shot-img-wrap">
+              <img src="screenshots/hongguo-detail.webp" loading="lazy" alt="红果短剧电脑版剧集详情、分组选集与剧评界面截图">
+            </div>
+            <figcaption class="shot-cap" data-i18n="hgCap1">红果短剧详情页 · 分组选集、主演跳转与完整剧评</figcaption>
+          </figure>
+          <figure class="shot-frame" style="margin:0">
+            <div class="shot-img-wrap">
+              <img src="screenshots/hongguo-player.webp" loading="lazy" alt="红果短剧电脑版视频播放、实时弹幕与右侧选集抽屉截图">
+            </div>
+            <figcaption class="shot-cap" data-i18n="hgCap2">红果短剧原生播放 · 自动连播、评论与弹幕时间点跳转</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- High-Intent Pillar 2: Douyin Desktop Client -->
+    <section class="block" id="douyin">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow"><img src="douyin-icon.png" alt="">MYDOUYIN · 抖音原生桌面客户端</span>
+          <h2 data-i18n="dyTitle">抖音桌面客户端：在 Mac 和 Windows 上更清爽地刷视频、看直播与发评论</h2>
+          <p data-i18n="dyLead">相比打开就吵闹连播的网页端，MyDouyin 为桌面用户设计了先搜索再观看的「引力场」首页，同时保留完整的抖音频道、直播间、实时弹幕与带图评论体验。</p>
+        </div>
+
+        <div class="pillar-grid">
+          <article class="card alt-accent reveal">
+            <span class="card-num">01</span>
+            <h3 data-i18n="dy1t">引力场首页：拒绝打开就强制连播</h3>
+            <p data-i18n="dy1d">启动后先呈现居中搜索框与 8 张错落视频卡片，支持「精选 / 关注 / 稍后 / 历史」切换、鼠标滚轮无重复换批、纯静搜索与实时抖音热搜。</p>
+          </article>
+          <article class="card alt-accent reveal">
+            <span class="card-num">02</span>
+            <h3 data-i18n="dy2t">桌面大屏播控：小窗、清屏、听抖音</h3>
+            <p data-i18n="dy2d">支持上下切视频、自动隐藏控制条与鼠标指针、清晰度与倍速切换、自动连播、清屏模式、听抖音音频模式、画中画小窗、网页全屏与系统全屏。</p>
+          </article>
+          <article class="card alt-accent reveal">
+            <span class="card-num">03</span>
+            <h3 data-i18n="dy3t">抖音直播间：多档清晰度与互动</h3>
+            <p data-i18n="dy3d">完整支持直播频道与直播间观看，提供原画、蓝光、超清、高清、标清与智能多档位清晰度切换、异常自动切备用线路，以及实时弹幕、评论与送礼。</p>
+          </article>
+          <article class="card alt-accent reveal">
+            <span class="card-num">04</span>
+            <h3 data-i18n="dy4t">完整评论区与高清带图评论</h3>
+            <p data-i18n="dy4d">支持楼中楼展开回复、官方表情面板，通过选图、粘贴截图或拖拽直接发带图评论；内置高清原图查看器（缩放、切换、复制与保存），点头像和 @ 直达作者主页。</p>
+          </article>
+          <article class="card alt-accent reveal">
+            <span class="card-num">05</span>
+            <h3 data-i18n="dy5t">全频道覆盖与观看历史同步</h3>
+            <p data-i18n="dy5d">涵盖精选、推荐、关注、朋友、直播、短剧、合集、创作者主页，以及我的作品、喜欢、收藏、稍后再看、观看历史、私信（只读）与通知，看过的视频自动同步减少重复推荐。</p>
+          </article>
+          <article class="card alt-accent reveal">
+            <span class="card-num">06</span>
+            <h3 data-i18n="dy6t">原生硬解不写盘，长时间刷也安静</h3>
+            <p data-i18n="dy6d">调用系统原生硬件解码，macOS 长时间刷视频不把缓存写满硬盘、不发烫，支持浅色「极净瓷白」与深色「纯黑黑洞」双主题自由切换。</p>
+          </article>
         </div>
       </div>
     </section>
@@ -1629,51 +1528,51 @@
     <section class="block" id="compare">
       <div class="container">
         <div class="section-head reveal">
-          <span class="eyebrow">WHY MYDOUYIN</span>
-          <h2 data-i18n="cmpTitle">为什么替代网页版、Electron 客户端或安卓模拟器</h2>
-          <p data-i18n="cmpSub">一表看清在电脑端同时刷抖音与追红果短剧的真实差异。</p>
+          <span class="eyebrow">COMPARISON</span>
+          <h2 data-i18n="cmpTitle">MyDouyin 对比抖音网页版、官方桌面端与安卓模拟器</h2>
+          <p data-i18n="cmpSub">如果你正在寻找好用的 Mac 抖音客户端或电脑看红果短剧的方法，下面是一目了然的差异对比。</p>
         </div>
 
         <div class="table-wrap reveal">
           <table class="cmp">
             <thead>
               <tr>
-                <th data-i18n="thDim">对比维度</th>
+                <th data-i18n="thDim">使用需求</th>
                 <th class="hl">MyDouyin · MyHongguo</th>
                 <th data-i18n="thWeb">浏览器网页版</th>
-                <th data-i18n="thElec">Electron 客户端 / 安卓模拟器</th>
+                <th data-i18n="thElec">套壳客户端 / 安卓模拟器</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td data-i18n="r1k">平台覆盖</td>
+                <td data-i18n="r1k">同时看抖音与红果</td>
                 <td class="hl" data-i18n="r1a">单窗口集成抖音 + 红果短剧，⌘1 / ⌘2 一键切换</td>
-                <td data-i18n="r1b">抖音靠标签页；红果无完整桌面网页版</td>
-                <td data-i18n="r1c">单一平台为主，看红果需跑整套安卓虚拟机</td>
+                <td data-i18n="r1b">仅能看抖音；红果短剧缺少完整电脑网页版</td>
+                <td data-i18n="r1c">看红果必须装安卓模拟器，和抖音分开运行</td>
               </tr>
               <tr>
-                <td data-i18n="r2k">启动首屏</td>
-                <td class="hl" data-i18n="r2a">引力场居中搜索 + 本地快照秒开，不强制自动连播</td>
-                <td data-i18n="r2b">打开即强制播放推荐流</td>
-                <td data-i18n="r2c">冷启动慢，后台常驻多个高内存进程</td>
+                <td data-i18n="r2k">打开体验</td>
+                <td class="hl" data-i18n="r2a">引力场首页安静选片或搜索，不强制一打开就自动发声</td>
+                <td data-i18n="r2b">一打开页面立刻自动播放推荐流</td>
+                <td data-i18n="r2c">模拟器冷启动慢，常伴随广告和后台弹窗</td>
               </tr>
               <tr>
-                <td data-i18n="r3k">内存与写盘</td>
-                <td class="hl" data-i18n="r3a">macOS 约 65 MB 零写盘；签名页 80 MB 闲置 10s 释放</td>
-                <td data-i18n="r3b">多标签与缓存随浏览持续暴涨</td>
-                <td data-i18n="r3c">常驻 500 MB–2 GB+，风扇与磁盘写入明显</td>
+                <td data-i18n="r3k">免登录使用</td>
+                <td class="hl" data-i18n="r3a">红果全程免登录；抖音免登录可看视频、搜索与直播间</td>
+                <td data-i18n="r3b">频繁弹出登录拦截</td>
+                <td data-i18n="r3c">通常需先登录手机端账号环境</td>
               </tr>
               <tr>
-                <td data-i18n="r4k">红果 HEIC 封面</td>
-                <td class="hl" data-i18n="r4a">macOS ImageIO / Windows 内置纯 Go 解码，开箱即显</td>
-                <td data-i18n="r4b">依赖浏览器 HEIC 兼容性</td>
-                <td data-i18n="r4c">需额外商店扩展或完整 Android 运行环境</td>
+                <td data-i18n="r4k">电脑流畅度</td>
+                <td class="hl" data-i18n="r4a">原生桌面端、硬件解码，Mac 不把缓存写满硬盘</td>
+                <td data-i18n="r4b">多开标签后浏览器内存持续上涨</td>
+                <td data-i18n="r4c">虚拟机/套壳常驻占用高，风扇噪音明显</td>
               </tr>
               <tr>
-                <td data-i18n="r5k">隐私与更新</td>
-                <td class="hl" data-i18n="r5a">零遥测、全数据本地存储、应用内签名增量热更新</td>
-                <td data-i18n="r5b">受限于浏览器环境</td>
-                <td data-i18n="r5c">频繁全量包更新，后台服务多</td>
+                <td data-i18n="r5k">安装与更新</td>
+                <td class="hl" data-i18n="r5a">开箱即用，无需装额外编解码插件，支持应用内一键升级</td>
+                <td data-i18n="r5b">依赖浏览器与插件兼容性</td>
+                <td data-i18n="r5c">体积庞大，每次升级需重新下载完整包</td>
               </tr>
             </tbody>
           </table>
@@ -1685,15 +1584,15 @@
     <section class="block" id="install">
       <div class="container">
         <div class="section-head reveal">
-          <span class="eyebrow">GET STARTED</span>
-          <h2 data-i18n="instTitle">下载与安装（自动同步最新版本）</h2>
-          <p data-i18n="instSub">安装包均由 GitHub Releases 分发并附带 SHA256SUMS 校验和，后续版本支持应用内签名增量热更新。</p>
+          <span class="eyebrow">DOWNLOAD &amp; INSTALL</span>
+          <h2 data-i18n="instTitle">如何在 macOS 和 Windows 上下载安装抖音与红果短剧电脑版</h2>
+          <p data-i18n="instSub">所有版本均免费发布在 GitHub Releases 并附带 SHA256SUMS 校验和，支持安装后在应用内一键升级。</p>
         </div>
 
         <div class="install-box reveal">
           <div class="os-tabs" role="tablist">
-            <button class="os-tab active" data-os="mac" role="tab" aria-selected="true">macOS (Apple Silicon)</button>
-            <button class="os-tab" data-os="win" role="tab" aria-selected="false">Windows 10 / 11 (x64)</button>
+            <button class="os-tab active" data-os="mac" role="tab" aria-selected="true">macOS（Apple Silicon）</button>
+            <button class="os-tab" data-os="win" role="tab" aria-selected="false">Windows 10 / 11（x64）</button>
           </div>
 
           <div class="os-pane active" data-os-pane="mac">
@@ -1714,7 +1613,7 @@
               </a>
               <a class="dl-card" id="dlSha1" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS">
                 <div>
-                  <strong data-i18n="shaName">校验文件 SHA256SUMS</strong>
+                  <strong data-i18n="shaName">文件完整性校验 SHA256SUMS</strong>
                   <span>SHA256SUMS</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↗</span>
@@ -1722,11 +1621,15 @@
             </div>
             <div class="cmd-box">
               <div class="cmd-head">
-                <span data-i18n="macGateLabel">首次打开若提示「无法验证开发者 / 已损坏」</span>
+                <span data-i18n="macGateLabel">macOS 首次打开提示「无法验证开发者 / 已损坏」解决命令</span>
                 <button class="copy-btn" data-copy="xattr -dr com.apple.quarantine /Applications/MyDouyin.app" data-i18n="copyBtn">复制命令</button>
               </div>
               <pre class="code">xattr -dr com.apple.quarantine /Applications/MyDouyin.app</pre>
-              <p class="install-note" data-i18n="macNote">拖入「应用程序」后运行上方命令，或在「系统设置 › 隐私与安全性」点击「仍要打开」。后续新版本可在窗口右上角胶囊一键增量升级。</p>
+              <ol class="install-steps">
+                <li data-i18n="macS1">双击打开 .dmg，将 MyDouyin.app 拖进「应用程序」文件夹。</li>
+                <li data-i18n="macS2">首次打开如被 Gatekeeper 拦截，运行上方命令或在「系统设置 › 隐私与安全性」点击「仍要打开」。</li>
+                <li data-i18n="macS3">启动后按 ⌘1 刷抖音，按 ⌘2 切入红果短剧模式。</li>
+              </ol>
             </div>
           </div>
 
@@ -1741,14 +1644,14 @@
               </a>
               <a class="dl-card" id="dlWinTar" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-windows-amd64.tar.gz">
                 <div>
-                  <strong data-i18n="winTarName">Windows 免安装绿色包</strong>
+                  <strong data-i18n="winTarName">Windows 免安装绿色版</strong>
                   <span id="winTarFile">mydouyin-0.2.26-windows-amd64.tar.gz</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
               <a class="dl-card" id="dlSha2" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS">
                 <div>
-                  <strong data-i18n="shaName">校验文件 SHA256SUMS</strong>
+                  <strong data-i18n="shaName">文件完整性校验 SHA256SUMS</strong>
                   <span>SHA256SUMS</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↗</span>
@@ -1756,49 +1659,57 @@
             </div>
             <div class="cmd-box">
               <div class="cmd-head">
-                <span data-i18n="winPsLabel">PowerShell 一键安装脚本</span>
+                <span data-i18n="winPsLabel">PowerShell 一键安装命令</span>
                 <button class="copy-btn" data-copy="irm https://github.com/margbug01/MyDouyin/releases/latest/download/install.ps1 | iex" data-i18n="copyBtn">复制命令</button>
               </div>
               <pre class="code">irm https://github.com/margbug01/MyDouyin/releases/latest/download/install.ps1 | iex</pre>
-              <p class="install-note" data-i18n="winNote">开箱即用，无需 FFmpeg 或微软商店 HEIF/HEVC 扩展。若触发 SmartScreen 提示，点击「更多信息 › 仍要运行」；Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。</p>
+              <ol class="install-steps">
+                <li data-i18n="winS1">下载安装程序运行，或解压绿色包直接启动，无需安装 FFmpeg 或商店 HEVC 扩展。</li>
+                <li data-i18n="winS2">首次运行若触发 SmartScreen 提示，点击「更多信息 › 仍要运行」；Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。</li>
+                <li data-i18n="winS3">启动后按 Ctrl+1 刷抖音，按 Ctrl+2 切入红果短剧模式。</li>
+              </ol>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- FAQ -->
+    <!-- High-Intent FAQ -->
     <section class="block" id="faq">
       <div class="container">
         <div class="section-head reveal">
-          <span class="eyebrow">FREQUENTLY ASKED QUESTIONS</span>
-          <h2 data-i18n="faqTitle">常见问题</h2>
+          <span class="eyebrow">FAQ</span>
+          <h2 data-i18n="faqTitle">常见问题：红果短剧电脑版与抖音客户端使用解答</h2>
         </div>
 
         <div class="faq-grid reveal">
           <details class="faq-item" open>
             <summary data-i18n="q1">红果短剧有电脑版吗？如何在 Mac 和 Windows 上不用安卓模拟器看红果短剧？</summary>
-            <p data-i18n="a1">MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11（x64）上，不需要安卓模拟器或手机投屏。打开后点击左上角品牌胶囊或按 ⌘2 / Ctrl+2 即可切换，支持双星引力场、发现、榜单、分类、上新、搜索、剧集详情、弹幕、评论与本地断点续播。</p>
+            <p data-i18n="a1">有。MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11 电脑上，不需要安卓模拟器或手机投屏。打开软件后点击左上角品牌胶囊或按 ⌘2 / Ctrl+2，即可免费观看真人短剧、漫剧与 AI 剧，支持榜单、分类、搜索、全集选集、剧评、实时弹幕与本地断点续播。</p>
           </details>
           <details class="faq-item">
-            <summary data-i18n="q2">不登录抖音或红果账号可以直接使用吗？</summary>
-            <p data-i18n="a2">可以。MyHongguo 红果短剧模式全程免登录匿名运行，追剧列表和每集进度保存在本机。MyDouyin 抖音模式免登录即可浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间；仅在点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。</p>
+            <summary data-i18n="q2">Mac 电脑上怎么刷抖音、看抖音直播和发带图评论？</summary>
+            <p data-i18n="a2">在 macOS（Apple Silicon）上安装 MyDouyin 即可直接浏览抖音引力场首页、推荐、关注、朋友、直播、短剧与合集。应用支持多档画质直播间、实时弹幕、粘贴/拖拽发带图评论、小窗播放与清屏模式，扫码登录后自动同步点赞收藏与观看历史。</p>
           </details>
           <details class="faq-item">
-            <summary data-i18n="q3">Windows 上看红果短剧需要额外安装 FFmpeg 或微软商店 HEIF/HEVC 扩展吗？</summary>
-            <p data-i18n="a3">不需要。Windows 版视频直接调用系统 Media Foundation 硬件解码，不附带 FFmpeg；红果短剧的签名 HEIC 封面通过内置纯 Go h265/heic 解码器直接解码并转为本地 JPEG 缓存，无需商店 HEIF/HEVC 扩展。仅 Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。</p>
+            <summary data-i18n="q3">不登录抖音或红果账号可以直接看吗？</summary>
+            <p data-i18n="a3">可以。红果短剧模式（MyHongguo）全程免登录使用，追剧收藏和每集播放进度自动保存在本机。抖音模式（MyDouyin）不登录也能浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间，仅点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。</p>
           </details>
           <details class="faq-item">
-            <summary data-i18n="q4">Mac 长时间刷抖音会把视频缓存写满硬盘吗？</summary>
-            <p data-i18n="a4">不会。macOS 版本对 AVFoundation 显式设置 AVURLAssetUsesNoPersistentCacheKey，只保留少量内存预读，不再把整段 MP4 写入 $TMPDIR/MediaCache；本地封面缓存也带自动上限清理。</p>
+            <summary data-i18n="q4">Windows 上看红果短剧封面不显示怎么办？需要装 FFmpeg 或微软商店 HEVC 扩展吗？</summary>
+            <p data-i18n="a4">不需要额外安装任何插件。MyDouyin 的 Windows 版已内置完整封面解码与原生视频播放能力，开箱即可正常显示红果短剧海报并直接播放，无需 FFmpeg 或微软商店付费 HEIF/HEVC 扩展。仅 Windows N / KN 精简版需在系统可选功能中安装 Media Feature Pack。</p>
           </details>
           <details class="faq-item">
-            <summary data-i18n="q5">红果短剧遇到代理异常或匿名限流加载不出来怎么办？</summary>
-            <p data-i18n="a5">在右上角「设置 › 红果短剧 (MyHongguo)」中确认「绕过系统代理直连」已开启（默认开启）。若匿名设备触发风控限流，点击「重置匿名设备」即可重新生成身份，也支持配置自定义远端签名服务与 Token。</p>
+            <summary data-i18n="q5">红果短剧遇到地区限制、代理异常或加载不出来怎么办？</summary>
+            <p data-i18n="a5">点击右上角齿轮打开「设置 › 红果短剧 (MyHongguo)」，确认「绕过系统代理直连」处于开启状态（默认已开启）。如果匿名设备遇到限流，点击「重置匿名设备」即可重新生成匿名身份并恢复加载。</p>
           </details>
           <details class="faq-item">
-            <summary data-i18n="q6">登录凭证、红果追剧记录和个人设置保存在哪里？</summary>
-            <p data-i18n="a6">所有个人数据仅存在本机标准应用配置目录中（macOS 为 ~/Library/Application Support/Douyin 与 ~/Library/Application Support/mydouyin，Windows 为 %APPDATA% 对应目录），应用零遥测、不上传任何统计信息，热更新和覆盖安装均保留数据。</p>
+            <summary data-i18n="q6">macOS 首次打开提示「无法验证开发者」或「已损坏」怎么办？</summary>
+            <p data-i18n="a6">个人开源版本尚未申请 Apple 官方公证，macOS Gatekeeper 会默认拦截首次运行。将应用拖入「应用程序」目录后，在「系统设置 › 隐私与安全性」点击「仍要打开」，或在终端运行 xattr -dr com.apple.quarantine /Applications/MyDouyin.app 即可正常启动。</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="q7">使用 MyDouyin 安全吗？登录信息和红果追剧记录存在哪里？</summary>
+            <p data-i18n="a7">代码完全开源、零遥测、不上传任何统计信息。你的登录凭证、红果追剧列表与播放进度只保存在本机系统配置目录中（macOS 位于 ~/Library/Application Support，Windows 位于 %APPDATA%），覆盖安装或应用内更新均不会丢失数据。</p>
           </details>
         </div>
       </div>
@@ -1816,8 +1727,8 @@
         <div class="footer-links">
           <a href="https://github.com/margbug01/MyDouyin" target="_blank" rel="noopener">GitHub</a>
           <a href="https://github.com/margbug01/MyDouyin/releases/latest" target="_blank" rel="noopener">Releases</a>
-          <a href="https://github.com/margbug01/MyDouyin/blob/main/PERFORMANCE.md" target="_blank" rel="noopener">PERFORMANCE.md</a>
-          <a href="https://github.com/margbug01/MyDouyin/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>
+          <a href="https://github.com/margbug01/MyDouyin/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG</a>
+          <a href="https://github.com/margbug01/MyDouyin/blob/main/PERFORMANCE.md" target="_blank" rel="noopener">PERFORMANCE</a>
           <a href="https://github.com/margbug01/MyDouyin/blob/main/README.en.md" target="_blank" rel="noopener">English README</a>
         </div>
       </div>
@@ -1835,116 +1746,155 @@
       let currentLang = new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh";
       let dmEnabled = true;
 
-      /* ---------- Bilingual Dictionary ---------- */
       const i18n = {
         zh: {
-          navStage: "引力场演示", navBench: "实测性能", navArch: "双原生架构", navCompare: "方案对比", navInstall: "下载安装",
-          releaseDesc: "双星引力场 · Windows 纯 Go HEIC 解码 · 原生硬解不写盘",
-          heroTitle: '一个原生窗口，同时装下<br><span class="accent-word">抖音</span>与<span class="accent-word">红果短剧</span>。',
-          heroSub: "基于 Go 与 MyGo 构建的开源桌面客户端，原生支持 macOS（Apple Silicon）与 Windows 10/11（x64）。无 Electron、无安卓模拟器、无 FFmpeg 或 HEVC 商店扩展，打开即可免登录浏览抖音与红果免费短剧、漫剧。",
-          dlMac: "下载 macOS（Apple Silicon）", dlWin: "下载 Windows 10/11（x64）", allInstall: "安装指南 & 校验 ↓",
-          badge1: "macOS 约 65 MB 原生硬解 · 零写盘", badge2: "Windows 原生 Media Foundation + 纯 Go HEIC", badge3: "红果免登录 · 512 KiB 单次 CENC 解密",
-          tabSplit: "双星切幕对比", tabPlayer: "抖音原生播放", tabHgDetail: "红果选集详情", tabHgPlayer: "红果流式解密播放",
-          splitHint: "↔ 左右拖动切幕，对比抖音与红果双模式", orbitLabel: "引力场", dualOrbitLabel: "双星引力场",
-          hudZeroDisk: "0 MB 持久写盘", hudPrewarm: "下一条静默预热", hudToggleDmOn: "隐藏预览弹幕", hudToggleDmOff: "开启预览弹幕",
-          dm1: "AVPlayerLayer 1080p 原生硬解，内存只有 65 MB！", dm2: "macOS 刷一整晚也不写盘，硬盘终于安静了", dm3: "⌘2 一秒切红果短剧，不用开安卓模拟器太爽了", dm4: "Windows 也无需 FFmpeg，直接 Media Foundation 硬解",
-          hudDetailCache: "近期 16 部剧 5 分钟缓存", hudTargetPrewarm: "进详情即预热目标集", hudNextEp: "75% 进度预热下集 · 2s 断点续播",
-          kbdLabel: "试试直接敲键盘或点击按键：", kbd1: "切到抖音模式", kbd2: "切到红果模式", kbdPrev: "上一场景", kbdNext: "下一场景", kbdTheme: "瓷白 / 黑洞主题",
-          benchTitle: "所有轻量承诺，都有实测数据背书", benchSub: "拒绝「感觉很快」的空话。以下指标均来自本仓库实测记录与性能分析报告，对比传统网页端、Electron 套壳与安卓模拟器。",
-          m1Title: "1080p 原生硬件解码内存", m1Desc: "改用系统原生 AVPlayerLayer 视频层，跳过逐帧像素拷贝，解码进程 VTDecoderXPCService 物理内存由 ~180 MB 降至 ~65 MB。",
-          barOld: "旧帧拷贝方案", barElec: "Electron / 模拟器",
-          m2Title: "macOS 刷视频零持久写盘", m2Desc: "通过 AVURLAssetUsesNoPersistentCacheKey 禁用系统持久媒体磁盘缓存，彻底消除连看 8 条视频向 $TMPDIR/MediaCache 写入 ~300 MB 的损耗，保护 SSD 寿命。",
-          m3Title: "按需签名，用完即焚", m3Desc: "仅点赞、评论、关注、发弹幕等写操作时拉起轻量签名页（对比完整网页 340–520 MB），闲置 10 秒自动销毁。",
-          m4Title: "红果流式解密首包加速", m4Desc: "首轮 512 KiB 单次探测一次覆盖实测 252 KiB 的 moov 盒并缓存前缀零等待吐出，配合 75% 进度预热下一集与 256 KiB Windows 点播头内存缓存。",
-          m5Unit: "个外挂依赖", m5Title: "纯 Go HEIC · 无需 FFmpeg", m5Desc: "Windows 播放直走系统 Media Foundation，红果签名 HEIC 封面内置纯 Go h265/heic 解码并转存 JPEG 缓存，告别微软商店付费 HEVC 扩展与模拟器。",
-          archTitle: "一套 Go 代码，两边都吃满系统原生能力", archSub: "不妥协于跨平台 WebView 最低公约数，在 macOS 与 Windows 上分别接入各自最轻量的硬件媒体管线。",
-          macP1T: "AVFoundation + AVPlayerLayer 硬解", macP1D: "硬件直出合成图层，1080p 内存约 65 MB，支持原生画中画与无缝连播预热。",
-          macP2T: "禁用持久媒体磁盘缓存", macP2D: "AVURLAssetUsesNoPersistentCacheKey 仅保留受控内存缓冲，不写盘。",
-          macP3T: "系统 ImageIO 硬件 HEIC 解码", macP3D: "秒解红果签名 HEIC 海报并按显示尺寸缩放，上传 GPU 后即释放 CPU 内存。",
-          winP1T: "Media Foundation + D3D11 GPU 纹理", winP1D: "系统原生硬解，不再打包或依赖任何 FFmpeg 可执行文件与 DLL。",
-          winP2T: "内存回环代理 + 256 KiB 头缓存", winP2D: "预检 HEAD 与起播首段零等待返回，配合播放中预热下一条视频降低切集延迟。",
-          winP3T: "内置纯 Go h265/heic 封面解码", winP3D: "不依赖微软商店 HEIF/HEVC 扩展，解码后自动落盘紧凑 JPEG 缓存实现秒开。",
-          coreTitle: "Go + MyGo 共享核心引擎", coreDesc: "统一承载抖音与红果双星引力场、流式加密解密、连接池复用与签名增量热更新。",
-          cmpTitle: "为什么替代网页版、Electron 客户端或安卓模拟器", cmpSub: "一表看清在电脑端同时刷抖音与追红果短剧的真实差异。",
-          thDim: "对比维度", thWeb: "浏览器网页版", thElec: "Electron 客户端 / 安卓模拟器",
-          r1k: "平台覆盖", r1a: "单窗口集成抖音 + 红果短剧，⌘1 / ⌘2 一键切换", r1b: "抖音靠标签页；红果无完整桌面网页版", r1c: "单一平台为主，看红果需跑整套安卓虚拟机",
-          r2k: "启动首屏", r2a: "引力场居中搜索 + 本地快照秒开，不强制自动连播", r2b: "打开即强制播放推荐流", r2c: "冷启动慢，后台常驻多个高内存进程",
-          r3k: "内存与写盘", r3a: "macOS 约 65 MB 零写盘；签名页 80 MB 闲置 10s 释放", r3b: "多标签与缓存随浏览持续暴涨", r3c: "常驻 500 MB–2 GB+，风扇与磁盘写入明显",
-          r4k: "红果 HEIC 封面", r4a: "macOS ImageIO / Windows 内置纯 Go 解码，开箱即显", r4b: "依赖浏览器 HEIC 兼容性", r4c: "需额外商店扩展或完整 Android 运行环境",
-          r5k: "隐私与更新", r5a: "零遥测、全数据本地存储、应用内签名增量热更新", r5b: "受限于浏览器环境", r5c: "频繁全量包更新，后台服务多",
-          instTitle: "下载与安装（自动同步最新版本）", instSub: "安装包均由 GitHub Releases 分发并附带 SHA256SUMS 校验和，后续版本支持应用内签名增量热更新。",
-          macDmgName: "macOS 安装镜像（推荐）", macTarName: "macOS 便携压缩包", winExeName: "Windows 安装程序（推荐）", winTarName: "Windows 免安装绿色包",
-          shaName: "校验文件 SHA256SUMS", copyBtn: "复制命令", copied: "已复制",
-          macGateLabel: "首次打开若提示「无法验证开发者 / 已损坏」", macNote: "拖入「应用程序」后运行上方命令，或在「系统设置 › 隐私与安全性」点击「仍要打开」。后续新版本可在窗口右上角胶囊一键增量升级。",
-          winPsLabel: "PowerShell 一键安装脚本", winNote: "开箱即用，无需 FFmpeg 或微软商店 HEIF/HEVC 扩展。若触发 SmartScreen 提示，点击「更多信息 › 仍要运行」；Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。",
-          faqTitle: "常见问题",
+          navWhat: "产品简介", navHg: "红果短剧电脑版", navDy: "抖音桌面端", navCompare: "对比方案", navInstall: "免费下载",
+          releaseDesc: "开源免费 · 支持 macOS（Apple Silicon）与 Windows 10/11",
+          heroTitle: '<span class="accent-word">抖音电脑版</span> &amp; <span class="accent-word">红果短剧电脑版</span><br>一个原生桌面软件搞定。',
+          heroSub: "MyDouyin · MyHongguo 是一款同时集成抖音与红果短剧的开源原生桌面客户端，支持 macOS（Apple Silicon）与 Windows 10/11。无需安卓模拟器、无需浏览器多开，打开就能在电脑上刷抖音视频、看抖音直播，以及免登录免费追红果短剧与漫剧。",
+          dlMac: "免费下载 macOS 版（Apple Silicon）", dlWin: "免费下载 Windows 版（x64）", allInstall: "安装步骤 ↓",
+          badge1: "不用安卓模拟器，直接看红果短剧与漫剧", badge2: "红果免登录看全集 · 自动记住追剧进度", badge3: "⌘1 / ⌘2 一键在抖音与红果之间切换",
+          tabSplit: "抖音 / 红果切幕对比", tabPlayer: "抖音电脑端播放与弹幕", tabHgDetail: "红果短剧选集与剧评", tabHgPlayer: "红果短剧连播与弹幕",
+          splitHint: "↔ 左右拖动切幕，体验一个窗口里的抖音与红果短剧", orbitLabel: "抖音引力场", dualOrbitLabel: "红果双星引力场",
+          hudDy1: "高清画质与倍速连播", hudDy2: "实时弹幕 & 带图评论", hudDy3: "画中画小窗 / 清屏 / 听抖音",
+          hudToggleDmOn: "隐藏预览弹幕", hudToggleDmOff: "开启预览弹幕",
+          dm1: "Mac 上终于有好用的原生抖音桌面客户端了！", dm2: "不用装安卓模拟器，直接按 ⌘2 就能追红果短剧全集", dm3: "带图评论、看直播、小窗摸鱼和清屏模式全都有", dm4: "Windows 开箱即用，封面和剧集都能正常秒播",
+          hudHgD1: "全集分组选集 & 多季切换", hudHgD2: "主演主页直达", hudHgD3: "完整剧评与楼中楼回复",
+          hudHgP1: "全程免登录免费看全集", hudHgP2: "点击弹幕直达剧情时间点", hudHgP3: "播完自动连播 · 本地断点续播",
+          kbdLabel: "试试敲键盘或点击体验切换：", kbd1: "抖音模式", kbd2: "红果短剧模式", kbdPrev: "上一界面", kbdNext: "下一界面", kbdTheme: "浅色 / 深色主题",
+          whatTitle: "MyDouyin · MyHongguo 是什么？",
+          whatDesc: "MyDouyin · MyHongguo 是一款面向 macOS（Apple Silicon）和 Windows 10/11 用户的开源原生桌面软件，在一个应用内同时提供「抖音桌面端（MyDouyin）」与「红果短剧电脑版（MyHongguo）」。它直接运行在电脑桌面，无需安卓模拟器或浏览器多标签，适合想在电脑大屏刷抖音、看直播以及免费追红果短剧和漫剧的用户。",
+          s1k: "核心用途", s1v: "电脑端刷抖音视频、看抖音直播 + 免登录免费追红果短剧与漫剧",
+          s2k: "支持平台", s2v: "macOS（Apple Silicon / M 系列）与 Windows 10 / 11（x64）",
+          s3k: "登录要求", s3v: "红果短剧全程免登录；抖音免登录可看公开视频与直播，互动可扫码登录",
+          s4k: "运行环境", s4v: "纯原生桌面应用，无需安卓模拟器、无需额外装 FFmpeg 或商店扩展",
+          s5k: "费用与开源", s5v: "个人开源免费项目，无广告弹窗，支持应用内一键增量升级",
+          s6k: "隐私与数据", s6v: "零遥测、不上传统计，登录态与红果追剧进度全部保存在本机",
+          hgTitle: "红果短剧电脑版：Mac 和 Windows 不用安卓模拟器免费看短剧与漫剧",
+          hgLead: "想在电脑大屏看红果免费短剧却不想安装卡顿的安卓模拟器？在 MyDouyin 中点击左上角品牌胶囊或按 ⌘2 / Ctrl+2 进入 MyHongguo 模式，即可原生浏览真人剧、漫剧、AI剧和影视剧全集。",
+          hg1t: "双星引力场：真人剧与漫剧同屏发现", hg1d: "首页以 3:4 竖版海报呈现左翼真人剧与右翼漫剧，支持「双星 / 真人剧 / 漫剧 / 追剧」四种视图、滚轮无限换批、搜索联想和短剧热搜榜。",
+          hg2t: "全频道找剧：发现、榜单、分类与上新", hg2d: "完整覆盖剧集榜与演员榜、多条件分类筛选、按日期浏览每日上新，以及按真人剧、漫剧、AI剧、影视剧分类搜索，点演员即可直达全部作品主页。",
+          hg3t: "全集选集、多季切换与剧评互动", hg3d: "剧集详情页展示评分、热度、状态标签、简介、多季切换、分组选集与相关推荐，完整支持查看剧评与楼中楼回复，点「开始播放」立刻起播。",
+          hg4t: "实时弹幕与点击时间点跳转", hg4d: "播放页自带画面弹幕与右侧抽屉（集成选集、本集评论、剧评与弹幕列表），点击任意弹幕即可精准跳转对应剧情时间点，播完自动连播下一集。",
+          hg5t: "全程免登录，本地追剧与断点续播", hg5d: "不需要注册或绑定手机号即可观看全集。软件会在本机自动保存「我的追剧」和「最近观看」，精确记住每集观看秒数，下次打开一键续播。",
+          hg6t: "Mac / Windows 开箱即看，封面与播放全正常", hg6d: "Windows 上不用买微软商店 HEVC 扩展也能正常显示全部红果剧集封面；内置「绕过系统代理直连」（默认开启）与一键重置匿名设备，减少网络异常。",
+          hgCap1: "红果短剧详情页 · 分组选集、主演跳转与完整剧评", hgCap2: "红果短剧原生播放 · 自动连播、评论与弹幕时间点跳转",
+          dyTitle: "抖音桌面客户端：在 Mac 和 Windows 上更清爽地刷视频、看直播与发评论",
+          dyLead: "相比打开就吵闹连播的网页端，MyDouyin 为桌面用户设计了先搜索再观看的「引力场」首页，同时保留完整的抖音频道、直播间、实时弹幕与带图评论体验。",
+          dy1t: "引力场首页：拒绝打开就强制连播", dy1d: "启动后先呈现居中搜索框与 8 张错落视频卡片，支持「精选 / 关注 / 稍后 / 历史」切换、鼠标滚轮无重复换批、纯静搜索与实时抖音热搜。",
+          dy2t: "桌面大屏播控：小窗、清屏、听抖音", dy2d: "支持上下切视频、自动隐藏控制条与鼠标指针、清晰度与倍速切换、自动连播、清屏模式、听抖音音频模式、画中画小窗、网页全屏与系统全屏。",
+          dy3t: "抖音直播间：多档清晰度与互动", dy3d: "完整支持直播频道与直播间观看，提供原画、蓝光、超清、高清、标清与智能多档位清晰度切换、异常自动切备用线路，以及实时弹幕、评论与送礼。",
+          dy4t: "完整评论区与高清带图评论", dy4d: "支持楼中楼展开回复、官方表情面板，通过选图、粘贴截图或拖拽直接发带图评论；内置高清原图查看器（缩放、切换、复制与保存），点头像和 @ 直达作者主页。",
+          dy5t: "全频道覆盖与观看历史同步", dy5d: "涵盖精选、推荐、关注、朋友、直播、短剧、合集、创作者主页，以及我的作品、喜欢、收藏、稍后再看、观看历史、私信（只读）与通知，看过的视频自动同步减少重复推荐。",
+          dy6t: "原生硬解不写盘，长时间刷也安静", dy6d: "调用系统原生硬件解码，macOS 长时间刷视频不把缓存写满硬盘、不发烫，支持浅色「极净瓷白」与深色「纯黑黑洞」双主题自由切换。",
+          cmpTitle: "MyDouyin 对比抖音网页版、官方桌面端与安卓模拟器", cmpSub: "如果你正在寻找好用的 Mac 抖音客户端或电脑看红果短剧的方法，下面是一目了然的差异对比。",
+          thDim: "使用需求", thWeb: "浏览器网页版", thElec: "套壳客户端 / 安卓模拟器",
+          r1k: "同时看抖音与红果", r1a: "单窗口集成抖音 + 红果短剧，⌘1 / ⌘2 一键切换", r1b: "仅能看抖音；红果短剧缺少完整电脑网页版", r1c: "看红果必须装安卓模拟器，和抖音分开运行",
+          r2k: "打开体验", r2a: "引力场首页安静选片或搜索，不强制一打开就自动发声", r2b: "一打开页面立刻自动播放推荐流", r2c: "模拟器冷启动慢，常伴随广告和后台弹窗",
+          r3k: "免登录使用", r3a: "红果全程免登录；抖音免登录可看视频、搜索与直播间", r3b: "频繁弹出登录拦截", r3c: "通常需先登录手机端账号环境",
+          r4k: "电脑流畅度", r4a: "原生桌面端、硬件解码，Mac 不把缓存写满硬盘", r4b: "多开标签后浏览器内存持续上涨", r4c: "虚拟机/套壳常驻占用高，风扇噪音明显",
+          r5k: "安装与更新", r5a: "开箱即用，无需装额外编解码插件，支持应用内一键升级", r5b: "依赖浏览器与插件兼容性", r5c: "体积庞大，每次升级需重新下载完整包",
+          instTitle: "如何在 macOS 和 Windows 上下载安装抖音与红果短剧电脑版", instSub: "所有版本均免费发布在 GitHub Releases 并附带 SHA256SUMS 校验和，支持安装后在应用内一键升级。",
+          macDmgName: "macOS 安装镜像（推荐）", macTarName: "macOS 便携压缩包", winExeName: "Windows 安装程序（推荐）", winTarName: "Windows 免安装绿色版",
+          shaName: "文件完整性校验 SHA256SUMS", copyBtn: "复制命令", copied: "已复制",
+          macGateLabel: "macOS 首次打开提示「无法验证开发者 / 已损坏」解决命令",
+          macS1: "双击打开 .dmg，将 MyDouyin.app 拖进「应用程序」文件夹。",
+          macS2: "首次打开如被 Gatekeeper 拦截，运行上方命令或在「系统设置 › 隐私与安全性」点击「仍要打开」。",
+          macS3: "启动后按 ⌘1 刷抖音，按 ⌘2 切入红果短剧模式。",
+          winPsLabel: "PowerShell 一键安装命令",
+          winS1: "下载安装程序运行，或解压绿色包直接启动，无需安装 FFmpeg 或商店 HEVC 扩展。",
+          winS2: "首次运行若触发 SmartScreen 提示，点击「更多信息 › 仍要运行」；Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。",
+          winS3: "启动后按 Ctrl+1 刷抖音，按 Ctrl+2 切入红果短剧模式。",
+          faqTitle: "常见问题：红果短剧电脑版与抖音客户端使用解答",
           q1: "红果短剧有电脑版吗？如何在 Mac 和 Windows 上不用安卓模拟器看红果短剧？",
-          a1: "MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11（x64）上，不需要安卓模拟器或手机投屏。打开后点击左上角品牌胶囊或按 ⌘2 / Ctrl+2 即可切换，支持双星引力场、发现、榜单、分类、上新、搜索、剧集详情、弹幕、评论与本地断点续播。",
-          q2: "不登录抖音或红果账号可以直接使用吗？",
-          a2: "可以。MyHongguo 红果短剧模式全程免登录匿名运行，追剧列表和每集进度保存在本机。MyDouyin 抖音模式免登录即可浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间；仅在点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。",
-          q3: "Windows 上看红果短剧需要额外安装 FFmpeg 或微软商店 HEIF/HEVC 扩展吗？",
-          a3: "不需要。Windows 版视频直接调用系统 Media Foundation 硬件解码，不附带 FFmpeg；红果短剧的签名 HEIC 封面通过内置纯 Go h265/heic 解码器直接解码并转为本地 JPEG 缓存，无需商店 HEIF/HEVC 扩展。仅 Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。",
-          q4: "Mac 长时间刷抖音会把视频缓存写满硬盘吗？",
-          a4: "不会。macOS 版本对 AVFoundation 显式设置 AVURLAssetUsesNoPersistentCacheKey，只保留少量内存预读，不再把整段 MP4 写入 $TMPDIR/MediaCache；本地封面缓存也带自动上限清理。",
-          q5: "红果短剧遇到代理异常或匿名限流加载不出来怎么办？",
-          a5: "在右上角「设置 › 红果短剧 (MyHongguo)」中确认「绕过系统代理直连」已开启（默认开启）。若匿名设备触发风控限流，点击「重置匿名设备」即可重新生成身份，也支持配置自定义远端签名服务与 Token。",
-          q6: "登录凭证、红果追剧记录和个人设置保存在哪里？",
-          a6: "所有个人数据仅存在本机标准应用配置目录中（macOS 为 ~/Library/Application Support/Douyin 与 ~/Library/Application Support/mydouyin，Windows 为 %APPDATA% 对应目录），应用零遥测、不上传任何统计信息，热更新和覆盖安装均保留数据。",
+          a1: "有。MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11 电脑上，不需要安卓模拟器或手机投屏。打开软件后点击左上角品牌胶囊或按 ⌘2 / Ctrl+2，即可免费观看真人短剧、漫剧与 AI 剧，支持榜单、分类、搜索、全集选集、剧评、实时弹幕与本地断点续播。",
+          q2: "Mac 电脑上怎么刷抖音、看抖音直播和发带图评论？",
+          a2: "在 macOS（Apple Silicon）上安装 MyDouyin 即可直接浏览抖音引力场首页、推荐、关注、朋友、直播、短剧与合集。应用支持多档画质直播间、实时弹幕、粘贴/拖拽发带图评论、小窗播放与清屏模式，扫码登录后自动同步点赞收藏与观看历史。",
+          q3: "不登录抖音或红果账号可以直接看吗？",
+          a3: "可以。红果短剧模式（MyHongguo）全程免登录使用，追剧收藏和每集播放进度自动保存在本机。抖音模式（MyDouyin）不登录也能浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间，仅点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。",
+          q4: "Windows 上看红果短剧封面不显示怎么办？需要装 FFmpeg 或微软商店 HEVC 扩展吗？",
+          a4: "不需要额外安装任何插件。MyDouyin 的 Windows 版已内置完整封面解码与原生视频播放能力，开箱即可正常显示红果短剧海报并直接播放，无需 FFmpeg 或微软商店付费 HEIF/HEVC 扩展。仅 Windows N / KN 精简版需在系统可选功能中安装 Media Feature Pack。",
+          q5: "红果短剧遇到地区限制、代理异常或加载不出来怎么办？",
+          a5: "点击右上角齿轮打开「设置 › 红果短剧 (MyHongguo)」，确认「绕过系统代理直连」处于开启状态（默认已开启）。如果匿名设备遇到限流，点击「重置匿名设备」即可重新生成匿名身份并恢复加载。",
+          q6: "macOS 首次打开提示「无法验证开发者」或「已损坏」怎么办？",
+          a6: "个人开源版本尚未申请 Apple 官方公证，macOS Gatekeeper 会默认拦截首次运行。将应用拖入「应用程序」目录后，在「系统设置 › 隐私与安全性」点击「仍要打开」，或在终端运行 xattr -dr com.apple.quarantine /Applications/MyDouyin.app 即可正常启动。",
+          q7: "使用 MyDouyin 安全吗？登录信息和红果追剧记录存在哪里？",
+          a7: "代码完全开源、零遥测、不上传任何统计信息。你的登录凭证、红果追剧列表与播放进度只保存在本机系统配置目录中（macOS 位于 ~/Library/Application Support，Windows 位于 %APPDATA%），覆盖安装或应用内更新均不会丢失数据。",
           disclaimer: "MyDouyin 是个人开源项目，与抖音（Douyin）、红果短剧（Hongguo）及字节跳动没有任何官方关联。软件所有数据仅在本机运行和存储，不收集任何遥测或统计信息。请仅使用个人账号合理浏览并遵守对应平台服务条款。"
         },
         en: {
-          navStage: "Orbit Demo", navBench: "Benchmarks", navArch: "Architecture", navCompare: "Comparison", navInstall: "Install",
-          releaseDesc: "Dual-Wing Orbit · Pure-Go Windows HEIC · Zero-Disk Native Decode",
-          heroTitle: 'One Native Window for<br><span class="accent-word">Douyin</span> &amp; <span class="accent-word">Hongguo Short Dramas</span>.',
-          heroSub: "An open-source Go + MyGo desktop client for macOS (Apple Silicon) and Windows 10/11 (x64). No Electron, no Android emulators, no FFmpeg or Windows Store HEVC packs. Launch straight into public Douyin feeds and login-free Hongguo dramas.",
-          dlMac: "Download macOS (Apple Silicon)", dlWin: "Download Windows 10/11 (x64)", allInstall: "Install Guide & Checksums ↓",
-          badge1: "~65 MB Native macOS Decode · 0 Disk Writes", badge2: "Windows Media Foundation + Pure-Go HEIC", badge3: "Login-Free Hongguo · 512 KiB 1-RTT CENC",
-          tabSplit: "Split-Curtain Compare", tabPlayer: "Douyin Native Player", tabHgDetail: "Hongguo Series Detail", tabHgPlayer: "Hongguo CENC Player",
-          splitHint: "↔ Drag the curtain to compare Douyin and Hongguo modes", orbitLabel: "Orbit Home", dualOrbitLabel: "Dual-Wing Orbit",
-          hudZeroDisk: "0 MB Persistent Disk Cache", hudPrewarm: "Silent Next-Video Prewarm", hudToggleDmOn: "Hide Preview Danmaku", hudToggleDmOff: "Show Preview Danmaku",
-          dm1: "AVPlayerLayer 1080p native decode in just ~65 MB RAM!", dm2: "Zero persistent video disk writes on macOS SSDs", dm3: "Press Cmd+2 for Hongguo dramas — no Android emulator!", dm4: "Windows Media Foundation + Pure-Go HEIC, zero FFmpeg",
-          hudDetailCache: "16-Series 5m Detail Cache", hudTargetPrewarm: "Target Episode Prewarm", hudNextEp: "75% Next-Ep Prewarm · 2s Resume",
-          kbdLabel: "Try pressing keys or clicking keycaps:", kbd1: "Douyin Mode", kbd2: "Hongguo Mode", kbdPrev: "Prev Scene", kbdNext: "Next Scene", kbdTheme: "Porcelain / Void Theme",
-          benchTitle: "Every Lightweight Claim Backed by Measurements", benchSub: "Figures recorded directly in this repository's benchmarks, compared against web tabs, Electron wrappers, and Android emulators.",
-          m1Title: "1080p Native Hardware Decoder Memory", m1Desc: "Rendering through native AVPlayerLayer skips per-frame CPU pixel copies, dropping VTDecoderXPCService footprint from ~180 MB to ~65 MB.",
-          barOld: "Frame-copy pipeline", barElec: "Electron / Emulator",
-          m2Title: "Zero Persistent Video Disk Writes on macOS", m2Desc: "Setting AVURLAssetUsesNoPersistentCacheKey keeps playback in bounded RAM instead of writing ~300 MB of temporary MP4 files per 8 watched videos.",
-          m3Title: "On-Demand Signing, Freed Automatically", m3Desc: "Write actions spin up a lightweight ~80 MB signing page (vs 340–520 MB full web page) and destroy it after 10 seconds idle.",
-          m4Title: "Single-RTT Streaming CENC Startup", m4Desc: "A 512 KiB opening probe captures typical 252 KiB Hongguo moov boxes in one round trip and streams cached bytes immediately, paired with a 256 KiB Windows VOD head cache.",
-          m5Unit: "extra runtimes", m5Title: "Pure-Go HEIC · Zero FFmpeg", m5Desc: "Windows builds use native Media Foundation with no FFmpeg binaries, and decode Hongguo's signed HEIC covers via pure-Go h265/heic cached as compact JPEGs.",
-          archTitle: "One Go Codebase, Native Pipelines on Both OSes", archSub: "No WebView lowest-common-denominator compromises. Each platform binds directly to its lightest hardware media stack.",
-          macP1T: "AVFoundation + AVPlayerLayer", macP1D: "Direct compositor video layer (~65 MB at 1080p) with native PiP and silent next-item prewarming.",
-          macP2T: "Zero Persistent Disk Cache", macP2D: "AVURLAssetUsesNoPersistentCacheKey bounds buffering strictly in RAM.",
-          macP3T: "System ImageIO HEIC Decode", macP3D: "Hardware-decodes Hongguo portrait posters, scales to display size, and releases CPU pixels after GPU upload.",
-          winP1T: "Media Foundation + D3D11 Textures", winP1D: "Native OS hardware decode with zero bundled FFmpeg binaries or DLLs.",
-          winP2T: "Loopback Proxy + 256 KiB Head Cache", winP2D: "Serves HEAD and opening byte ranges from RAM while prewarming the next video during playback.",
-          winP3T: "Embedded Pure-Go h265/heic Decoder", winP3D: "No Microsoft Store HEIF/HEVC extension required; saves compact local JPEG caches for instant reuse.",
-          coreTitle: "Go + MyGo Shared Core", coreDesc: "Powers both Douyin and Hongguo Orbit layouts, streaming AES-128-CTR decryption, pooled HTTP transport, and signed delta updates.",
-          cmpTitle: "Why Switch From Web, Electron, or Android Emulators", cmpSub: "Side-by-side comparison for watching Douyin and Hongguo Short Dramas on desktop.",
-          thDim: "Dimension", thWeb: "Web Browser", thElec: "Electron / Android Emulator",
-          r1k: "Platform coverage", r1a: "Douyin + Hongguo Short Dramas in one window via Cmd+1 / Cmd+2", r1b: "Douyin in tabs; no full Hongguo desktop web app", r1c: "Single-platform; Hongguo requires a full Android VM",
-          r2k: "Launch experience", r2a: "Orbit search canvas + local fast-start snapshots, no forced autoplay", r2b: "Autoplays feed immediately on load", r2c: "Slow cold start with resident background processes",
-          r3k: "Memory & disk I/O", r3a: "~65 MB zero-disk macOS decode; ~80 MB signing page freed in 10s", r3b: "Grows steadily across long sessions", r3c: "500 MB–2 GB+ resident memory, heavy fan & disk load",
-          r4k: "Hongguo HEIC covers", r4a: "macOS ImageIO / Windows pure-Go decoder out of the box", r4b: "Depends on browser HEIC support", r4c: "Needs extra codec packs or Android runtime",
-          r5k: "Privacy & updates", r5a: "Zero telemetry, strictly local storage, signed in-app delta updates", r5b: "Web-only", r5c: "Large full-installer downloads",
-          instTitle: "Download & Install (Auto-Synced to Latest Release)", instSub: "All builds ship via GitHub Releases with SHA256SUMS and support signed in-app delta updates.",
+          navWhat: "Overview", navHg: "Hongguo Desktop", navDy: "Douyin Desktop", navCompare: "Comparison", navInstall: "Download",
+          releaseDesc: "Free & Open Source · macOS (Apple Silicon) & Windows 10/11",
+          heroTitle: '<span class="accent-word">Douyin</span> &amp; <span class="accent-word">Hongguo Short Dramas</span><br>in One Native Desktop App.',
+          heroSub: "MyDouyin · MyHongguo is an open-source desktop client for macOS (Apple Silicon) and Windows 10/11. Watch Douyin videos and live streams alongside login-free Hongguo short dramas and animated dramas without Android emulators or browser tab clutter.",
+          dlMac: "Free Download for macOS (Apple Silicon)", dlWin: "Free Download for Windows (x64)", allInstall: "Install Guide ↓",
+          badge1: "Watch Hongguo dramas on desktop without Android emulators", badge2: "Zero-login full episodes · Automatic local resume", badge3: "Switch Douyin & Hongguo instantly via Cmd+1 / Cmd+2",
+          tabSplit: "Douyin / Hongguo Curtain", tabPlayer: "Douyin Player & Danmaku", tabHgDetail: "Hongguo Episodes & Reviews", tabHgPlayer: "Hongguo Series Player",
+          splitHint: "↔ Drag the curtain to compare Douyin and Hongguo in one window", orbitLabel: "Douyin Orbit", dualOrbitLabel: "Hongguo Dual-Wing Orbit",
+          hudDy1: "HD Quality & Speed Control", hudDy2: "Live Danmaku & Image Replies", hudDy3: "PiP / Clean Screen / Audio Mode",
+          hudToggleDmOn: "Hide Preview Danmaku", hudToggleDmOff: "Show Preview Danmaku",
+          dm1: "Finally a native Douyin desktop app for macOS & Windows!", dm2: "Press Cmd+2 to binge Hongguo short dramas without Android emulators", dm3: "Live rooms, image comments, PiP & clean screen all included", dm4: "Works out of the box on Windows — covers & videos play right away",
+          hudHgD1: "Grouped Episodes & Multi-Season", hudHgD2: "Clickable Cast Profiles", hudHgD3: "Series Reviews & Replies",
+          hudHgP1: "Login-Free Full Episodes", hudHgP2: "Click Danmaku to Jump Timestamps", hudHgP3: "Auto-Next · Local Resume",
+          kbdLabel: "Press keys or click keycaps to try:", kbd1: "Douyin Mode", kbd2: "Hongguo Mode", kbdPrev: "Prev View", kbdNext: "Next View", kbdTheme: "Light / Dark Theme",
+          whatTitle: "What is MyDouyin · MyHongguo?",
+          whatDesc: "MyDouyin · MyHongguo is an open-source native desktop application for macOS (Apple Silicon) and Windows 10/11 that combines a Douyin desktop client (MyDouyin) and a Hongguo Short Dramas desktop app (MyHongguo) inside one window. Run it directly on your computer without Android emulators or browser tabs.",
+          s1k: "Primary use", s1v: "Watch Douyin videos & live streams + free Hongguo short dramas & animated dramas on desktop",
+          s2k: "Supported OS", s2v: "macOS (Apple Silicon / M-series) & Windows 10 / 11 (x64)",
+          s3k: "Account model", s3v: "Hongguo runs without login; Douyin browses public feeds & live rooms without login, QR login for interactions",
+          s4k: "Requirements", s4v: "Native desktop binary — no Android emulator, no FFmpeg or Windows Store codec packs",
+          s5k: "License & updates", s5v: "Free open-source project with zero ads and one-click in-app updates",
+          s6k: "Privacy", s6v: "Zero telemetry; login sessions and Hongguo watch progress stay strictly on your device",
+          hgTitle: "Hongguo Short Dramas on Desktop: Watch Free on Mac & Windows Without Android Emulators",
+          hgLead: "Want to watch Hongguo short dramas on a desktop monitor without installing a heavy Android emulator? Click the top-left switcher pill or press Cmd+2 / Ctrl+2 to enter MyHongguo mode for live-action, animated, and AI dramas.",
+          hg1t: "Dual-Wing Orbit: Live-Action & Animated Dramas", hg1d: "Browse 3:4 portrait posters split into live-action and animated wings with Dual, Live-action, Animated, and Tracking views, wheel batch cycling, and trending search.",
+          hg2t: "Complete Discovery: Rankings, Filters & New Releases", hg2d: "Explore series and actor leaderboards, multi-criteria category filters, daily new releases by date, type-filtered search, and full actor filmographies.",
+          hg3t: "Full Episode Grids, Multi-Season & Reviews", hg3d: "Inspect ratings, heat scores, status tags, synopsis, season switching, grouped episode selectors, related titles, and nested series reviews.",
+          hg4t: "Real-Time Danmaku & Timestamp Jumping", hg4d: "Watch with live danmaku overlay and an integrated drawer for episodes, episode comments, series reviews, and clickable danmaku timestamps plus auto-next.",
+          hg5t: "Zero Login Needed with Local Resume", hg5d: "No account or phone number required. Favorites and recent watch history save locally with exact per-episode timestamps for one-click resume.",
+          hg6t: "Works Out of the Box on Mac & Windows", hg6d: "Displays Hongguo HEIC drama covers on Windows without Microsoft Store codec packs, and includes direct connection (proxy bypass on by default) plus one-click anonymous device reset.",
+          hgCap1: "Hongguo Series Detail · Grouped episodes, cast pages, and reviews", hgCap2: "Hongguo Native Player · Auto-next, comments, and clickable danmaku",
+          dyTitle: "Douyin Desktop Client: Videos, Live Streams, and Comments on Mac & Windows",
+          dyLead: "Instead of loud auto-playing web tabs, MyDouyin opens to a calm Orbit search canvas while delivering every Douyin channel, live room, danmaku feed, and image comment workflow.",
+          dy1t: "Orbit Home: Browse & Search Before Playing", dy1d: "Launches to a centered search bar surrounded by curated video cards with Picks, Following, Watch Later, History, trending topics, and scroll-wheel refresh.",
+          dy2t: "Desktop Playback Controls: PiP, Clean Screen & Audio", dy2d: "Smooth vertical switching, auto-hiding controls and cursor, quality and speed selectors, autoplay-next, clean screen, audio-only mode, PiP, theater, and fullscreen.",
+          dy3t: "Douyin Live Rooms with Quality Selection", dy3d: "Browse live channels and rooms with multi-quality H.264 streams, automatic backup stream failover, live danmaku, chat, and gifting.",
+          dy4t: "Full Comment Threads & Image Replies", dy4d: "Nested replies, official emojis, image uploads via file picker, paste, or drag-and-drop, full-resolution image lightbox, and clickable avatars and @mentions.",
+          dy5t: "All Channels & Watch History Sync", dy5d: "Covers Picks, Recommend, Following, Friends, Live, Short Dramas, Mixes, Creator Profiles, Likes, Saves, Watch Later, History, read-only DMs, and Notifications.",
+          dy6t: "Native Hardware Playback, Quiet & Clean", dy6d: "Uses OS hardware decoding with zero persistent media disk cache on macOS, paired with Porcelain Light and Pure Black Dark themes.",
+          cmpTitle: "MyDouyin vs Douyin Web, Wrapper Apps, and Android Emulators", cmpSub: "Clear side-by-side differences for watching Douyin and Hongguo Short Dramas on desktop.",
+          thDim: "User Need", thWeb: "Web Browser", thElec: "Wrapper App / Android Emulator",
+          r1k: "Douyin + Hongguo together", r1a: "Both platforms in one window via Cmd+1 / Cmd+2", r1b: "Douyin only; Hongguo lacks a full desktop web app", r1c: "Hongguo requires a separate Android emulator",
+          r2k: "Launch experience", r2a: "Calm Orbit search & cards without forced autoplay audio", r2b: "Autoplays feed immediately on load", r2c: "Slow emulator boot with ads and background bloat",
+          r3k: "No-login browsing", r3a: "Hongguo needs zero login; Douyin browses public videos & live rooms", r3b: "Frequent login popups", r3c: "Usually requires mobile account setup inside VM",
+          r4k: "Desktop comfort", r4a: "Native hardware decode without filling macOS disk cache", r4b: "Browser tab memory climbs over time", r4c: "Heavy VM footprint and loud fans",
+          r5k: "Install & updates", r5a: "Ready out of the box with one-click in-app updates", r5b: "Limited by browser codec support", r5c: "Huge installers and manual full re-downloads",
+          instTitle: "How to Download and Install on macOS and Windows", instSub: "All releases ship free on GitHub Releases with SHA256SUMS verification and one-click in-app updates.",
           macDmgName: "macOS Disk Image (Recommended)", macTarName: "macOS Portable Archive", winExeName: "Windows Installer (Recommended)", winTarName: "Windows Portable Archive",
           shaName: "Checksums (SHA256SUMS)", copyBtn: "Copy", copied: "Copied",
-          macGateLabel: "If macOS Gatekeeper blocks the unnotarized build", macNote: "Drag MyDouyin.app into Applications, then run the command above or click Open Anyway in System Settings › Privacy & Security.",
-          winPsLabel: "One-line PowerShell installer", winNote: "Works out of the box with no FFmpeg or Store HEIF/HEVC extension. Click More info › Run anyway if SmartScreen warns; Windows N/KN editions need the Media Feature Pack.",
-          faqTitle: "Frequently Asked Questions",
-          q1: "Is there a desktop client for Hongguo Short Dramas without an Android emulator?",
-          a1: "Yes. MyDouyin includes a native MyHongguo mode on macOS (Apple Silicon) and Windows 10/11 (x64) with zero emulators or screen mirroring. Click the top-left switcher pill or press Cmd+2 / Ctrl+2 for Dual-Wing Orbit, Discover, Rankings, Filters, New Releases, Search, danmaku, comments, and local resume.",
-          q2: "What works without logging into Douyin or Hongguo?",
-          a2: "MyHongguo runs completely anonymously with local favorites and episode progress. MyDouyin browses Orbit Picks, recommendations, categories, search, creator profiles, and public live rooms without sign-in; QR login is only needed for Douyin interactive writes and account history sync.",
-          q3: "Do I need FFmpeg or Microsoft Store HEIF/HEVC extensions on Windows?",
-          a3: "No. Windows builds decode video natively through Media Foundation with no FFmpeg, and decode Hongguo signed HEIC covers using an embedded pure-Go h265/heic decoder cached locally as JPEG. Only Windows N/KN editions need the OS Media Feature Pack.",
-          q4: "Does MyDouyin fill up disk space on macOS?",
-          a4: "No. AVURLAssetUsesNoPersistentCacheKey disables persistent MP4 media caching in $TMPDIR/MediaCache, and the local thumbnail cache enforces an automatic count cap.",
-          q5: "What if Hongguo fails behind a proxy or hits anonymous rate limits?",
-          a5: "Open Settings › MyHongguo and verify direct connection (bypassing system proxy) is enabled (default on). Click Reset anonymous device to generate a fresh profile, or configure an optional remote signer URL and token.",
-          q6: "Where are login sessions, Hongguo tracking lists, and settings stored?",
-          a6: "Everything stays strictly local in standard OS application directories (~/Library/Application Support/Douyin and mydouyin on macOS, or %APPDATA% on Windows) and persists across manual upgrades and delta updates.",
+          macGateLabel: "Fix macOS Gatekeeper warning on first launch",
+          macS1: "Open the .dmg and drag MyDouyin.app into Applications.",
+          macS2: "If macOS blocks the unnotarized build, run the command above or click Open Anyway in System Settings › Privacy & Security.",
+          macS3: "Press Cmd+1 for Douyin or Cmd+2 for Hongguo Short Dramas.",
+          winPsLabel: "One-line PowerShell installer",
+          winS1: "Run the installer or extract the portable archive — no FFmpeg or Store HEVC extension needed.",
+          winS2: "Choose More info › Run anyway if SmartScreen warns; Windows N/KN editions need the OS Media Feature Pack.",
+          winS3: "Press Ctrl+1 for Douyin or Ctrl+2 for Hongguo Short Dramas.",
+          faqTitle: "FAQ: Hongguo Short Dramas & Douyin Desktop Questions",
+          q1: "Is there a desktop app for Hongguo Short Dramas without using an Android emulator?",
+          a1: "Yes. MyDouyin includes a built-in MyHongguo mode natively for macOS (Apple Silicon) and Windows 10/11 without Android emulators or screen mirroring. Click the top-left switcher or press Cmd+2 / Ctrl+2 for live-action, animated, and AI dramas with rankings, filters, episodes, reviews, danmaku, and local resume.",
+          q2: "How do I watch Douyin videos, live streams, and post image comments on Mac?",
+          a2: "Install MyDouyin on macOS (Apple Silicon) for Orbit home, Recommend, Following, Friends, Live, Short Dramas, Mixes, multi-quality live rooms, real-time danmaku, drag-and-drop image comments, PiP, and QR login sync.",
+          q3: "Can I use MyDouyin and MyHongguo without logging in?",
+          a3: "Yes. MyHongguo works completely without login while saving favorites and episode progress locally. MyDouyin lets you watch Orbit Picks, recommendations, search, creator profiles, and public live rooms without signing in; QR login is only required for likes, saves, comments, danmaku, and history sync.",
+          q4: "Do I need FFmpeg or Microsoft Store HEVC extensions on Windows?",
+          a4: "No. Windows builds display Hongguo covers and play all videos out of the box with no FFmpeg or paid Microsoft Store HEIF/HEVC packs. Only Windows N/KN editions need the OS Media Feature Pack.",
+          q5: "What if Hongguo fails to load behind a proxy or hits anonymous limits?",
+          a5: "Open Settings › MyHongguo in the top-right corner and make sure direct connection (bypassing system proxy) is enabled (default on). Click Reset anonymous device to generate a fresh session if rate-limited.",
+          q6: "How do I open MyDouyin on macOS if Gatekeeper says it cannot be verified?",
+          a6: "Because the open-source build is not Apple-notarized yet, drag it into Applications and click Open Anyway in System Settings › Privacy & Security, or run xattr -dr com.apple.quarantine /Applications/MyDouyin.app in Terminal.",
+          q7: "Is MyDouyin safe, and where are login sessions and Hongguo watch lists stored?",
+          a7: "The source code is fully open with zero telemetry or analytics. Credentials, favorites, and resume timestamps stay strictly in your local OS config folders (~/Library/Application Support on macOS, %APPDATA% on Windows) and persist across updates.",
           disclaimer: "MyDouyin is an independent open-source project and is not affiliated with Douyin, Hongguo, or ByteDance. All data remains locally on your machine with zero telemetry or analytics."
         }
       };
@@ -1966,7 +1916,6 @@
         applyOSPrimaryCTA();
       }
 
-      /* ---------- Theme Toggle ---------- */
       function setTheme(theme) {
         root.setAttribute("data-theme", theme);
         document.getElementById("themeIcon").textContent = theme === "dark" ? "☀" : "☾";
@@ -1975,7 +1924,6 @@
         try { localStorage.setItem("mydouyin_theme", theme); } catch (_) {}
       }
 
-      /* ---------- Mode Morph (Douyin <-> Hongguo) ---------- */
       function setMode(mode, syncStage) {
         root.setAttribute("data-mode", mode);
         document.querySelectorAll(".brand-btn").forEach((b) => {
@@ -1990,7 +1938,6 @@
         }
       }
 
-      /* ---------- Stage Switcher ---------- */
       function setStage(name) {
         currentStage = name;
         document.querySelectorAll(".stage-tab").forEach((t) => {
@@ -2005,7 +1952,6 @@
         if (name === "hg-detail" || name === "hg-player") setMode("hongguo", false);
       }
 
-      /* ---------- Interactive Split Curtain ---------- */
       const splitWrap = document.getElementById("splitWrap");
       let splitPct = 50;
       let dragging = false;
@@ -2041,16 +1987,9 @@
         if (!dragging) return;
         updateSplitFromClientX(e.clientX);
       });
-      splitWrap.addEventListener("pointerup", () => {
-        dragging = false;
-        splitWrap.classList.remove("dragging");
-      });
-      splitWrap.addEventListener("pointercancel", () => {
-        dragging = false;
-        splitWrap.classList.remove("dragging");
-      });
+      splitWrap.addEventListener("pointerup", () => { dragging = false; splitWrap.classList.remove("dragging"); });
+      splitWrap.addEventListener("pointercancel", () => { dragging = false; splitWrap.classList.remove("dragging"); });
 
-      /* ---------- Danmaku Toggle ---------- */
       const dmLayer = document.getElementById("danmakuLayer");
       const dmBtn = document.getElementById("toggleDanmaku");
       function updateDanmakuBtn() {
@@ -2063,35 +2002,26 @@
         updateDanmakuBtn();
       });
 
-      /* ---------- Tactile Keyboard Playground ---------- */
       function flashKey(keyName) {
         const el = document.querySelector(`.key-item[data-key="${keyName}"]`);
         if (!el) return;
         el.classList.add("pressed");
         setTimeout(() => el.classList.remove("pressed"), 210);
       }
-
       function triggerKeyAction(key) {
-        if (key === "1") {
-          flashKey("1");
-          setMode("douyin", true);
-        } else if (key === "2") {
-          flashKey("2");
-          setMode("hongguo", true);
-        } else if (key === "ArrowLeft") {
+        if (key === "1") { flashKey("1"); setMode("douyin", true); }
+        else if (key === "2") { flashKey("2"); setMode("hongguo", true); }
+        else if (key === "ArrowLeft") {
           flashKey("ArrowLeft");
-          const idx = (stageOrder.indexOf(currentStage) - 1 + stageOrder.length) % stageOrder.length;
-          setStage(stageOrder[idx]);
+          setStage(stageOrder[(stageOrder.indexOf(currentStage) - 1 + stageOrder.length) % stageOrder.length]);
         } else if (key === "ArrowRight") {
           flashKey("ArrowRight");
-          const idx = (stageOrder.indexOf(currentStage) + 1) % stageOrder.length;
-          setStage(stageOrder[idx]);
+          setStage(stageOrder[(stageOrder.indexOf(currentStage) + 1) % stageOrder.length]);
         } else if (key === "t" || key === "T") {
           flashKey("t");
           setTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
         }
       }
-
       document.querySelectorAll(".key-item").forEach((btn) => {
         btn.addEventListener("click", () => triggerKeyAction(btn.dataset.key));
       });
@@ -2107,7 +2037,6 @@
         }
       });
 
-      /* ---------- Wire UI Controls ---------- */
       document.querySelectorAll(".brand-btn").forEach((btn) => {
         btn.addEventListener("click", () => setMode(btn.dataset.switch, true));
       });
@@ -2121,10 +2050,8 @@
         applyLang(currentLang === "zh" ? "en" : "zh");
       });
 
-      /* ---------- OS Tabs & Smart OS Detection ---------- */
       const isWin = /Windows/i.test(navigator.userAgent);
       let latestUrls = {
-        tag: "v0.2.26",
         macDmg: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg",
         macTar: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-darwin-arm64.tar.gz",
         winExe: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe",
@@ -2153,19 +2080,14 @@
         const pTxt = document.getElementById("primaryDlText");
         const sTxt = document.getElementById("secondaryDlText");
         if (isWin) {
-          pBtn.href = latestUrls.winExe;
-          pTxt.textContent = d.dlWin;
-          sBtn.href = latestUrls.macDmg;
-          sTxt.textContent = d.dlMac;
+          pBtn.href = latestUrls.winExe; pTxt.textContent = d.dlWin;
+          sBtn.href = latestUrls.macDmg; sTxt.textContent = d.dlMac;
         } else {
-          pBtn.href = latestUrls.macDmg;
-          pTxt.textContent = d.dlMac;
-          sBtn.href = latestUrls.winExe;
-          sTxt.textContent = d.dlWin;
+          pBtn.href = latestUrls.macDmg; pTxt.textContent = d.dlMac;
+          sBtn.href = latestUrls.winExe; sTxt.textContent = d.dlWin;
         }
       }
 
-      /* ---------- Copy Buttons ---------- */
       document.querySelectorAll(".copy-btn").forEach((btn) => {
         btn.addEventListener("click", async () => {
           try {
@@ -2180,12 +2102,10 @@
         });
       });
 
-      /* ---------- Dynamic GitHub Latest Release Sync ---------- */
       fetch("https://api.github.com/repos/margbug01/MyDouyin/releases/latest")
         .then((r) => (r.ok ? r.json() : null))
         .then((rel) => {
           if (!rel || !rel.tag_name) return;
-          latestUrls.tag = rel.tag_name;
           document.getElementById("releaseTag").textContent = rel.tag_name;
           if (rel.html_url) document.getElementById("releasePill").href = rel.html_url;
           const assets = Array.isArray(rel.assets) ? rel.assets : [];
@@ -2195,50 +2115,25 @@
           const exe = find(/setup-.*amd64\.exe$/i);
           const wtar = find(/windows-amd64\.tar\.gz$/i);
           const sha = find(/^SHA256SUMS$/i);
-          if (dmg) {
-            latestUrls.macDmg = dmg.browser_download_url;
-            document.getElementById("dlMacDmg").href = dmg.browser_download_url;
-            document.getElementById("macDmgFile").textContent = dmg.name;
-          }
-          if (mtar) {
-            latestUrls.macTar = mtar.browser_download_url;
-            document.getElementById("dlMacTar").href = mtar.browser_download_url;
-            document.getElementById("macTarFile").textContent = mtar.name;
-          }
-          if (exe) {
-            latestUrls.winExe = exe.browser_download_url;
-            document.getElementById("dlWinExe").href = exe.browser_download_url;
-            document.getElementById("winExeFile").textContent = exe.name;
-          }
-          if (wtar) {
-            latestUrls.winTar = wtar.browser_download_url;
-            document.getElementById("dlWinTar").href = wtar.browser_download_url;
-            document.getElementById("winTarFile").textContent = wtar.name;
-          }
-          if (sha) {
-            latestUrls.sha = sha.browser_download_url;
-            document.getElementById("dlSha1").href = sha.browser_download_url;
-            document.getElementById("dlSha2").href = sha.browser_download_url;
-          }
+          if (dmg) { latestUrls.macDmg = dmg.browser_download_url; document.getElementById("dlMacDmg").href = dmg.browser_download_url; document.getElementById("macDmgFile").textContent = dmg.name; }
+          if (mtar) { latestUrls.macTar = mtar.browser_download_url; document.getElementById("dlMacTar").href = mtar.browser_download_url; document.getElementById("macTarFile").textContent = mtar.name; }
+          if (exe) { latestUrls.winExe = exe.browser_download_url; document.getElementById("dlWinExe").href = exe.browser_download_url; document.getElementById("winExeFile").textContent = exe.name; }
+          if (wtar) { latestUrls.winTar = wtar.browser_download_url; document.getElementById("dlWinTar").href = wtar.browser_download_url; document.getElementById("winTarFile").textContent = wtar.name; }
+          if (sha) { latestUrls.sha = sha.browser_download_url; document.getElementById("dlSha1").href = sha.browser_download_url; document.getElementById("dlSha2").href = sha.browser_download_url; }
           applyOSPrimaryCTA();
         })
         .catch(() => {});
 
-      /* ---------- Scroll Reveal ---------- */
       const io = new IntersectionObserver(
         (entries) => {
           entries.forEach((en) => {
-            if (en.isIntersecting) {
-              en.target.classList.add("in");
-              io.unobserve(en.target);
-            }
+            if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
           });
         },
-        { threshold: 0.12 }
+        { threshold: 0.1 }
       );
       document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
 
-      /* ---------- Init ---------- */
       try {
         const saved = localStorage.getItem("mydouyin_theme");
         if (saved === "dark" || saved === "light") setTheme(saved);
