@@ -19,7 +19,7 @@ func TestDecodeHEICCoverOnNonDarwin(t *testing.T) {
 		}
 	}
 	var raw bytes.Buffer
-	if err := heic.Encode(&raw, src, nil); err != nil {
+	if err := heic.Encode(&raw, src, heic.EncodeOptions{}); err != nil {
 		t.Fatalf("heic.Encode failed: %v", err)
 	}
 
