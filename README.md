@@ -198,3 +198,17 @@ MyDouyin 尚未进行 Apple 官方公证，macOS Gatekeeper 会默认拦截首�
 ### 登录凭证、红果追剧记录和个人设置保存在哪里？
 
 所有个人数据只保存在本机标准应用配置目录中（macOS 位于 `~/Library/Application Support/Douyin` 与 `~/Library/Application Support/mydouyin`，Windows 位于 `%APPDATA%` 对应目录）。覆盖安装或应用内热更新均会保留登录态、偏好设置与红果追剧进度。
+
+## 致谢
+
+MyDouyin · MyHongguo 的实现借鉴并受益于以下优秀开源项目与社区贡献者的工作，特此致谢：
+
+- **[MyGo](https://github.com/egoist/mygo)**：提供轻量原生的 Go 跨平台 GUI、系统原生视频播放与签名增量更新框架，构成了本项目的基础底座。
+- **[openhongguo](https://github.com/beilunyang/openhongguo)**（及上游修复贡献者 **[J3n5en/openhongguo](https://github.com/J3n5en/openhongguo)**）：开源红果短剧协议分析与 Go SDK，为 MyHongguo 红果短剧模式提供了核心支持。
+- **[purego](https://github.com/ebitengine/purego)**：让 Go 程序无需 CGo 即可直接调用系统原生动态库。
+- **[gen2brain/h265](https://github.com/gen2brain/h265)**：纯 Go HEVC / HEIC 图像解码实现，使 Windows 端无需微软商店扩展即可直接显示红果短剧封面。
+- 感谢所有体验反馈、提出建议与分享思路的开源社区朋友们。
+
+## 友链
+
+- **[LINUX DO](https://linux.do)**：真诚、友善、团结、专业的开源与技术交流社区（新的理想型社区）。

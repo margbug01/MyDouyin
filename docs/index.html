@@ -1120,6 +1120,56 @@
       line-height: 1.75;
     }
 
+    /* Credits & Friends */
+    .credits-grid {
+      display: grid;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 16px;
+    }
+    .credits-list {
+      margin: 14px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 12px;
+    }
+    .credits-list li {
+      font-size: 14px;
+      color: var(--ink-2);
+      line-height: 1.62;
+    }
+    .credits-list a {
+      color: var(--ink);
+      font-weight: 700;
+      text-decoration: underline;
+      text-decoration-color: var(--border-strong);
+      text-underline-offset: 3px;
+      transition: color 0.2s, text-decoration-color 0.2s;
+    }
+    .credits-list a:hover {
+      color: var(--accent);
+      text-decoration-color: var(--accent);
+    }
+    .friend-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      transition: border-color 0.2s, transform 0.2s var(--ease);
+    }
+    .friend-link:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .friend-link strong { display: block; font-size: 15px; color: var(--ink); }
+    .friend-link span { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+    .friend-domain { font-family: var(--font-mono); font-size: 12px; color: var(--accent); font-weight: 650; white-space: nowrap; }
+
     /* Footer */
     footer {
       border-top: 1px solid var(--border);
@@ -1157,7 +1207,7 @@
     @media (max-width: 960px) {
       .nav-links { display: none; }
       .spec-grid, .pillar-grid { grid-template-columns: repeat(2, 1fr); }
-      .pillar-shot { grid-template-columns: 1fr; }
+      .pillar-shot, .credits-grid { grid-template-columns: 1fr; }
       .os-pane.active { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
@@ -1689,6 +1739,40 @@
         </div>
       </div>
     </section>
+    <!-- Acknowledgements & Community Links -->
+    <section class="block" id="credits">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">ACKNOWLEDGEMENTS &amp; LINKS</span>
+          <h2 data-i18n="creditsTitle">致谢与友情链接</h2>
+        </div>
+
+        <div class="credits-grid reveal">
+          <div class="card">
+            <h3 data-i18n="thanksHead">开源致谢</h3>
+            <p data-i18n="thanksIntro">本项目的实现借鉴并受益于以下优秀开源项目与社区贡献者：</p>
+            <ul class="credits-list">
+              <li><a href="https://github.com/egoist/mygo" target="_blank" rel="noopener">MyGo</a>：<span data-i18n="thMygo">提供 Go 跨平台原生桌面界面、系统原生播放与增量更新底座。</span></li>
+              <li><a href="https://github.com/beilunyang/openhongguo" target="_blank" rel="noopener">openhongguo</a>（<a href="https://github.com/J3n5en/openhongguo" target="_blank" rel="noopener">J3n5en/openhongguo</a>）：<span data-i18n="thHg">开源红果短剧协议分析与 Go SDK 及上游及时修复。</span></li>
+              <li><a href="https://github.com/ebitengine/purego" target="_blank" rel="noopener">purego</a>：<span data-i18n="thPurego">支持免 CGo 直接调用系统原生动态库。</span></li>
+              <li><a href="https://github.com/gen2brain/h265" target="_blank" rel="noopener">gen2brain/h265</a>：<span data-i18n="thH265">纯 Go HEVC / HEIC 图像解码，让 Windows 开箱显示红果封面。</span></li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h3 data-i18n="friendsHead">友情链接</h3>
+            <p data-i18n="friendsIntro">感谢交流分享与一起打磨工具的开源技术社区：</p>
+            <a class="friend-link" href="https://linux.do" target="_blank" rel="noopener">
+              <div>
+                <strong>LINUX DO</strong>
+                <span data-i18n="ldDesc">真诚、友善、团结、专业的开源与技术交流社区</span>
+              </div>
+              <span class="friend-domain">linux.do ↗</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer>
@@ -1702,8 +1786,8 @@
         <div class="footer-links">
           <a href="https://github.com/margbug01/MyDouyin" target="_blank" rel="noopener">GitHub</a>
           <a href="https://github.com/margbug01/MyDouyin/releases/latest" target="_blank" rel="noopener">Releases</a>
+          <a href="https://linux.do" target="_blank" rel="noopener">LINUX DO</a>
           <a href="https://github.com/margbug01/MyDouyin/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG</a>
-          <a href="https://github.com/margbug01/MyDouyin/blob/main/PERFORMANCE.md" target="_blank" rel="noopener">PERFORMANCE</a>
           <a href="https://github.com/margbug01/MyDouyin/blob/main/README.en.md" target="_blank" rel="noopener">English README</a>
         </div>
       </div>
@@ -1795,6 +1879,10 @@
           a6: "个人开源版本尚未申请 Apple 官方公证，macOS Gatekeeper 会默认拦截首次运行。将应用拖入「应用程序」目录后，在「系统设置 › 隐私与安全性」点击「仍要打开」，或在终端运行 xattr -dr com.apple.quarantine /Applications/MyDouyin.app 即可正常启动。",
           q7: "使用 MyDouyin 安全吗？登录信息和红果追剧记录存在哪里？",
           a7: "代码完全开源、零遥测、不上传任何统计信息。你的登录凭证、红果追剧列表与播放进度只保存在本机系统配置目录中（macOS 位于 ~/Library/Application Support，Windows 位于 %APPDATA%），覆盖安装或应用内更新均不会丢失数据。",
+          creditsTitle: "致谢与友情链接", thanksHead: "开源致谢", thanksIntro: "本项目的实现借鉴并受益于以下优秀开源项目与社区贡献者：",
+          thMygo: "提供 Go 跨平台原生桌面界面、系统原生播放与增量更新底座。", thHg: "开源红果短剧协议分析与 Go SDK 及上游及时修复。",
+          thPurego: "支持免 CGo 直接调用系统原生动态库。", thH265: "纯 Go HEVC / HEIC 图像解码，让 Windows 开箱显示红果封面。",
+          friendsHead: "友情链接", friendsIntro: "感谢交流分享与一起打磨工具的开源技术社区：", ldDesc: "真诚、友善、团结、专业的开源与技术交流社区",
           disclaimer: "MyDouyin 是个人开源项目，与抖音（Douyin）、红果短剧（Hongguo）及字节跳动没有任何官方关联。软件所有数据仅在本机运行和存储，不收集任何遥测或统计信息。请仅使用个人账号合理浏览并遵守对应平台服务条款。"
         },
         en: {
@@ -1870,6 +1958,10 @@
           a6: "Because the open-source build is not Apple-notarized yet, drag it into Applications and click Open Anyway in System Settings › Privacy & Security, or run xattr -dr com.apple.quarantine /Applications/MyDouyin.app in Terminal.",
           q7: "Is MyDouyin safe, and where are login sessions and Hongguo watch lists stored?",
           a7: "The source code is fully open with zero telemetry or analytics. Credentials, favorites, and resume timestamps stay strictly in your local OS config folders (~/Library/Application Support on macOS, %APPDATA% on Windows) and persist across updates.",
+          creditsTitle: "Acknowledgements & Community Links", thanksHead: "Open-Source Credits", thanksIntro: "Built with and inspired by these open-source projects and contributors:",
+          thMygo: "Native Go cross-platform UI, OS playback, and delta updates.", thHg: "Open-source Hongguo Short Drama protocol and Go SDK.",
+          thPurego: "Calling native OS libraries from Go without CGo.", thH265: "Pure-Go HEVC / HEIC decoding for Windows drama covers.",
+          friendsHead: "Community Links", friendsIntro: "Recommended open-source and developer community:", ldDesc: "A friendly, open-source and technology community",
           disclaimer: "MyDouyin is an independent open-source project and is not affiliated with Douyin, Hongguo, or ByteDance. All data remains locally on your machine with zero telemetry or analytics."
         }
       };

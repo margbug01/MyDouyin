@@ -197,3 +197,17 @@ Drag **MyDouyin.app** into `/Applications`, click **Open Anyway** under **System
 ### Where are login sessions, Hongguo tracking lists, and settings stored?
 
 All personal data stays in standard local OS configuration directories (`~/Library/Application Support/Douyin` and `~/Library/Application Support/mydouyin` on macOS, or `%APPDATA%` on Windows) and persists across manual upgrades and in-app delta updates.
+
+## Acknowledgements
+
+MyDouyin · MyHongguo builds on and draws inspiration from the following open-source projects and contributors:
+
+- **[MyGo](https://github.com/egoist/mygo)**: Native Go cross-platform UI, OS media playback, and signed delta update framework powering this app.
+- **[openhongguo](https://github.com/beilunyang/openhongguo)** (and upstream contributor **[J3n5en/openhongguo](https://github.com/J3n5en/openhongguo)**): Open-source Hongguo Short Drama protocol research and Go SDK behind MyHongguo mode.
+- **[purego](https://github.com/ebitengine/purego)**: Calling native OS libraries from Go without CGo.
+- **[gen2brain/h265](https://github.com/gen2brain/h265)**: Pure-Go HEVC / HEIC decoding that renders Hongguo covers on Windows without Store codec packs.
+- Thanks to everyone in the open-source community who tested builds, reported bugs, and shared feedback.
+
+## Community Links
+
+- **[LINUX DO](https://linux.do)**: A friendly, open-source and technology community.
