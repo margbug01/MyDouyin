@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://margbug01.github.io/MyDouyin/sitemap.xml
+Sitemap: https://mydouyin.pages.dev/sitemap.xml
