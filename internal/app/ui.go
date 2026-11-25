@@ -520,6 +520,38 @@ func (a *app) tabsRow(c *ui.Context) {
 	})
 }
 
+// coverShape is the shape Douyin crops a list's covers to, which the grid's
+// cards take whole rather than crop them again: Douyin's 横封面 in 精选,
+// search and series; its 竖封面 in a profile's lists (作品, 喜欢, 收藏, 观看历史,
+// 稍后再看); a live room's own picture in 直播.
+type coverShape uint8
+
+const (
+	landscapeCovers coverShape = iota // 4:3
+	portraitCovers                    // 3:4
+	liveCovers                        // 16:9
+)
+
+// ratio is a card's cover, width over height.
+func (s coverShape) ratio() float32 {
+	switch s {
+	case portraitCovers:
+		return 3.0 / 4
+	case liveCovers:
+		return 16.0 / 9
+	}
+	return 4.0 / 3
+}
+
+// minWidth is a card's narrowest: an upright one shows as much as a wide
+// one does narrower, and a row holds more of them.
+func (s coverShape) minWidth() float32 {
+	if s == portraitCovers {
+		return 200
+	}
+	return 260
+}
+
 // grid is p's covers, as many columns as fit, loading more near its end. 精选's
 // first video is a big card that plays, silent, as Douyin's does. Virtualized
 // via ui.List so off-screen covers are not built or retained in memory.
@@ -529,7 +561,7 @@ func (a *app) grid(c *ui.Context, p *page) {
 	if a.notes != nil || a.dms != nil {
 		inner -= 360 + 16
 	}
-	cols := max(2, int((inner+16)/(260+16)))
+	cols := max(2, int((inner+16)/(p.covers.minWidth()+16)))
 	colW := (inner - 16*float32(cols-1)) / float32(cols)
 	hasBig := p == a.picks && cols >= 3 && len(p.list) > 0
 	nCardRows := 0
@@ -574,7 +606,7 @@ func (a *app) grid(c *ui.Context, p *page) {
 			return
 		}
 		if hasBig && row == 0 {
-			bigH := 2*(colW*9/16+63) + 26
+			bigH := 2*(colW/p.covers.ratio()+63) + 26
 			ui.Row(c).Padding(0, barGutter, 26, 24).Gap(16).AlignItems(ui.Stretch).Children(func() {
 				a.bigCard(c.Key("0"), p, p.list[0], float32(cols-1), bigH, viewport)
 				ui.Column(c.Key("side")).Grow(1).Basis(0).MinWidth(0).Gap(26).Children(func() {
@@ -611,7 +643,7 @@ func (a *app) card(c *ui.Context, p *page, i int, s *slot) ui.Element {
 	v := s.v
 	b := ui.ButtonBase(c).Column().AlignItems(ui.Stretch).Justify(ui.Start).Gap(8).FocusRing(false).Label(v.Desc)
 	b.Children(func() {
-		cover := ui.Box(c).AspectRatio(16.0 / 9).Radius(10).Clip().Background(pal.well)
+		cover := ui.Box(c).AspectRatio(p.covers.ratio()).Radius(10).Clip().Background(pal.well)
 		cover.Children(func() {
 			if bmp := a.img.getSized(v.Cover, coverEdge); bmp != nil {
 				ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover).Transition(coverFade)

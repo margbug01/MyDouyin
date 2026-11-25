@@ -168,6 +168,7 @@ type page struct {
 	msg      string
 	paused   bool   // playback state while another page is open
 	authorID string // an author's works, where is_top is meaningful
+	covers   coverShape // the shape of the covers Douyin serves this list, which its cards take
 
 	restart func() dy.Pager[dy.Video] // a root's list from the top, as refresh takes it; nil goes on with next
 
@@ -1502,7 +1503,7 @@ func (a *app) loadAccount() {
 			}
 			if me.ID != "" && a.mine == nil {
 				list := func(title string, from func() dy.Pager[dy.Video]) *page {
-					return &page{title: title, next: from(), grid: true, restart: from}
+					return &page{title: title, next: from(), grid: true, restart: from, covers: portraitCovers}
 				}
 				posts := list("作品", func() dy.Pager[dy.Video] { return a.c.MyPosts(me.ID) })
 				posts.authorID = me.ID
@@ -2148,7 +2149,7 @@ func (a *app) openAuthor(p *page, name, id string) {
 		return
 	}
 	if a.c != nil {
-		q := &page{title: "@" + name, authorID: id, next: a.c.Posts(id), grid: true}
+		q := &page{title: "@" + name, authorID: id, next: a.c.Posts(id), grid: true, covers: portraitCovers}
 		a.open(q)
 		go func() {
 			if u, err := a.c.Profile(id); err == nil {
@@ -2274,7 +2275,7 @@ func Run() error {
 	a.loadOrbitCache()
 	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true, restart: c.FollowFeed}
 	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true, restart: c.FriendFeed}
-	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true, restart: c.LiveRooms}
+	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true, restart: c.LiveRooms, covers: liveCovers}
 	a.drama = picksPage(c, "短剧", 300214) // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.home}
 	a.img = newImages(c.Image, a.post)
