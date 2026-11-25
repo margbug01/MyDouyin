@@ -1,0 +1,2252 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-mode="douyin">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyDouyin · MyHongguo — 开源原生抖音桌面客户端 &amp; 红果短剧电脑版（macOS / Windows）</title>
+  <meta name="description" content="MyDouyin 是基于 Go 与 MyGo 构建的开源原生桌面客户端，在一个窗口内同时提供抖音（MyDouyin）与红果短剧（MyHongguo）双模式，支持 macOS Apple Silicon 与 Windows 10/11 x64，无 Electron、无安卓模拟器、无 FFmpeg。">
+  <meta name="keywords" content="MyDouyin, MyHongguo, 抖音桌面客户端, Mac 抖音客户端, 红果短剧电脑版, 红果短剧桌面端, 不用安卓模拟器看红果短剧, Douyin desktop client, Hongguo short drama, Go, MyGo, AVFoundation, Media Foundation, HEIC">
+  <meta name="theme-color" content="#f6f7fb">
+  <link rel="canonical" href="https://margbug01.github.io/MyDouyin/">
+  <link rel="icon" type="image/png" href="douyin-icon.png">
+  <link rel="apple-touch-icon" href="douyin-icon.png">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="MyDouyin · MyHongguo">
+  <meta property="og:title" content="MyDouyin · MyHongguo — 开源原生抖音桌面客户端 &amp; 红果短剧电脑版">
+  <meta property="og:description" content="一个轻量原生窗口，同时刷抖音与看红果免费短剧/漫剧。macOS 约 65 MB 零写盘硬解，Windows 原生 Media Foundation + 纯 Go HEIC 封面解码。">
+  <meta property="og:url" content="https://margbug01.github.io/MyDouyin/">
+  <meta property="og:image" content="https://margbug01.github.io/MyDouyin/screenshots/hero.webp">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="MyDouyin · MyHongguo — Native Douyin &amp; Hongguo Short Drama Desktop Client">
+  <meta name="twitter:description" content="Open-source Go + MyGo native desktop client for Douyin and Hongguo Short Dramas on macOS (Apple Silicon) and Windows 10/11 (x64). No Electron, no Android emulators, no FFmpeg.">
+  <meta name="twitter:image" content="https://margbug01.github.io/MyDouyin/screenshots/hero.webp">
+
+  <!-- Structured Data: SoftwareApplication + FAQPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "MyDouyin · MyHongguo",
+        "alternateName": ["MyDouyin", "MyHongguo", "红果短剧电脑版", "抖音原生桌面客户端"],
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "macOS (Apple Silicon), Windows 10, Windows 11 (x64)",
+        "softwareVersion": "0.2.26",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "CNY"
+        },
+        "url": "https://margbug01.github.io/MyDouyin/",
+        "downloadUrl": "https://github.com/margbug01/MyDouyin/releases/latest",
+        "codeRepository": "https://github.com/margbug01/MyDouyin",
+        "screenshot": [
+          "https://margbug01.github.io/MyDouyin/screenshots/hero.webp",
+          "https://margbug01.github.io/MyDouyin/screenshots/hongguo-orbit.webp",
+          "https://margbug01.github.io/MyDouyin/screenshots/player.webp",
+          "https://margbug01.github.io/MyDouyin/screenshots/hongguo-player.webp"
+        ],
+        "description": "开源轻量原生桌面客户端，基于 Go 与 MyGo 构建，在单窗口内提供抖音桌面端（MyDouyin）与红果短剧电脑版（MyHongguo）双模式，无需 Electron、安卓模拟器、FFmpeg 或微软商店 HEVC 扩展。"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "红果短剧有电脑版吗？如何在 Mac 和 Windows 上不用安卓模拟器看红果短剧？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11（x64）上，不需要安卓模拟器或手机投屏。点击左上角品牌胶囊或按 Cmd+2 / Ctrl+2 即可切换进入，支持双星引力场、发现、榜单、分类、上新、搜索、剧集详情、弹幕、评论与本地断点续播。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "不登录抖音或红果账号可以直接使用吗？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "可以。MyHongguo 红果短剧模式全程免登录匿名运行，追剧收藏与播放断点仅保存在本机。MyDouyin 抖音模式免登录即可浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间，仅在点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Windows 上看红果短剧需要额外安装 FFmpeg 或微软商店 HEIF/HEVC 扩展吗？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "不需要。Windows 版视频直接走系统原生 Media Foundation 硬件解码，不含 FFmpeg；红果短剧的签名 HEIC 封面通过内置纯 Go h265/heic 解码器直接解码并转存本地 JPEG 缓存，无需微软商店 HEIF/HEVC 扩展。仅 Windows N/KN 精简版需安装系统可选功能 Media Feature Pack。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Mac 长时间刷抖音会把视频缓存写满硬盘吗？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "不会。MyDouyin 在 macOS 上对 AVFoundation 显式启用 AVURLAssetUsesNoPersistentCacheKey，消除临时 MP4 写盘，实测 1080p 解码进程物理内存约 65 MB。"
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --bg-elev: rgba(255, 255, 255, 0.78);
+      --surface: #ffffff;
+      --surface-2: #eff1f7;
+      --surface-3: #e7eaf3;
+      --ink: #0e1117;
+      --ink-2: #4c5568;
+      --ink-3: #7c8599;
+      --border: rgba(14, 17, 23, 0.085);
+      --border-strong: rgba(14, 17, 23, 0.15);
+      --shadow-sm: 0 2px 8px rgba(14, 17, 23, 0.04);
+      --shadow-md: 0 14px 40px rgba(14, 17, 23, 0.08);
+      --shadow-lg: 0 30px 90px rgba(14, 17, 23, 0.13);
+      --void-slice: #08090f;
+      --accent: #fe2c55;
+      --accent-2: #08c5c4;
+      --accent-soft: rgba(254, 44, 85, 0.10);
+      --accent-2-soft: rgba(8, 197, 196, 0.12);
+      --glow-1: rgba(254, 44, 85, 0.13);
+      --glow-2: rgba(37, 244, 238, 0.16);
+      --radius-sm: 12px;
+      --radius-md: 18px;
+      --radius-lg: 26px;
+      --font-sans: "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    html[data-theme="dark"] {
+      --bg: #07080d;
+      --bg-elev: rgba(16, 18, 26, 0.78);
+      --surface: #11131c;
+      --surface-2: #171a26;
+      --surface-3: #1f2333;
+      --ink: #f4f6fc;
+      --ink-2: #a5aec2;
+      --ink-3: #6f788f;
+      --border: rgba(255, 255, 255, 0.09);
+      --border-strong: rgba(255, 255, 255, 0.17);
+      --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
+      --shadow-md: 0 18px 46px rgba(0, 0, 0, 0.45);
+      --shadow-lg: 0 36px 100px rgba(0, 0, 0, 0.65);
+      --void-slice: #10131e;
+    }
+
+    html[data-mode="hongguo"] {
+      --accent: #ff453a;
+      --accent-2: #7c5cff;
+      --accent-soft: rgba(255, 69, 58, 0.11);
+      --accent-2-soft: rgba(124, 92, 255, 0.14);
+      --glow-1: rgba(255, 69, 58, 0.14);
+      --glow-2: rgba(124, 92, 255, 0.17);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      transition: background 0.45s var(--ease), color 0.35s var(--ease);
+    }
+
+    a { color: inherit; text-decoration: none; }
+    button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+    img { display: block; max-width: 100%; }
+
+    /* Ambient Orbit Aura */
+    .ambient {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: -2;
+      overflow: hidden;
+    }
+    .ambient::before,
+    .ambient::after {
+      content: "";
+      position: absolute;
+      width: 58vw;
+      height: 58vw;
+      max-width: 780px;
+      max-height: 780px;
+      border-radius: 50%;
+      filter: blur(110px);
+      transition: background 0.7s var(--ease), transform 0.9s var(--ease);
+    }
+    .ambient::before {
+      top: -22vw;
+      left: -14vw;
+      background: radial-gradient(circle, var(--glow-1), transparent 68%);
+    }
+    .ambient::after {
+      top: -12vw;
+      right: -16vw;
+      background: radial-gradient(circle, var(--glow-2), transparent 68%);
+    }
+
+    /* Subtle Diagonal Porcelain / Void Architectural Ribbon */
+    .hero-diagonal {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: -1;
+      overflow: hidden;
+      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.5) 72%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.5) 72%, transparent 100%);
+    }
+    .hero-diagonal::before {
+      content: "";
+      position: absolute;
+      top: -80px;
+      right: -12%;
+      width: 54%;
+      height: 112%;
+      background: linear-gradient(135deg, rgba(14, 17, 23, 0.032), rgba(14, 17, 23, 0.008));
+      transform: skewX(-16deg);
+      border-left: 1px solid var(--border);
+    }
+    html[data-theme="dark"] .hero-diagonal::before {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.006));
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Floating Glass Header */
+    .topbar-wrap {
+      position: sticky;
+      top: 14px;
+      z-index: 60;
+      padding: 0 16px;
+      margin-bottom: 18px;
+    }
+    .topbar {
+      max-width: 1128px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 10px 8px 8px;
+      border-radius: 999px;
+      background: var(--bg-elev);
+      backdrop-filter: blur(20px) saturate(1.6);
+      -webkit-backdrop-filter: blur(20px) saturate(1.6);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* Interactive Dual Brand Switcher Pill */
+    .brand-switcher {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      padding: 3px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+    .brand-pill-bg {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      height: calc(100% - 6px);
+      width: calc(50% - 3px);
+      border-radius: 999px;
+      background: var(--surface);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+      border: 1px solid var(--border);
+      transition: transform 0.36s var(--ease);
+    }
+    html[data-mode="hongguo"] .brand-pill-bg {
+      transform: translateX(100%);
+    }
+    .brand-btn {
+      position: relative;
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 13px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      color: var(--ink-2);
+      transition: color 0.25s ease;
+      white-space: nowrap;
+    }
+    .brand-btn img {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+    }
+    .brand-btn .kbd-mini {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 5px;
+      background: var(--surface-3);
+      color: var(--ink-3);
+    }
+    html[data-mode="douyin"] .brand-btn[data-switch="douyin"],
+    html[data-mode="hongguo"] .brand-btn[data-switch="hongguo"] {
+      color: var(--ink);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .nav-links a {
+      font-size: 13px;
+      font-weight: 550;
+      color: var(--ink-2);
+      padding: 7px 12px;
+      border-radius: 999px;
+      transition: background 0.2s, color 0.2s;
+    }
+    .nav-links a:hover {
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .icon-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 34px;
+      padding: 0 11px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--ink-2);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      transition: transform 0.18s var(--ease), color 0.2s, border-color 0.2s;
+    }
+    .icon-pill:hover {
+      color: var(--ink);
+      border-color: var(--border-strong);
+      transform: translateY(-1px);
+    }
+    .icon-pill.icon-only {
+      width: 34px;
+      padding: 0;
+    }
+    .icon-pill.gh-link {
+      background: var(--ink);
+      color: var(--bg);
+      border-color: transparent;
+      padding: 0 13px;
+    }
+    .icon-pill.gh-link:hover {
+      color: var(--bg);
+      opacity: 0.9;
+    }
+
+    /* Hero Section */
+    .hero {
+      position: relative;
+      padding: 36px 0 42px;
+      text-align: center;
+    }
+    .release-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px 6px 9px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--ink-2);
+      margin-bottom: 22px;
+      transition: border-color 0.25s, transform 0.25s var(--ease);
+    }
+    .release-pill:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-1px);
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+      transition: background 0.35s;
+    }
+    .release-tag {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .hero h1 {
+      margin: 0 auto 18px;
+      max-width: 880px;
+      font-size: clamp(2.15rem, 4.9vw, 4.05rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.035em;
+    }
+    .hero h1 .accent-word {
+      background: linear-gradient(115deg, var(--accent) 0%, var(--accent-2) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      transition: filter 0.35s;
+    }
+
+    .hero-sub {
+      max-width: 690px;
+      margin: 0 auto 28px;
+      font-size: clamp(0.98rem, 1.45vw, 1.12rem);
+      color: var(--ink-2);
+      line-height: 1.68;
+    }
+
+    .hero-ctas {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      padding: 13px 22px;
+      border-radius: 999px;
+      font-size: 14.5px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      transition: transform 0.2s var(--ease), box-shadow 0.25s var(--ease), background 0.25s, border-color 0.25s;
+    }
+    .btn:hover { transform: translateY(-2px); }
+    .btn-primary {
+      background: var(--ink);
+      color: var(--bg);
+      box-shadow: 0 12px 28px rgba(14, 17, 23, 0.16);
+    }
+    html[data-theme="dark"] .btn-primary {
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.48);
+    }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--ink);
+      border: 1px solid var(--border-strong);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-ghost {
+      color: var(--ink-2);
+      padding: 13px 16px;
+    }
+    .btn-ghost:hover { color: var(--ink); }
+
+    .hero-badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px 18px;
+      font-size: 12.5px;
+      color: var(--ink-3);
+      margin-bottom: 36px;
+    }
+    .hero-badges span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hero-badges .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent-2);
+    }
+
+    /* Interactive Dual-Orbit Stage */
+    .stage-shell {
+      position: relative;
+      max-width: 1020px;
+      margin: 0 auto;
+    }
+    .stage-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stage-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 15px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-2);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      transition: all 0.25s var(--ease);
+    }
+    .stage-tab:hover {
+      color: var(--ink);
+      border-color: var(--border-strong);
+    }
+    .stage-tab.active {
+      background: var(--ink);
+      color: var(--bg);
+      border-color: transparent;
+      box-shadow: var(--shadow-sm);
+    }
+    .stage-tab .tab-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.45;
+    }
+    .stage-tab.active .tab-dot {
+      background: var(--accent);
+      opacity: 1;
+    }
+
+    .stage-viewport {
+      position: relative;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: #090b12;
+      border: 1px solid var(--border-strong);
+      box-shadow: var(--shadow-lg);
+      aspect-ratio: 1480 / 977;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: pan-y;
+    }
+
+    .stage-panel {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.38s var(--ease);
+    }
+    .stage-panel.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .stage-panel > img,
+    .split-base img,
+    .split-overlay img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scale(1.055);
+      transform-origin: center;
+    }
+
+    /* Split Curtain Comparison */
+    .split-wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      cursor: ew-resize;
+    }
+    .split-base,
+    .split-overlay {
+      position: absolute;
+      inset: 0;
+    }
+    .split-overlay {
+      clip-path: inset(0 calc(100% - var(--split, 50%)) 0 0);
+      will-change: clip-path;
+    }
+    .split-divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: var(--split, 50%);
+      width: 2px;
+      background: linear-gradient(180deg, var(--accent) 0%, #ffffff 50%, var(--accent-2) 100%);
+      box-shadow: 0 0 18px rgba(254, 44, 85, 0.55), 0 0 24px rgba(124, 92, 255, 0.45);
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+    .split-handle {
+      position: absolute;
+      top: 50%;
+      left: var(--split, 50%);
+      transform: translate(-50%, -50%);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(14, 17, 23, 0.86);
+      color: #ffffff;
+      border: 1.5px solid rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+      pointer-events: none;
+      transition: transform 0.2s var(--ease);
+    }
+    .split-wrap.dragging .split-handle {
+      transform: translate(-50%, -50%) scale(1.1);
+    }
+    .split-tag {
+      position: absolute;
+      bottom: 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+      background: rgba(10, 12, 18, 0.72);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(12px);
+      pointer-events: none;
+    }
+    .split-tag img { width: 16px; height: 16px; border-radius: 4px; }
+    .split-tag.left { left: 16px; }
+    .split-tag.right { right: 16px; }
+    .split-hint {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 600;
+      background: rgba(10, 12, 18, 0.7);
+      color: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      transition: opacity 0.4s;
+    }
+    .split-wrap.interacted .split-hint { opacity: 0; }
+
+    /* Interactive Danmaku Overlay on Player Tab */
+    .danmaku-layer {
+      position: absolute;
+      inset: 15% 4% 52% 9.5%;
+      overflow: hidden;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    .danmaku-layer.on { opacity: 1; }
+    .dm-item {
+      position: absolute;
+      left: 102%;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 650;
+      color: rgba(255, 255, 255, 0.94);
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+      animation: dm-fly var(--dur, 9s) linear infinite;
+      animation-delay: var(--delay, 0s);
+    }
+    @keyframes dm-fly {
+      from { transform: translateX(0); }
+      to { transform: translateX(-140vw); }
+    }
+
+    /* Telemetry HUD Chips inside Stage */
+    .stage-hud {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .hud-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .hud-chip {
+      padding: 6px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(10, 12, 18, 0.76);
+      color: #f4f6fc;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      backdrop-filter: blur(12px);
+    }
+    .hud-btn {
+      pointer-events: auto;
+      padding: 7px 13px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(254, 44, 85, 0.35);
+      transition: transform 0.18s var(--ease);
+    }
+    .hud-btn:hover { transform: scale(1.04); }
+
+    /* Interactive Shortcut Keyboard Dock */
+    .kbd-dock {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 18px;
+      padding: 12px 16px;
+      border-radius: 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+    .kbd-dock-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-3);
+      margin-right: 4px;
+    }
+    .key-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 10px 5px 6px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      color: var(--ink-2);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      transition: transform 0.12s ease, border-color 0.2s, background 0.2s, color 0.2s;
+    }
+    .key-item:hover {
+      color: var(--ink);
+      border-color: var(--border-strong);
+    }
+    .key-item.pressed {
+      transform: translateY(2px) scale(0.97);
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--ink);
+    }
+    .keycap {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--ink);
+      border: 1px solid var(--border-strong);
+      box-shadow: 0 2px 0 var(--border-strong);
+    }
+
+    /* Section Headings */
+    section.block {
+      padding: 68px 0;
+    }
+    .section-head {
+      max-width: 720px;
+      margin: 0 auto 38px;
+      text-align: center;
+    }
+    .eyebrow {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+    .section-head h2 {
+      margin: 0 0 12px;
+      font-size: clamp(1.65rem, 3.1vw, 2.5rem);
+      font-weight: 780;
+      letter-spacing: -0.03em;
+      line-height: 1.18;
+    }
+    .section-head p {
+      margin: 0;
+      color: var(--ink-2);
+      font-size: 15.5px;
+    }
+
+    /* Bento Grid: Measured Benchmarks */
+    .bento {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 26px;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.28s var(--ease), border-color 0.25s, box-shadow 0.28s;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: var(--border-strong);
+      box-shadow: var(--shadow-md);
+    }
+    .span-7 { grid-column: span 7; }
+    .span-5 { grid-column: span 5; }
+    .span-4 { grid-column: span 4; }
+    .span-8 { grid-column: span 8; }
+    .span-6 { grid-column: span 6; }
+
+    .metric-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--ink-3);
+      margin-bottom: 12px;
+    }
+    .metric-value {
+      font-size: clamp(2rem, 3.6vw, 2.95rem);
+      font-weight: 820;
+      letter-spacing: -0.04em;
+      line-height: 1.05;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 10px;
+    }
+    .metric-value .unit {
+      font-size: 0.46em;
+      font-weight: 700;
+      color: var(--ink-2);
+      margin-left: 4px;
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      font-weight: 720;
+      letter-spacing: -0.015em;
+    }
+    .card p {
+      margin: 0;
+      font-size: 14px;
+      color: var(--ink-2);
+      line-height: 1.65;
+    }
+
+    /* Bar Chart Comparison inside Card */
+    .bar-list {
+      display: grid;
+      gap: 11px;
+      margin-top: 18px;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 140px 1fr 98px;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+    }
+    .bar-label { color: var(--ink-2); font-weight: 600; }
+    .bar-track {
+      height: 10px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--ink-3);
+      opacity: 0.35;
+    }
+    .bar-fill.best {
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      opacity: 1;
+    }
+    .bar-num {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+
+    /* Dual-OS Architecture Schematic */
+    .arch-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+    .arch-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .arch-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .arch-badge {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--ink);
+    }
+    .pipe-steps {
+      display: grid;
+      gap: 10px;
+    }
+    .pipe-node {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 13px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+    .pipe-icon {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 800;
+      background: var(--surface);
+      color: var(--accent);
+      border: 1px solid var(--border);
+    }
+    .pipe-node strong {
+      display: block;
+      font-size: 13.5px;
+      margin-bottom: 2px;
+    }
+    .pipe-node span {
+      display: block;
+      font-size: 12.5px;
+      color: var(--ink-2);
+    }
+    .shared-core {
+      margin-top: 16px;
+      padding: 22px 26px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(125deg, var(--accent-soft), var(--accent-2-soft));
+      border: 1px solid var(--border-strong);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .shared-core h3 { margin: 0 0 4px; font-size: 16px; }
+    .shared-core p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+    .core-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .core-pill {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 650;
+      padding: 6px 11px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+
+    /* Comparison Table */
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+    table.cmp {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+      font-size: 13.5px;
+    }
+    table.cmp th,
+    table.cmp td {
+      padding: 15px 18px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    table.cmp tr:last-child td { border-bottom: none; }
+    table.cmp th {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--ink-2);
+      background: var(--surface-2);
+    }
+    table.cmp th.hl,
+    table.cmp td.hl {
+      background: var(--accent-soft);
+      color: var(--ink);
+      font-weight: 600;
+    }
+    table.cmp td:first-child {
+      font-weight: 700;
+      white-space: nowrap;
+      width: 145px;
+    }
+
+    /* Install Section */
+    .install-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      box-shadow: var(--shadow-md);
+    }
+    .os-tabs {
+      display: inline-flex;
+      padding: 4px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      margin-bottom: 22px;
+    }
+    .os-tab {
+      padding: 8px 18px;
+      border-radius: 999px;
+      font-size: 13.5px;
+      font-weight: 650;
+      color: var(--ink-2);
+      transition: all 0.22s var(--ease);
+    }
+    .os-tab.active {
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: var(--shadow-sm);
+    }
+    .os-pane { display: none; }
+    .os-pane.active {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    .dl-list {
+      display: grid;
+      gap: 10px;
+    }
+    .dl-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      transition: border-color 0.2s, transform 0.2s var(--ease);
+    }
+    .dl-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .dl-card strong { display: block; font-size: 14px; }
+    .dl-card span { display: block; font-size: 12px; color: var(--ink-3); font-family: var(--font-mono); }
+    .dl-arrow {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--ink);
+      color: var(--bg);
+      flex: 0 0 34px;
+      font-size: 15px;
+    }
+    .cmd-box {
+      padding: 16px;
+      border-radius: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+    .cmd-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--ink-2);
+    }
+    .copy-btn {
+      font-size: 11.5px;
+      font-weight: 650;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      color: var(--ink);
+      transition: background 0.2s, color 0.2s;
+    }
+    .copy-btn.copied {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    pre.code {
+      margin: 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      overflow-x: auto;
+      color: var(--ink);
+    }
+    .install-note {
+      margin-top: 12px;
+      font-size: 12.5px;
+      color: var(--ink-2);
+      line-height: 1.6;
+    }
+
+    /* FAQ Accordion */
+    .faq-grid {
+      display: grid;
+      gap: 10px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    details.faq-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      padding: 16px 20px;
+      transition: border-color 0.2s;
+    }
+    details.faq-item[open] { border-color: var(--border-strong); }
+    details.faq-item summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 680;
+    }
+    details.faq-item summary::-webkit-details-marker { display: none; }
+    details.faq-item summary::after {
+      content: "+";
+      font-family: var(--font-mono);
+      font-size: 18px;
+      color: var(--ink-3);
+      transition: transform 0.25s var(--ease);
+    }
+    details.faq-item[open] summary::after {
+      transform: rotate(45deg);
+      color: var(--accent);
+    }
+    details.faq-item p {
+      margin: 12px 0 0;
+      font-size: 14px;
+      color: var(--ink-2);
+      line-height: 1.72;
+    }
+    details.faq-item code {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: var(--surface-2);
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 36px 0 54px;
+      margin-top: 40px;
+      color: var(--ink-3);
+      font-size: 13px;
+    }
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .footer-brand img { width: 22px; height: 22px; border-radius: 6px; }
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .footer-links a:hover { color: var(--ink); }
+    .disclaimer {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--ink-3);
+      line-height: 1.6;
+    }
+
+    /* Scroll reveal */
+    .reveal {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+    }
+    .reveal.in {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 960px) {
+      .nav-links { display: none; }
+      .span-7, .span-5, .span-4, .span-8, .span-6 { grid-column: span 12; }
+      .arch-grid { grid-template-columns: 1fr; }
+      .os-pane.active { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .topbar { padding: 6px 8px; }
+      .brand-btn { padding: 5px 9px; font-size: 12px; }
+      .brand-btn .kbd-mini { display: none; }
+      .bar-row { grid-template-columns: 112px 1fr 64px; font-size: 12px; }
+      .hero { padding-top: 20px; }
+      .split-tag { font-size: 11px; padding: 4px 9px; bottom: 10px; }
+      .stage-hud { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <!-- Floating Dual-Brand Capsule Header -->
+  <div class="topbar-wrap">
+    <header class="topbar" role="banner">
+      <div class="brand-switcher" role="tablist" aria-label="切换模式">
+        <span class="brand-pill-bg" aria-hidden="true"></span>
+        <button class="brand-btn" data-switch="douyin" role="tab" aria-selected="true">
+          <img src="douyin-icon.png" width="20" height="20" alt="MyDouyin">
+          <span>MyDouyin</span>
+          <span class="kbd-mini">⌘1</span>
+        </button>
+        <button class="brand-btn" data-switch="hongguo" role="tab" aria-selected="false">
+          <img src="hongguo-icon.png" width="20" height="20" alt="MyHongguo">
+          <span>MyHongguo</span>
+          <span class="kbd-mini">⌘2</span>
+        </button>
+      </div>
+
+      <nav class="nav-links" aria-label="主导航">
+        <a href="#stage" data-i18n="navStage">引力场演示</a>
+        <a href="#benchmarks" data-i18n="navBench">实测性能</a>
+        <a href="#architecture" data-i18n="navArch">双原生架构</a>
+        <a href="#compare" data-i18n="navCompare">方案对比</a>
+        <a href="#install" data-i18n="navInstall">下载安装</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <button class="icon-pill" id="langBtn" aria-label="Switch Language">EN</button>
+        <button class="icon-pill icon-only" id="themeBtn" title="切换极净瓷白 / 纯黑黑洞主题" aria-label="切换主题">
+          <span id="themeIcon" aria-hidden="true">☾</span>
+        </button>
+        <a class="icon-pill gh-link" href="https://github.com/margbug01/MyDouyin" target="_blank" rel="noopener">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.78-.25.78-.55v-2.16c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.19-1.49 3.16-1.18 3.16-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.38-5.25 5.67.42.36.79 1.07.79 2.15v3.19c0 .31.21.66.79.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </header>
+  </div>
+
+  <main>
+    <!-- Hero + Interactive Dual-Orbit Stage -->
+    <section class="hero">
+      <div class="hero-diagonal" aria-hidden="true"></div>
+      <div class="container">
+        <a class="release-pill" id="releasePill" href="https://github.com/margbug01/MyDouyin/releases/latest" target="_blank" rel="noopener">
+          <span class="pulse-dot"></span>
+          <span class="release-tag" id="releaseTag">v0.2.26</span>
+          <span data-i18n="releaseDesc">双星引力场 · Windows 纯 Go HEIC 解码 · 原生硬解不写盘</span>
+          <span aria-hidden="true">↗</span>
+        </a>
+
+        <h1 id="heroTitle" data-i18n-html="heroTitle">
+          一个原生窗口，同时装下<br><span class="accent-word">抖音</span>与<span class="accent-word">红果短剧</span>。
+        </h1>
+
+        <p class="hero-sub" data-i18n="heroSub">
+          基于 Go 与 MyGo 构建的开源桌面客户端，原生支持 macOS（Apple Silicon）与 Windows 10/11（x64）。无 Electron、无安卓模拟器、无 FFmpeg 或 HEVC 商店扩展，打开即可免登录浏览抖音与红果免费短剧、漫剧。
+        </p>
+
+        <div class="hero-ctas">
+          <a class="btn btn-primary" id="primaryDl" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg">
+            <span id="primaryDlText" data-i18n="dlMac">下载 macOS（Apple Silicon）</span>
+          </a>
+          <a class="btn btn-secondary" id="secondaryDl" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe">
+            <span id="secondaryDlText" data-i18n="dlWin">下载 Windows 10/11（x64）</span>
+          </a>
+          <a class="btn btn-ghost" href="#install" data-i18n="allInstall">安装指南 &amp; 校验 ↓</a>
+        </div>
+
+        <div class="hero-badges">
+          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge1">macOS 约 65 MB 原生硬解 · 零写盘</em></span>
+          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge2">Windows 原生 Media Foundation + 纯 Go HEIC</em></span>
+          <span><i class="dot"></i><em style="font-style:normal" data-i18n="badge3">红果免登录 · 512 KiB 单次 CENC 解密</em></span>
+        </div>
+
+        <!-- Interactive Stage -->
+        <div class="stage-shell" id="stage">
+          <div class="stage-tabs" role="tablist" aria-label="实拍界面切换">
+            <button class="stage-tab active" data-stage="split" role="tab" aria-selected="true">
+              <span class="tab-dot"></span><span data-i18n="tabSplit">双星切幕对比</span>
+            </button>
+            <button class="stage-tab" data-stage="player" role="tab" aria-selected="false">
+              <span class="tab-dot"></span><span data-i18n="tabPlayer">抖音原生播放</span>
+            </button>
+            <button class="stage-tab" data-stage="hg-detail" role="tab" aria-selected="false">
+              <span class="tab-dot"></span><span data-i18n="tabHgDetail">红果选集详情</span>
+            </button>
+            <button class="stage-tab" data-stage="hg-player" role="tab" aria-selected="false">
+              <span class="tab-dot"></span><span data-i18n="tabHgPlayer">红果流式解密播放</span>
+            </button>
+          </div>
+
+          <div class="stage-viewport">
+            <!-- Panel 1: Interactive Split Curtain -->
+            <div class="stage-panel active" data-panel="split">
+              <div class="split-wrap" id="splitWrap" style="--split: 50%;">
+                <div class="split-base">
+                  <img src="screenshots/hongguo-orbit.webp" alt="MyHongguo 红果短剧双星引力场首页实拍">
+                </div>
+                <div class="split-overlay">
+                  <img src="screenshots/hero.webp" alt="MyDouyin 抖音引力场首页双主题实拍">
+                </div>
+                <div class="split-divider" aria-hidden="true"></div>
+                <div class="split-handle" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/></svg>
+                </div>
+                <div class="split-hint" data-i18n="splitHint">↔ 左右拖动切幕，对比抖音与红果双模式</div>
+                <div class="split-tag left">
+                  <img src="douyin-icon.png" alt=""><span>MyDouyin · <em style="font-style:normal" data-i18n="orbitLabel">引力场</em></span>
+                </div>
+                <div class="split-tag right">
+                  <img src="hongguo-icon.png" alt=""><span>MyHongguo · <em style="font-style:normal" data-i18n="dualOrbitLabel">双星引力场</em></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel 2: Douyin Native Player + Interactive Danmaku -->
+            <div class="stage-panel" data-panel="player">
+              <img src="screenshots/player.webp" alt="MyDouyin 抖音原生 1080p 播放与弹幕互动界面">
+              <div class="danmaku-layer on" id="danmakuLayer" aria-hidden="true">
+                <span class="dm-item" data-i18n="dm1" style="top: 6%; --dur: 9.5s; --delay: -1s;">AVPlayerLayer 1080p 原生硬解，内存只有 65 MB！</span>
+                <span class="dm-item" data-i18n="dm2" style="top: 34%; --dur: 11.2s; --delay: -4.5s;">macOS 刷一整晚也不写盘，硬盘终于安静了</span>
+                <span class="dm-item" data-i18n="dm3" style="top: 62%; --dur: 8.8s; --delay: -2.2s;">⌘2 一秒切红果短剧，不用开安卓模拟器太爽了</span>
+                <span class="dm-item" data-i18n="dm4" style="top: 86%; --dur: 10.6s; --delay: -6.8s;">Windows 也无需 FFmpeg，直接 Media Foundation 硬解</span>
+              </div>
+              <div class="stage-hud">
+                <div class="hud-chips">
+                  <span class="hud-chip">AVPlayerLayer ~65 MB</span>
+                  <span class="hud-chip" data-i18n="hudZeroDisk">0 MB 持久写盘</span>
+                  <span class="hud-chip" data-i18n="hudPrewarm">下一条静默预热</span>
+                </div>
+                <button class="hud-btn" id="toggleDanmaku" data-i18n="hudToggleDm">隐藏预览弹幕</button>
+              </div>
+            </div>
+
+            <!-- Panel 3: Hongguo Detail -->
+            <div class="stage-panel" data-panel="hg-detail">
+              <img src="screenshots/hongguo-detail.webp" alt="MyHongguo 红果短剧详情页、分组选集与剧评">
+              <div class="stage-hud">
+                <div class="hud-chips">
+                  <span class="hud-chip" data-i18n="hudDetailCache">近期 16 部剧 5 分钟缓存</span>
+                  <span class="hud-chip" data-i18n="hudTargetPrewarm">进详情即预热目标集</span>
+                  <span class="hud-chip">Pure-Go HEIC 封面</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel 4: Hongguo Encrypted Player -->
+            <div class="stage-panel" data-panel="hg-player">
+              <img src="screenshots/hongguo-player.webp" alt="MyHongguo 红果短剧流式 CENC 解密原生播放页">
+              <div class="stage-hud">
+                <div class="hud-chips">
+                  <span class="hud-chip">ISO-BMFF CENC AES-128-CTR</span>
+                  <span class="hud-chip">512 KiB 1-RTT 探测</span>
+                  <span class="hud-chip" data-i18n="hudNextEp">75% 进度预热下集 · 2s 断点续播</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tactile Interactive Keyboard Dock -->
+          <div class="kbd-dock" aria-label="交互快捷键体验区">
+            <span class="kbd-dock-label" data-i18n="kbdLabel">试试直接敲键盘或点击按键：</span>
+            <button class="key-item" data-key="1">
+              <span class="keycap">1</span><span data-i18n="kbd1">切到抖音模式</span>
+            </button>
+            <button class="key-item" data-key="2">
+              <span class="keycap">2</span><span data-i18n="kbd2">切到红果模式</span>
+            </button>
+            <button class="key-item" data-key="ArrowLeft">
+              <span class="keycap">←</span><span data-i18n="kbdPrev">上一场景</span>
+            </button>
+            <button class="key-item" data-key="ArrowRight">
+              <span class="keycap">→</span><span data-i18n="kbdNext">下一场景</span>
+            </button>
+            <button class="key-item" data-key="t">
+              <span class="keycap">T</span><span data-i18n="kbdTheme">瓷白 / 黑洞主题</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Measured Performance Bento Grid -->
+    <section class="block" id="benchmarks">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">MEASURED TELEMETRY</span>
+          <h2 data-i18n="benchTitle">所有轻量承诺，都有实测数据背书</h2>
+          <p data-i18n="benchSub">拒绝「感觉很快」的空话。以下指标均来自本仓库实测记录与性能分析报告，对比传统网页端、Electron 套壳与安卓模拟器。</p>
+        </div>
+
+        <div class="bento">
+          <article class="card span-7 reveal">
+            <div class="metric-tag">MACOS · AVPLAYERLAYER</div>
+            <div class="metric-value">~65<span class="unit">MB</span></div>
+            <h3 data-i18n="m1Title">1080p 原生硬件解码内存</h3>
+            <p data-i18n="m1Desc">改用系统原生 AVPlayerLayer 视频层，跳过逐帧像素拷贝，解码进程 VTDecoderXPCService 物理内存由 ~180 MB 降至 ~65 MB。</p>
+            <div class="bar-list">
+              <div class="bar-row">
+                <span class="bar-label">MyDouyin 原生硬解</span>
+                <div class="bar-track"><div class="bar-fill best" style="width: 11%;"></div></div>
+                <span class="bar-num">~65 MB</span>
+              </div>
+              <div class="bar-row">
+                <span class="bar-label" data-i18n="barOld">旧帧拷贝方案</span>
+                <div class="bar-track"><div class="bar-fill" style="width: 28%;"></div></div>
+                <span class="bar-num">~180 MB</span>
+              </div>
+              <div class="bar-row">
+                <span class="bar-label" data-i18n="barElec">Electron / 模拟器</span>
+                <div class="bar-track"><div class="bar-fill" style="width: 96%;"></div></div>
+                <span class="bar-num">500–2000 MB</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="card span-5 reveal">
+            <div class="metric-tag">DISK I/O · ZERO CACHE</div>
+            <div class="metric-value">0<span class="unit">MB</span></div>
+            <h3 data-i18n="m2Title">macOS 刷视频零持久写盘</h3>
+            <p data-i18n="m2Desc">通过 AVURLAssetUsesNoPersistentCacheKey 禁用系统持久媒体磁盘缓存，彻底消除连看 8 条视频向 $TMPDIR/MediaCache 写入 ~300 MB 的损耗，保护 SSD 寿命。</p>
+          </article>
+
+          <article class="card span-4 reveal">
+            <div class="metric-tag">ON-DEMAND SIGNER</div>
+            <div class="metric-value">80<span class="unit">MB / 10s</span></div>
+            <h3 data-i18n="m3Title">按需签名，用完即焚</h3>
+            <p data-i18n="m3Desc">仅点赞、评论、关注、发弹幕等写操作时拉起轻量签名页（对比完整网页 340–520 MB），闲置 10 秒自动销毁。</p>
+          </article>
+
+          <article class="card span-4 reveal">
+            <div class="metric-tag">STREAMING CENC · 1-RTT</div>
+            <div class="metric-value">512<span class="unit">KiB</span></div>
+            <h3 data-i18n="m4Title">红果流式解密首包加速</h3>
+            <p data-i18n="m4Desc">首轮 512 KiB 单次探测一次覆盖实测 252 KiB 的 moov 盒并缓存前缀零等待吐出，配合 75% 进度预热下一集与 256 KiB Windows 点播头内存缓存。</p>
+          </article>
+
+          <article class="card span-4 reveal">
+            <div class="metric-tag">ZERO EXTRA RUNTIME</div>
+            <div class="metric-value">0<span class="unit" data-i18n="m5Unit">个外挂依赖</span></div>
+            <h3 data-i18n="m5Title">纯 Go HEIC · 无需 FFmpeg</h3>
+            <p data-i18n="m5Desc">Windows 播放直走系统 Media Foundation，红果签名 HEIC 封面内置纯 Go h265/heic 解码并转存 JPEG 缓存，告别微软商店付费 HEVC 扩展与模拟器。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Dual-OS Native Architecture -->
+    <section class="block" id="architecture">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">DUAL-OS NATIVE PIPELINE</span>
+          <h2 data-i18n="archTitle">一套 Go 代码，两边都吃满系统原生能力</h2>
+          <p data-i18n="archSub">不妥协于跨平台 WebView 最低公约数，在 macOS 与 Windows 上分别接入各自最轻量的硬件媒体管线。</p>
+        </div>
+
+        <div class="arch-grid">
+          <div class="card arch-card reveal">
+            <div class="arch-head">
+              <h3 style="margin:0">macOS（Apple Silicon）</h3>
+              <span class="arch-badge">darwin/arm64</span>
+            </div>
+            <div class="pipe-steps">
+              <div class="pipe-node">
+                <span class="pipe-icon">AV</span>
+                <div>
+                  <strong data-i18n="macP1T">AVFoundation + AVPlayerLayer 硬解</strong>
+                  <span data-i18n="macP1D">硬件直出合成图层，1080p 内存约 65 MB，支持原生画中画与无缝连播预热。</span>
+                </div>
+              </div>
+              <div class="pipe-node">
+                <span class="pipe-icon">0W</span>
+                <div>
+                  <strong data-i18n="macP2T">禁用持久媒体磁盘缓存</strong>
+                  <span data-i18n="macP2D">AVURLAssetUsesNoPersistentCacheKey 仅保留受控内存缓冲，不写盘。</span>
+                </div>
+              </div>
+              <div class="pipe-node">
+                <span class="pipe-icon">CG</span>
+                <div>
+                  <strong data-i18n="macP3T">系统 ImageIO 硬件 HEIC 解码</strong>
+                  <span data-i18n="macP3D">秒解红果签名 HEIC 海报并按显示尺寸缩放，上传 GPU 后即释放 CPU 内存。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card arch-card reveal">
+            <div class="arch-head">
+              <h3 style="margin:0">Windows 10 / 11（x64）</h3>
+              <span class="arch-badge">windows/amd64</span>
+            </div>
+            <div class="pipe-steps">
+              <div class="pipe-node">
+                <span class="pipe-icon">MF</span>
+                <div>
+                  <strong data-i18n="winP1T">Media Foundation + D3D11 GPU 纹理</strong>
+                  <span data-i18n="winP1D">系统原生硬解，不再打包或依赖任何 FFmpeg 可执行文件与 DLL。</span>
+                </div>
+              </div>
+              <div class="pipe-node">
+                <span class="pipe-icon">256</span>
+                <div>
+                  <strong data-i18n="winP2T">内存回环代理 + 256 KiB 头缓存</strong>
+                  <span data-i18n="winP2D">预检 HEAD 与起播首段零等待返回，配合播放中预热下一条视频降低切集延迟。</span>
+                </div>
+              </div>
+              <div class="pipe-node">
+                <span class="pipe-icon">HE</span>
+                <div>
+                  <strong data-i18n="winP3T">内置纯 Go h265/heic 封面解码</strong>
+                  <span data-i18n="winP3D">不依赖微软商店 HEIF/HEVC 扩展，解码后自动落盘紧凑 JPEG 缓存实现秒开。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="shared-core reveal">
+          <div>
+            <h3 data-i18n="coreTitle">Go + MyGo 共享核心引擎</h3>
+            <p data-i18n="coreDesc">统一承载抖音与红果双星引力场、流式加密解密、连接池复用与签名增量热更新。</p>
+          </div>
+          <div class="core-pills">
+            <span class="core-pill">ISO-BMFF CENC AES-128-CTR</span>
+            <span class="core-pill">MaxIdleConnsPerHost=16</span>
+            <span class="core-pill">16-Drama 5m Detail Cache</span>
+            <span class="core-pill">Signed Delta Update</span>
+            <span class="core-pill">Zero Telemetry</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison Matrix -->
+    <section class="block" id="compare">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">WHY MYDOUYIN</span>
+          <h2 data-i18n="cmpTitle">为什么替代网页版、Electron 客户端或安卓模拟器</h2>
+          <p data-i18n="cmpSub">一表看清在电脑端同时刷抖音与追红果短剧的真实差异。</p>
+        </div>
+
+        <div class="table-wrap reveal">
+          <table class="cmp">
+            <thead>
+              <tr>
+                <th data-i18n="thDim">对比维度</th>
+                <th class="hl">MyDouyin · MyHongguo</th>
+                <th data-i18n="thWeb">浏览器网页版</th>
+                <th data-i18n="thElec">Electron 客户端 / 安卓模拟器</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-i18n="r1k">平台覆盖</td>
+                <td class="hl" data-i18n="r1a">单窗口集成抖音 + 红果短剧，⌘1 / ⌘2 一键切换</td>
+                <td data-i18n="r1b">抖音靠标签页；红果无完整桌面网页版</td>
+                <td data-i18n="r1c">单一平台为主，看红果需跑整套安卓虚拟机</td>
+              </tr>
+              <tr>
+                <td data-i18n="r2k">启动首屏</td>
+                <td class="hl" data-i18n="r2a">引力场居中搜索 + 本地快照秒开，不强制自动连播</td>
+                <td data-i18n="r2b">打开即强制播放推荐流</td>
+                <td data-i18n="r2c">冷启动慢，后台常驻多个高内存进程</td>
+              </tr>
+              <tr>
+                <td data-i18n="r3k">内存与写盘</td>
+                <td class="hl" data-i18n="r3a">macOS 约 65 MB 零写盘；签名页 80 MB 闲置 10s 释放</td>
+                <td data-i18n="r3b">多标签与缓存随浏览持续暴涨</td>
+                <td data-i18n="r3c">常驻 500 MB–2 GB+，风扇与磁盘写入明显</td>
+              </tr>
+              <tr>
+                <td data-i18n="r4k">红果 HEIC 封面</td>
+                <td class="hl" data-i18n="r4a">macOS ImageIO / Windows 内置纯 Go 解码，开箱即显</td>
+                <td data-i18n="r4b">依赖浏览器 HEIC 兼容性</td>
+                <td data-i18n="r4c">需额外商店扩展或完整 Android 运行环境</td>
+              </tr>
+              <tr>
+                <td data-i18n="r5k">隐私与更新</td>
+                <td class="hl" data-i18n="r5a">零遥测、全数据本地存储、应用内签名增量热更新</td>
+                <td data-i18n="r5b">受限于浏览器环境</td>
+                <td data-i18n="r5c">频繁全量包更新，后台服务多</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download & Install -->
+    <section class="block" id="install">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">GET STARTED</span>
+          <h2 data-i18n="instTitle">下载与安装（自动同步最新版本）</h2>
+          <p data-i18n="instSub">安装包均由 GitHub Releases 分发并附带 SHA256SUMS 校验和，后续版本支持应用内签名增量热更新。</p>
+        </div>
+
+        <div class="install-box reveal">
+          <div class="os-tabs" role="tablist">
+            <button class="os-tab active" data-os="mac" role="tab" aria-selected="true">macOS (Apple Silicon)</button>
+            <button class="os-tab" data-os="win" role="tab" aria-selected="false">Windows 10 / 11 (x64)</button>
+          </div>
+
+          <div class="os-pane active" data-os-pane="mac">
+            <div class="dl-list">
+              <a class="dl-card" id="dlMacDmg" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg">
+                <div>
+                  <strong data-i18n="macDmgName">macOS 安装镜像（推荐）</strong>
+                  <span id="macDmgFile">mydouyin-0.2.26-arm64.dmg</span>
+                </div>
+                <span class="dl-arrow" aria-hidden="true">↓</span>
+              </a>
+              <a class="dl-card" id="dlMacTar" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-darwin-arm64.tar.gz">
+                <div>
+                  <strong data-i18n="macTarName">macOS 便携压缩包</strong>
+                  <span id="macTarFile">mydouyin-0.2.26-darwin-arm64.tar.gz</span>
+                </div>
+                <span class="dl-arrow" aria-hidden="true">↓</span>
+              </a>
+              <a class="dl-card" id="dlSha1" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS">
+                <div>
+                  <strong data-i18n="shaName">校验文件 SHA256SUMS</strong>
+                  <span>SHA256SUMS</span>
+                </div>
+                <span class="dl-arrow" aria-hidden="true">↗</span>
+              </a>
+            </div>
+            <div class="cmd-box">
+              <div class="cmd-head">
+                <span data-i18n="macGateLabel">首次打开若提示「无法验证开发者 / 已损坏」</span>
+                <button class="copy-btn" data-copy="xattr -dr com.apple.quarantine /Applications/MyDouyin.app" data-i18n="copyBtn">复制命令</button>
+              </div>
+              <pre class="code">xattr -dr com.apple.quarantine /Applications/MyDouyin.app</pre>
+              <p class="install-note" data-i18n="macNote">拖入「应用程序」后运行上方命令，或在「系统设置 › 隐私与安全性」点击「仍要打开」。后续新版本可在窗口右上角胶囊一键增量升级。</p>
+            </div>
+          </div>
+
+          <div class="os-pane" data-os-pane="win">
+            <div class="dl-list">
+              <a class="dl-card" id="dlWinExe" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe">
+                <div>
+                  <strong data-i18n="winExeName">Windows 安装程序（推荐）</strong>
+                  <span id="winExeFile">mydouyin-setup-0.2.26-amd64.exe</span>
+                </div>
+                <span class="dl-arrow" aria-hidden="true">↓</span>
+              </a>
+              <a class="dl-card" id="dlWinTar" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-windows-amd64.tar.gz">
+                <div>
+                  <strong data-i18n="winTarName">Windows 免安装绿色包</strong>
+                  <span id="winTarFile">mydouyin-0.2.26-windows-amd64.tar.gz</span>
+                </div>
+                <span class="dl-arrow" aria-hidden="true">↓</span>
+              </a>
+              <a class="dl-card" id="dlSha2" href="https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS">
+                <div>
+                  <strong data-i18n="shaName">校验文件 SHA256SUMS</strong>
+                  <span>SHA256SUMS</span>
+                </div>
+                <span class="dl-arrow" aria-hidden="true">↗</span>
+              </a>
+            </div>
+            <div class="cmd-box">
+              <div class="cmd-head">
+                <span data-i18n="winPsLabel">PowerShell 一键安装脚本</span>
+                <button class="copy-btn" data-copy="irm https://github.com/margbug01/MyDouyin/releases/latest/download/install.ps1 | iex" data-i18n="copyBtn">复制命令</button>
+              </div>
+              <pre class="code">irm https://github.com/margbug01/MyDouyin/releases/latest/download/install.ps1 | iex</pre>
+              <p class="install-note" data-i18n="winNote">开箱即用，无需 FFmpeg 或微软商店 HEIF/HEVC 扩展。若触发 SmartScreen 提示，点击「更多信息 › 仍要运行」；Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="block" id="faq">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">FREQUENTLY ASKED QUESTIONS</span>
+          <h2 data-i18n="faqTitle">常见问题</h2>
+        </div>
+
+        <div class="faq-grid reveal">
+          <details class="faq-item" open>
+            <summary data-i18n="q1">红果短剧有电脑版吗？如何在 Mac 和 Windows 上不用安卓模拟器看红果短剧？</summary>
+            <p data-i18n="a1">MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11（x64）上，不需要安卓模拟器或手机投屏。打开后点击左上角品牌胶囊或按 ⌘2 / Ctrl+2 即可切换，支持双星引力场、发现、榜单、分类、上新、搜索、剧集详情、弹幕、评论与本地断点续播。</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="q2">不登录抖音或红果账号可以直接使用吗？</summary>
+            <p data-i18n="a2">可以。MyHongguo 红果短剧模式全程免登录匿名运行，追剧列表和每集进度保存在本机。MyDouyin 抖音模式免登录即可浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间；仅在点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="q3">Windows 上看红果短剧需要额外安装 FFmpeg 或微软商店 HEIF/HEVC 扩展吗？</summary>
+            <p data-i18n="a3">不需要。Windows 版视频直接调用系统 Media Foundation 硬件解码，不附带 FFmpeg；红果短剧的签名 HEIC 封面通过内置纯 Go h265/heic 解码器直接解码并转为本地 JPEG 缓存，无需商店 HEIF/HEVC 扩展。仅 Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="q4">Mac 长时间刷抖音会把视频缓存写满硬盘吗？</summary>
+            <p data-i18n="a4">不会。macOS 版本对 AVFoundation 显式设置 AVURLAssetUsesNoPersistentCacheKey，只保留少量内存预读，不再把整段 MP4 写入 $TMPDIR/MediaCache；本地封面缓存也带自动上限清理。</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="q5">红果短剧遇到代理异常或匿名限流加载不出来怎么办？</summary>
+            <p data-i18n="a5">在右上角「设置 › 红果短剧 (MyHongguo)」中确认「绕过系统代理直连」已开启（默认开启）。若匿名设备触发风控限流，点击「重置匿名设备」即可重新生成身份，也支持配置自定义远端签名服务与 Token。</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="q6">登录凭证、红果追剧记录和个人设置保存在哪里？</summary>
+            <p data-i18n="a6">所有个人数据仅存在本机标准应用配置目录中（macOS 为 ~/Library/Application Support/Douyin 与 ~/Library/Application Support/mydouyin，Windows 为 %APPDATA% 对应目录），应用零遥测、不上传任何统计信息，热更新和覆盖安装均保留数据。</p>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <img src="douyin-icon.png" alt="MyDouyin">
+          <img src="hongguo-icon.png" alt="MyHongguo">
+          <span>MyDouyin · MyHongguo</span>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/margbug01/MyDouyin" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/margbug01/MyDouyin/releases/latest" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/margbug01/MyDouyin/blob/main/PERFORMANCE.md" target="_blank" rel="noopener">PERFORMANCE.md</a>
+          <a href="https://github.com/margbug01/MyDouyin/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>
+          <a href="https://github.com/margbug01/MyDouyin/blob/main/README.en.md" target="_blank" rel="noopener">English README</a>
+        </div>
+      </div>
+      <p class="disclaimer" data-i18n="disclaimer">
+        MyDouyin 是个人开源项目，与抖音（Douyin）、红果短剧（Hongguo）及字节跳动没有任何官方关联。软件所有数据仅在本机运行和存储，不收集任何遥测或统计信息。请仅使用个人账号合理浏览并遵守对应平台服务条款。
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const stageOrder = ["split", "player", "hg-detail", "hg-player"];
+      let currentStage = "split";
+      let currentLang = new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh";
+      let dmEnabled = true;
+
+      /* ---------- Bilingual Dictionary ---------- */
+      const i18n = {
+        zh: {
+          navStage: "引力场演示", navBench: "实测性能", navArch: "双原生架构", navCompare: "方案对比", navInstall: "下载安装",
+          releaseDesc: "双星引力场 · Windows 纯 Go HEIC 解码 · 原生硬解不写盘",
+          heroTitle: '一个原生窗口，同时装下<br><span class="accent-word">抖音</span>与<span class="accent-word">红果短剧</span>。',
+          heroSub: "基于 Go 与 MyGo 构建的开源桌面客户端，原生支持 macOS（Apple Silicon）与 Windows 10/11（x64）。无 Electron、无安卓模拟器、无 FFmpeg 或 HEVC 商店扩展，打开即可免登录浏览抖音与红果免费短剧、漫剧。",
+          dlMac: "下载 macOS（Apple Silicon）", dlWin: "下载 Windows 10/11（x64）", allInstall: "安装指南 & 校验 ↓",
+          badge1: "macOS 约 65 MB 原生硬解 · 零写盘", badge2: "Windows 原生 Media Foundation + 纯 Go HEIC", badge3: "红果免登录 · 512 KiB 单次 CENC 解密",
+          tabSplit: "双星切幕对比", tabPlayer: "抖音原生播放", tabHgDetail: "红果选集详情", tabHgPlayer: "红果流式解密播放",
+          splitHint: "↔ 左右拖动切幕，对比抖音与红果双模式", orbitLabel: "引力场", dualOrbitLabel: "双星引力场",
+          hudZeroDisk: "0 MB 持久写盘", hudPrewarm: "下一条静默预热", hudToggleDmOn: "隐藏预览弹幕", hudToggleDmOff: "开启预览弹幕",
+          dm1: "AVPlayerLayer 1080p 原生硬解，内存只有 65 MB！", dm2: "macOS 刷一整晚也不写盘，硬盘终于安静了", dm3: "⌘2 一秒切红果短剧，不用开安卓模拟器太爽了", dm4: "Windows 也无需 FFmpeg，直接 Media Foundation 硬解",
+          hudDetailCache: "近期 16 部剧 5 分钟缓存", hudTargetPrewarm: "进详情即预热目标集", hudNextEp: "75% 进度预热下集 · 2s 断点续播",
+          kbdLabel: "试试直接敲键盘或点击按键：", kbd1: "切到抖音模式", kbd2: "切到红果模式", kbdPrev: "上一场景", kbdNext: "下一场景", kbdTheme: "瓷白 / 黑洞主题",
+          benchTitle: "所有轻量承诺，都有实测数据背书", benchSub: "拒绝「感觉很快」的空话。以下指标均来自本仓库实测记录与性能分析报告，对比传统网页端、Electron 套壳与安卓模拟器。",
+          m1Title: "1080p 原生硬件解码内存", m1Desc: "改用系统原生 AVPlayerLayer 视频层，跳过逐帧像素拷贝，解码进程 VTDecoderXPCService 物理内存由 ~180 MB 降至 ~65 MB。",
+          barOld: "旧帧拷贝方案", barElec: "Electron / 模拟器",
+          m2Title: "macOS 刷视频零持久写盘", m2Desc: "通过 AVURLAssetUsesNoPersistentCacheKey 禁用系统持久媒体磁盘缓存，彻底消除连看 8 条视频向 $TMPDIR/MediaCache 写入 ~300 MB 的损耗，保护 SSD 寿命。",
+          m3Title: "按需签名，用完即焚", m3Desc: "仅点赞、评论、关注、发弹幕等写操作时拉起轻量签名页（对比完整网页 340–520 MB），闲置 10 秒自动销毁。",
+          m4Title: "红果流式解密首包加速", m4Desc: "首轮 512 KiB 单次探测一次覆盖实测 252 KiB 的 moov 盒并缓存前缀零等待吐出，配合 75% 进度预热下一集与 256 KiB Windows 点播头内存缓存。",
+          m5Unit: "个外挂依赖", m5Title: "纯 Go HEIC · 无需 FFmpeg", m5Desc: "Windows 播放直走系统 Media Foundation，红果签名 HEIC 封面内置纯 Go h265/heic 解码并转存 JPEG 缓存，告别微软商店付费 HEVC 扩展与模拟器。",
+          archTitle: "一套 Go 代码，两边都吃满系统原生能力", archSub: "不妥协于跨平台 WebView 最低公约数，在 macOS 与 Windows 上分别接入各自最轻量的硬件媒体管线。",
+          macP1T: "AVFoundation + AVPlayerLayer 硬解", macP1D: "硬件直出合成图层，1080p 内存约 65 MB，支持原生画中画与无缝连播预热。",
+          macP2T: "禁用持久媒体磁盘缓存", macP2D: "AVURLAssetUsesNoPersistentCacheKey 仅保留受控内存缓冲，不写盘。",
+          macP3T: "系统 ImageIO 硬件 HEIC 解码", macP3D: "秒解红果签名 HEIC 海报并按显示尺寸缩放，上传 GPU 后即释放 CPU 内存。",
+          winP1T: "Media Foundation + D3D11 GPU 纹理", winP1D: "系统原生硬解，不再打包或依赖任何 FFmpeg 可执行文件与 DLL。",
+          winP2T: "内存回环代理 + 256 KiB 头缓存", winP2D: "预检 HEAD 与起播首段零等待返回，配合播放中预热下一条视频降低切集延迟。",
+          winP3T: "内置纯 Go h265/heic 封面解码", winP3D: "不依赖微软商店 HEIF/HEVC 扩展，解码后自动落盘紧凑 JPEG 缓存实现秒开。",
+          coreTitle: "Go + MyGo 共享核心引擎", coreDesc: "统一承载抖音与红果双星引力场、流式加密解密、连接池复用与签名增量热更新。",
+          cmpTitle: "为什么替代网页版、Electron 客户端或安卓模拟器", cmpSub: "一表看清在电脑端同时刷抖音与追红果短剧的真实差异。",
+          thDim: "对比维度", thWeb: "浏览器网页版", thElec: "Electron 客户端 / 安卓模拟器",
+          r1k: "平台覆盖", r1a: "单窗口集成抖音 + 红果短剧，⌘1 / ⌘2 一键切换", r1b: "抖音靠标签页；红果无完整桌面网页版", r1c: "单一平台为主，看红果需跑整套安卓虚拟机",
+          r2k: "启动首屏", r2a: "引力场居中搜索 + 本地快照秒开，不强制自动连播", r2b: "打开即强制播放推荐流", r2c: "冷启动慢，后台常驻多个高内存进程",
+          r3k: "内存与写盘", r3a: "macOS 约 65 MB 零写盘；签名页 80 MB 闲置 10s 释放", r3b: "多标签与缓存随浏览持续暴涨", r3c: "常驻 500 MB–2 GB+，风扇与磁盘写入明显",
+          r4k: "红果 HEIC 封面", r4a: "macOS ImageIO / Windows 内置纯 Go 解码，开箱即显", r4b: "依赖浏览器 HEIC 兼容性", r4c: "需额外商店扩展或完整 Android 运行环境",
+          r5k: "隐私与更新", r5a: "零遥测、全数据本地存储、应用内签名增量热更新", r5b: "受限于浏览器环境", r5c: "频繁全量包更新，后台服务多",
+          instTitle: "下载与安装（自动同步最新版本）", instSub: "安装包均由 GitHub Releases 分发并附带 SHA256SUMS 校验和，后续版本支持应用内签名增量热更新。",
+          macDmgName: "macOS 安装镜像（推荐）", macTarName: "macOS 便携压缩包", winExeName: "Windows 安装程序（推荐）", winTarName: "Windows 免安装绿色包",
+          shaName: "校验文件 SHA256SUMS", copyBtn: "复制命令", copied: "已复制",
+          macGateLabel: "首次打开若提示「无法验证开发者 / 已损坏」", macNote: "拖入「应用程序」后运行上方命令，或在「系统设置 › 隐私与安全性」点击「仍要打开」。后续新版本可在窗口右上角胶囊一键增量升级。",
+          winPsLabel: "PowerShell 一键安装脚本", winNote: "开箱即用，无需 FFmpeg 或微软商店 HEIF/HEVC 扩展。若触发 SmartScreen 提示，点击「更多信息 › 仍要运行」；Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。",
+          faqTitle: "常见问题",
+          q1: "红果短剧有电脑版吗？如何在 Mac 和 Windows 上不用安卓模拟器看红果短剧？",
+          a1: "MyDouyin 内置完整的 MyHongguo 红果短剧模式，原生运行在 macOS（Apple Silicon）和 Windows 10/11（x64）上，不需要安卓模拟器或手机投屏。打开后点击左上角品牌胶囊或按 ⌘2 / Ctrl+2 即可切换，支持双星引力场、发现、榜单、分类、上新、搜索、剧集详情、弹幕、评论与本地断点续播。",
+          q2: "不登录抖音或红果账号可以直接使用吗？",
+          a2: "可以。MyHongguo 红果短剧模式全程免登录匿名运行，追剧列表和每集进度保存在本机。MyDouyin 抖音模式免登录即可浏览引力场精选、推荐、分类、搜索、作者主页与公开直播间；仅在点赞、收藏、关注、发评论、发弹幕或同步历史时需要扫码登录。",
+          q3: "Windows 上看红果短剧需要额外安装 FFmpeg 或微软商店 HEIF/HEVC 扩展吗？",
+          a3: "不需要。Windows 版视频直接调用系统 Media Foundation 硬件解码，不附带 FFmpeg；红果短剧的签名 HEIC 封面通过内置纯 Go h265/heic 解码器直接解码并转为本地 JPEG 缓存，无需商店 HEIF/HEVC 扩展。仅 Windows N / KN 精简版需安装系统可选功能 Media Feature Pack。",
+          q4: "Mac 长时间刷抖音会把视频缓存写满硬盘吗？",
+          a4: "不会。macOS 版本对 AVFoundation 显式设置 AVURLAssetUsesNoPersistentCacheKey，只保留少量内存预读，不再把整段 MP4 写入 $TMPDIR/MediaCache；本地封面缓存也带自动上限清理。",
+          q5: "红果短剧遇到代理异常或匿名限流加载不出来怎么办？",
+          a5: "在右上角「设置 › 红果短剧 (MyHongguo)」中确认「绕过系统代理直连」已开启（默认开启）。若匿名设备触发风控限流，点击「重置匿名设备」即可重新生成身份，也支持配置自定义远端签名服务与 Token。",
+          q6: "登录凭证、红果追剧记录和个人设置保存在哪里？",
+          a6: "所有个人数据仅存在本机标准应用配置目录中（macOS 为 ~/Library/Application Support/Douyin 与 ~/Library/Application Support/mydouyin，Windows 为 %APPDATA% 对应目录），应用零遥测、不上传任何统计信息，热更新和覆盖安装均保留数据。",
+          disclaimer: "MyDouyin 是个人开源项目，与抖音（Douyin）、红果短剧（Hongguo）及字节跳动没有任何官方关联。软件所有数据仅在本机运行和存储，不收集任何遥测或统计信息。请仅使用个人账号合理浏览并遵守对应平台服务条款。"
+        },
+        en: {
+          navStage: "Orbit Demo", navBench: "Benchmarks", navArch: "Architecture", navCompare: "Comparison", navInstall: "Install",
+          releaseDesc: "Dual-Wing Orbit · Pure-Go Windows HEIC · Zero-Disk Native Decode",
+          heroTitle: 'One Native Window for<br><span class="accent-word">Douyin</span> &amp; <span class="accent-word">Hongguo Short Dramas</span>.',
+          heroSub: "An open-source Go + MyGo desktop client for macOS (Apple Silicon) and Windows 10/11 (x64). No Electron, no Android emulators, no FFmpeg or Windows Store HEVC packs. Launch straight into public Douyin feeds and login-free Hongguo dramas.",
+          dlMac: "Download macOS (Apple Silicon)", dlWin: "Download Windows 10/11 (x64)", allInstall: "Install Guide & Checksums ↓",
+          badge1: "~65 MB Native macOS Decode · 0 Disk Writes", badge2: "Windows Media Foundation + Pure-Go HEIC", badge3: "Login-Free Hongguo · 512 KiB 1-RTT CENC",
+          tabSplit: "Split-Curtain Compare", tabPlayer: "Douyin Native Player", tabHgDetail: "Hongguo Series Detail", tabHgPlayer: "Hongguo CENC Player",
+          splitHint: "↔ Drag the curtain to compare Douyin and Hongguo modes", orbitLabel: "Orbit Home", dualOrbitLabel: "Dual-Wing Orbit",
+          hudZeroDisk: "0 MB Persistent Disk Cache", hudPrewarm: "Silent Next-Video Prewarm", hudToggleDmOn: "Hide Preview Danmaku", hudToggleDmOff: "Show Preview Danmaku",
+          dm1: "AVPlayerLayer 1080p native decode in just ~65 MB RAM!", dm2: "Zero persistent video disk writes on macOS SSDs", dm3: "Press Cmd+2 for Hongguo dramas — no Android emulator!", dm4: "Windows Media Foundation + Pure-Go HEIC, zero FFmpeg",
+          hudDetailCache: "16-Series 5m Detail Cache", hudTargetPrewarm: "Target Episode Prewarm", hudNextEp: "75% Next-Ep Prewarm · 2s Resume",
+          kbdLabel: "Try pressing keys or clicking keycaps:", kbd1: "Douyin Mode", kbd2: "Hongguo Mode", kbdPrev: "Prev Scene", kbdNext: "Next Scene", kbdTheme: "Porcelain / Void Theme",
+          benchTitle: "Every Lightweight Claim Backed by Measurements", benchSub: "Figures recorded directly in this repository's benchmarks, compared against web tabs, Electron wrappers, and Android emulators.",
+          m1Title: "1080p Native Hardware Decoder Memory", m1Desc: "Rendering through native AVPlayerLayer skips per-frame CPU pixel copies, dropping VTDecoderXPCService footprint from ~180 MB to ~65 MB.",
+          barOld: "Frame-copy pipeline", barElec: "Electron / Emulator",
+          m2Title: "Zero Persistent Video Disk Writes on macOS", m2Desc: "Setting AVURLAssetUsesNoPersistentCacheKey keeps playback in bounded RAM instead of writing ~300 MB of temporary MP4 files per 8 watched videos.",
+          m3Title: "On-Demand Signing, Freed Automatically", m3Desc: "Write actions spin up a lightweight ~80 MB signing page (vs 340–520 MB full web page) and destroy it after 10 seconds idle.",
+          m4Title: "Single-RTT Streaming CENC Startup", m4Desc: "A 512 KiB opening probe captures typical 252 KiB Hongguo moov boxes in one round trip and streams cached bytes immediately, paired with a 256 KiB Windows VOD head cache.",
+          m5Unit: "extra runtimes", m5Title: "Pure-Go HEIC · Zero FFmpeg", m5Desc: "Windows builds use native Media Foundation with no FFmpeg binaries, and decode Hongguo's signed HEIC covers via pure-Go h265/heic cached as compact JPEGs.",
+          archTitle: "One Go Codebase, Native Pipelines on Both OSes", archSub: "No WebView lowest-common-denominator compromises. Each platform binds directly to its lightest hardware media stack.",
+          macP1T: "AVFoundation + AVPlayerLayer", macP1D: "Direct compositor video layer (~65 MB at 1080p) with native PiP and silent next-item prewarming.",
+          macP2T: "Zero Persistent Disk Cache", macP2D: "AVURLAssetUsesNoPersistentCacheKey bounds buffering strictly in RAM.",
+          macP3T: "System ImageIO HEIC Decode", macP3D: "Hardware-decodes Hongguo portrait posters, scales to display size, and releases CPU pixels after GPU upload.",
+          winP1T: "Media Foundation + D3D11 Textures", winP1D: "Native OS hardware decode with zero bundled FFmpeg binaries or DLLs.",
+          winP2T: "Loopback Proxy + 256 KiB Head Cache", winP2D: "Serves HEAD and opening byte ranges from RAM while prewarming the next video during playback.",
+          winP3T: "Embedded Pure-Go h265/heic Decoder", winP3D: "No Microsoft Store HEIF/HEVC extension required; saves compact local JPEG caches for instant reuse.",
+          coreTitle: "Go + MyGo Shared Core", coreDesc: "Powers both Douyin and Hongguo Orbit layouts, streaming AES-128-CTR decryption, pooled HTTP transport, and signed delta updates.",
+          cmpTitle: "Why Switch From Web, Electron, or Android Emulators", cmpSub: "Side-by-side comparison for watching Douyin and Hongguo Short Dramas on desktop.",
+          thDim: "Dimension", thWeb: "Web Browser", thElec: "Electron / Android Emulator",
+          r1k: "Platform coverage", r1a: "Douyin + Hongguo Short Dramas in one window via Cmd+1 / Cmd+2", r1b: "Douyin in tabs; no full Hongguo desktop web app", r1c: "Single-platform; Hongguo requires a full Android VM",
+          r2k: "Launch experience", r2a: "Orbit search canvas + local fast-start snapshots, no forced autoplay", r2b: "Autoplays feed immediately on load", r2c: "Slow cold start with resident background processes",
+          r3k: "Memory & disk I/O", r3a: "~65 MB zero-disk macOS decode; ~80 MB signing page freed in 10s", r3b: "Grows steadily across long sessions", r3c: "500 MB–2 GB+ resident memory, heavy fan & disk load",
+          r4k: "Hongguo HEIC covers", r4a: "macOS ImageIO / Windows pure-Go decoder out of the box", r4b: "Depends on browser HEIC support", r4c: "Needs extra codec packs or Android runtime",
+          r5k: "Privacy & updates", r5a: "Zero telemetry, strictly local storage, signed in-app delta updates", r5b: "Web-only", r5c: "Large full-installer downloads",
+          instTitle: "Download & Install (Auto-Synced to Latest Release)", instSub: "All builds ship via GitHub Releases with SHA256SUMS and support signed in-app delta updates.",
+          macDmgName: "macOS Disk Image (Recommended)", macTarName: "macOS Portable Archive", winExeName: "Windows Installer (Recommended)", winTarName: "Windows Portable Archive",
+          shaName: "Checksums (SHA256SUMS)", copyBtn: "Copy", copied: "Copied",
+          macGateLabel: "If macOS Gatekeeper blocks the unnotarized build", macNote: "Drag MyDouyin.app into Applications, then run the command above or click Open Anyway in System Settings › Privacy & Security.",
+          winPsLabel: "One-line PowerShell installer", winNote: "Works out of the box with no FFmpeg or Store HEIF/HEVC extension. Click More info › Run anyway if SmartScreen warns; Windows N/KN editions need the Media Feature Pack.",
+          faqTitle: "Frequently Asked Questions",
+          q1: "Is there a desktop client for Hongguo Short Dramas without an Android emulator?",
+          a1: "Yes. MyDouyin includes a native MyHongguo mode on macOS (Apple Silicon) and Windows 10/11 (x64) with zero emulators or screen mirroring. Click the top-left switcher pill or press Cmd+2 / Ctrl+2 for Dual-Wing Orbit, Discover, Rankings, Filters, New Releases, Search, danmaku, comments, and local resume.",
+          q2: "What works without logging into Douyin or Hongguo?",
+          a2: "MyHongguo runs completely anonymously with local favorites and episode progress. MyDouyin browses Orbit Picks, recommendations, categories, search, creator profiles, and public live rooms without sign-in; QR login is only needed for Douyin interactive writes and account history sync.",
+          q3: "Do I need FFmpeg or Microsoft Store HEIF/HEVC extensions on Windows?",
+          a3: "No. Windows builds decode video natively through Media Foundation with no FFmpeg, and decode Hongguo signed HEIC covers using an embedded pure-Go h265/heic decoder cached locally as JPEG. Only Windows N/KN editions need the OS Media Feature Pack.",
+          q4: "Does MyDouyin fill up disk space on macOS?",
+          a4: "No. AVURLAssetUsesNoPersistentCacheKey disables persistent MP4 media caching in $TMPDIR/MediaCache, and the local thumbnail cache enforces an automatic count cap.",
+          q5: "What if Hongguo fails behind a proxy or hits anonymous rate limits?",
+          a5: "Open Settings › MyHongguo and verify direct connection (bypassing system proxy) is enabled (default on). Click Reset anonymous device to generate a fresh profile, or configure an optional remote signer URL and token.",
+          q6: "Where are login sessions, Hongguo tracking lists, and settings stored?",
+          a6: "Everything stays strictly local in standard OS application directories (~/Library/Application Support/Douyin and mydouyin on macOS, or %APPDATA% on Windows) and persists across manual upgrades and delta updates.",
+          disclaimer: "MyDouyin is an independent open-source project and is not affiliated with Douyin, Hongguo, or ByteDance. All data remains locally on your machine with zero telemetry or analytics."
+        }
+      };
+
+      function applyLang(lang) {
+        currentLang = lang;
+        root.lang = lang === "en" ? "en" : "zh-CN";
+        const dict = i18n[lang];
+        document.querySelectorAll("[data-i18n]").forEach((el) => {
+          const key = el.getAttribute("data-i18n");
+          if (dict[key]) el.textContent = dict[key];
+        });
+        document.querySelectorAll("[data-i18n-html]").forEach((el) => {
+          const key = el.getAttribute("data-i18n-html");
+          if (dict[key]) el.innerHTML = dict[key];
+        });
+        document.getElementById("langBtn").textContent = lang === "en" ? "中文" : "EN";
+        updateDanmakuBtn();
+        applyOSPrimaryCTA();
+      }
+
+      /* ---------- Theme Toggle ---------- */
+      function setTheme(theme) {
+        root.setAttribute("data-theme", theme);
+        document.getElementById("themeIcon").textContent = theme === "dark" ? "☀" : "☾";
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#07080d" : "#f6f7fb");
+        try { localStorage.setItem("mydouyin_theme", theme); } catch (_) {}
+      }
+
+      /* ---------- Mode Morph (Douyin <-> Hongguo) ---------- */
+      function setMode(mode, syncStage) {
+        root.setAttribute("data-mode", mode);
+        document.querySelectorAll(".brand-btn").forEach((b) => {
+          b.setAttribute("aria-selected", String(b.dataset.switch === mode));
+        });
+        if (syncStage) {
+          if (currentStage === "split") {
+            setSplitPercent(mode === "douyin" ? 76 : 24, true);
+          } else {
+            setStage(mode === "douyin" ? "player" : "hg-player");
+          }
+        }
+      }
+
+      /* ---------- Stage Switcher ---------- */
+      function setStage(name) {
+        currentStage = name;
+        document.querySelectorAll(".stage-tab").forEach((t) => {
+          const active = t.dataset.stage === name;
+          t.classList.toggle("active", active);
+          t.setAttribute("aria-selected", String(active));
+        });
+        document.querySelectorAll(".stage-panel").forEach((p) => {
+          p.classList.toggle("active", p.dataset.panel === name);
+        });
+        if (name === "player") setMode("douyin", false);
+        if (name === "hg-detail" || name === "hg-player") setMode("hongguo", false);
+      }
+
+      /* ---------- Interactive Split Curtain ---------- */
+      const splitWrap = document.getElementById("splitWrap");
+      let splitPct = 50;
+      let dragging = false;
+
+      function setSplitPercent(pct, smooth) {
+        splitPct = Math.max(4, Math.min(96, pct));
+        const overlay = splitWrap.querySelector(".split-overlay");
+        const divider = splitWrap.querySelector(".split-divider");
+        const handle = splitWrap.querySelector(".split-handle");
+        const tr = smooth ? "all 0.5s cubic-bezier(0.22, 1, 0.36, 1)" : "none";
+        overlay.style.transition = tr;
+        divider.style.transition = tr;
+        handle.style.transition = tr;
+        splitWrap.style.setProperty("--split", splitPct.toFixed(2) + "%");
+        if (splitPct >= 58) setMode("douyin", false);
+        else if (splitPct <= 42) setMode("hongguo", false);
+      }
+
+      function updateSplitFromClientX(clientX) {
+        const rect = splitWrap.getBoundingClientRect();
+        const pct = ((clientX - rect.left) / rect.width) * 100;
+        splitWrap.classList.add("interacted");
+        setSplitPercent(pct, false);
+      }
+
+      splitWrap.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        splitWrap.classList.add("dragging", "interacted");
+        splitWrap.setPointerCapture(e.pointerId);
+        updateSplitFromClientX(e.clientX);
+      });
+      splitWrap.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        updateSplitFromClientX(e.clientX);
+      });
+      splitWrap.addEventListener("pointerup", () => {
+        dragging = false;
+        splitWrap.classList.remove("dragging");
+      });
+      splitWrap.addEventListener("pointercancel", () => {
+        dragging = false;
+        splitWrap.classList.remove("dragging");
+      });
+
+      /* ---------- Danmaku Toggle ---------- */
+      const dmLayer = document.getElementById("danmakuLayer");
+      const dmBtn = document.getElementById("toggleDanmaku");
+      function updateDanmakuBtn() {
+        const d = i18n[currentLang];
+        dmBtn.textContent = dmEnabled ? d.hudToggleDmOn : d.hudToggleDmOff;
+      }
+      dmBtn.addEventListener("click", () => {
+        dmEnabled = !dmEnabled;
+        dmLayer.classList.toggle("on", dmEnabled);
+        updateDanmakuBtn();
+      });
+
+      /* ---------- Tactile Keyboard Playground ---------- */
+      function flashKey(keyName) {
+        const el = document.querySelector(`.key-item[data-key="${keyName}"]`);
+        if (!el) return;
+        el.classList.add("pressed");
+        setTimeout(() => el.classList.remove("pressed"), 210);
+      }
+
+      function triggerKeyAction(key) {
+        if (key === "1") {
+          flashKey("1");
+          setMode("douyin", true);
+        } else if (key === "2") {
+          flashKey("2");
+          setMode("hongguo", true);
+        } else if (key === "ArrowLeft") {
+          flashKey("ArrowLeft");
+          const idx = (stageOrder.indexOf(currentStage) - 1 + stageOrder.length) % stageOrder.length;
+          setStage(stageOrder[idx]);
+        } else if (key === "ArrowRight") {
+          flashKey("ArrowRight");
+          const idx = (stageOrder.indexOf(currentStage) + 1) % stageOrder.length;
+          setStage(stageOrder[idx]);
+        } else if (key === "t" || key === "T") {
+          flashKey("t");
+          setTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+        }
+      }
+
+      document.querySelectorAll(".key-item").forEach((btn) => {
+        btn.addEventListener("click", () => triggerKeyAction(btn.dataset.key));
+      });
+      window.addEventListener("keydown", (e) => {
+        if (e.target && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
+        if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2")) {
+          e.preventDefault();
+          triggerKeyAction(e.key);
+          return;
+        }
+        if (!e.metaKey && !e.ctrlKey && !e.altKey && ["1", "2", "ArrowLeft", "ArrowRight", "t", "T"].includes(e.key)) {
+          triggerKeyAction(e.key);
+        }
+      });
+
+      /* ---------- Wire UI Controls ---------- */
+      document.querySelectorAll(".brand-btn").forEach((btn) => {
+        btn.addEventListener("click", () => setMode(btn.dataset.switch, true));
+      });
+      document.querySelectorAll(".stage-tab").forEach((tab) => {
+        tab.addEventListener("click", () => setStage(tab.dataset.stage));
+      });
+      document.getElementById("themeBtn").addEventListener("click", () => {
+        setTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+      });
+      document.getElementById("langBtn").addEventListener("click", () => {
+        applyLang(currentLang === "zh" ? "en" : "zh");
+      });
+
+      /* ---------- OS Tabs & Smart OS Detection ---------- */
+      const isWin = /Windows/i.test(navigator.userAgent);
+      let latestUrls = {
+        tag: "v0.2.26",
+        macDmg: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-arm64.dmg",
+        macTar: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-darwin-arm64.tar.gz",
+        winExe: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-setup-0.2.26-amd64.exe",
+        winTar: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/mydouyin-0.2.26-windows-amd64.tar.gz",
+        sha: "https://github.com/margbug01/MyDouyin/releases/download/v0.2.26/SHA256SUMS"
+      };
+
+      function selectOSTab(os) {
+        document.querySelectorAll(".os-tab").forEach((t) => {
+          const active = t.dataset.os === os;
+          t.classList.toggle("active", active);
+          t.setAttribute("aria-selected", String(active));
+        });
+        document.querySelectorAll(".os-pane").forEach((p) => {
+          p.classList.toggle("active", p.dataset.osPane === os);
+        });
+      }
+      document.querySelectorAll(".os-tab").forEach((t) => {
+        t.addEventListener("click", () => selectOSTab(t.dataset.os));
+      });
+
+      function applyOSPrimaryCTA() {
+        const d = i18n[currentLang];
+        const pBtn = document.getElementById("primaryDl");
+        const sBtn = document.getElementById("secondaryDl");
+        const pTxt = document.getElementById("primaryDlText");
+        const sTxt = document.getElementById("secondaryDlText");
+        if (isWin) {
+          pBtn.href = latestUrls.winExe;
+          pTxt.textContent = d.dlWin;
+          sBtn.href = latestUrls.macDmg;
+          sTxt.textContent = d.dlMac;
+        } else {
+          pBtn.href = latestUrls.macDmg;
+          pTxt.textContent = d.dlMac;
+          sBtn.href = latestUrls.winExe;
+          sTxt.textContent = d.dlWin;
+        }
+      }
+
+      /* ---------- Copy Buttons ---------- */
+      document.querySelectorAll(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(btn.dataset.copy);
+            btn.classList.add("copied");
+            btn.textContent = i18n[currentLang].copied;
+            setTimeout(() => {
+              btn.classList.remove("copied");
+              btn.textContent = i18n[currentLang].copyBtn;
+            }, 1600);
+          } catch (_) {}
+        });
+      });
+
+      /* ---------- Dynamic GitHub Latest Release Sync ---------- */
+      fetch("https://api.github.com/repos/margbug01/MyDouyin/releases/latest")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((rel) => {
+          if (!rel || !rel.tag_name) return;
+          latestUrls.tag = rel.tag_name;
+          document.getElementById("releaseTag").textContent = rel.tag_name;
+          if (rel.html_url) document.getElementById("releasePill").href = rel.html_url;
+          const assets = Array.isArray(rel.assets) ? rel.assets : [];
+          const find = (re) => assets.find((a) => re.test(a.name));
+          const dmg = find(/arm64\.dmg$/i);
+          const mtar = find(/darwin-arm64\.tar\.gz$/i);
+          const exe = find(/setup-.*amd64\.exe$/i);
+          const wtar = find(/windows-amd64\.tar\.gz$/i);
+          const sha = find(/^SHA256SUMS$/i);
+          if (dmg) {
+            latestUrls.macDmg = dmg.browser_download_url;
+            document.getElementById("dlMacDmg").href = dmg.browser_download_url;
+            document.getElementById("macDmgFile").textContent = dmg.name;
+          }
+          if (mtar) {
+            latestUrls.macTar = mtar.browser_download_url;
+            document.getElementById("dlMacTar").href = mtar.browser_download_url;
+            document.getElementById("macTarFile").textContent = mtar.name;
+          }
+          if (exe) {
+            latestUrls.winExe = exe.browser_download_url;
+            document.getElementById("dlWinExe").href = exe.browser_download_url;
+            document.getElementById("winExeFile").textContent = exe.name;
+          }
+          if (wtar) {
+            latestUrls.winTar = wtar.browser_download_url;
+            document.getElementById("dlWinTar").href = wtar.browser_download_url;
+            document.getElementById("winTarFile").textContent = wtar.name;
+          }
+          if (sha) {
+            latestUrls.sha = sha.browser_download_url;
+            document.getElementById("dlSha1").href = sha.browser_download_url;
+            document.getElementById("dlSha2").href = sha.browser_download_url;
+          }
+          applyOSPrimaryCTA();
+        })
+        .catch(() => {});
+
+      /* ---------- Scroll Reveal ---------- */
+      const io = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((en) => {
+            if (en.isIntersecting) {
+              en.target.classList.add("in");
+              io.unobserve(en.target);
+            }
+          });
+        },
+        { threshold: 0.12 }
+      );
+      document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+
+      /* ---------- Init ---------- */
+      try {
+        const saved = localStorage.getItem("mydouyin_theme");
+        if (saved === "dark" || saved === "light") setTheme(saved);
+        else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) setTheme("dark");
+      } catch (_) {}
+      selectOSTab(isWin ? "win" : "mac");
+      applyLang(currentLang);
+    })();
+  </script>
+</body>
+</html>
