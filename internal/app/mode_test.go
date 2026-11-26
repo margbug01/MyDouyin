@@ -309,8 +309,8 @@ func TestHGSettingsReconfigureAndReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !a.settingsOpen || !tt.HasText("红果短剧 (MyHongguo)") || !tt.HasText("绕过系统代理直连") {
-		t.Fatalf("settings dialog missing Hongguo section: %q", tt.Texts())
+	if !a.settingsOpen || !tt.HasText("绕过系统代理") || !tt.HasText("留空使用内置签名") {
+		t.Fatalf("settings did not open on the Hongguo page: %q", tt.Texts())
 	}
 
 	// Toggling direct switch immediately calls Reconfigure.
@@ -324,10 +324,10 @@ func TestHGSettingsReconfigureAndReset(t *testing.T) {
 	}
 	fake.mu.Unlock()
 
-	// Updating signer URL/Token and clicking 应用配置 calls Reconfigure.
+	// The signer URL/Token changed apply as the settings close.
 	a.hgSignerURL = "https://sign.local/v1"
 	a.hgSignerToken = "abc"
-	if err := tt.Click("应用配置"); err != nil {
+	if err := tt.Click("关闭设置"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -337,8 +337,12 @@ func TestHGSettingsReconfigureAndReset(t *testing.T) {
 	}
 	fake.mu.Unlock()
 
-	// Clicking 重置匿名设备 invokes ResetDevice asynchronously and posts toast.
-	if err := tt.Click("重置匿名设备"); err != nil {
+	// 重置, the settings opened again, invokes ResetDevice asynchronously and posts toast.
+	if err := tt.Click("设置"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("重置"); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.After(2 * time.Second)

@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,217 +153,258 @@ func (a *app) saveSettings() {
 // qualityChoices are the settings dialog's definitions, Douyin's pick first.
 var qualityChoices = []string{"智能", "4K", "2K", "1080P", "720P", "540P"}
 
-// settingsDialog is the settings, over the window while open: playback,
-// Hongguo configuration, and updates.
+// settingsPage is a page of the settings, which the dialog's side lists.
+type settingsPage int
+
+const (
+	settingsPlay settingsPage = iota
+	settingsDanmaku
+	settingsHongguo
+	settingsAccount
+	settingsUpdate
+)
+
+var settingsPageNames = [...]string{"播放", "弹幕", "红果短剧", "账号", "更新"}
+
+// settingsDialog is the settings, over the window while open: its pages
+// listed down the side, the one chosen beside them in cards of rows. It
+// opens on the mode's own page.
 func (a *app) settingsDialog(c *ui.Context) {
+	if a.settingsOpen && !a.settingsWasOpen {
+		a.settingsPage = onOff(a.mode == modeHongguo, settingsHongguo, settingsPlay)
+	}
+	// The signer's fields apply as they lose focus, the page or the dialog
+	// closing with them.
+	urlFocused, tokFocused := c.Focused(a.hgSignerURLBox), c.Focused(a.hgSignerTokenBox)
+	if (a.hgSignerURLFocused && !urlFocused || a.hgSignerTokenFocused && !tokFocused) && a.hg != nil && a.hgConfig() != a.hg.cfg {
+		a.reconfigureHG()
+	}
+	a.hgSignerURLFocused, a.hgSignerTokenFocused = urlFocused, tokFocused
+	_, winH := c.Size()
 	ui.DialogBase(c.Key("settings"), &a.settingsOpen, func(back, panel ui.Element) {
 		back.Background(ui.RGBA(0, 0, 0, 0.45))
-		panel.Width(440).Padding(18, 20, 20, 20).Gap(6).Radius(14).Background(pal.popover).
+		panel.Width(720).Height(min(520, winH-48)).Radius(14).Clip().Background(pal.popover).
 			Border(1, pal.popoverBd).Shadow(0, 10, 30, -6, pal.cardShadow).Label("设置")
-		ui.Row(c).AlignItems(ui.Center).Margin(0, 0, 8, 0).Children(func() {
-			ui.Text(c, "设置").FontSize(17).FontWeight(700).TextColor(pal.strong).Grow(1)
-			if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭设置").Clicked() {
-				a.settingsOpen = false
+		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
+			ui.Column(c.Key("settings-nav")).Width(172).Padding(22, 12, 22, 12).Gap(2).
+				Background(onOff(pal.dark, pal.raised, pal.bg)).Role(ui.RoleTabList).Children(func() {
+				ui.Text(c, "设置").FontSize(17).FontWeight(700).TextColor(pal.strong).Padding(0, 10, 14, 10)
+				for i, name := range settingsPageNames {
+					p := settingsPage(i)
+					if p == settingsAccount && a.c == nil {
+						continue
+					}
+					on := p == a.settingsPage
+					b := ui.ButtonBase(c.Key("settings-nav-" + name)).Role(ui.RoleTab).AccessSelected(on).Label(name).
+						Height(36).PaddingX(12).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false)
+					switch {
+					case on:
+						b.Background(pal.press)
+					case b.Hovered() || b.FocusVisible():
+						b.Background(pal.hover)
+					}
+					b.Children(func() {
+						ui.Text(c, name).FontSize(14).FontWeight(onOff(on, 600, 400)).TextColor(onOff(on, pal.strong, pal.muted))
+					})
+					if b.Clicked() {
+						a.settingsPage = p
+					}
+				}
+			})
+			ui.Box(c).Width(1).Background(pal.hairline)
+			ui.Column(c).Grow(1).MinWidth(0).Padding(22, 16, 0, 28).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Padding(0, barGutter, 0, 0).Margin(0, 0, 16, 0).Children(func() {
+					ui.Text(c, settingsPageNames[a.settingsPage]).FontSize(15).FontWeight(700).TextColor(pal.strong).Grow(1)
+					if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭设置").Clicked() {
+						a.settingsOpen = false
+					}
+				})
+				ui.Scroll(c.Key(fmt.Sprint("settings-page", a.settingsPage))).Grow(1).Padding(0, barGutter, 24, 0).Children(func() {
+					a.settingsBody(c)
+				})
+			})
+		})
+	})
+	if a.settingsWasOpen && !a.settingsOpen {
+		a.hgSignerURLFocused, a.hgSignerTokenFocused = false, false
+		if a.hg != nil && a.hgConfig() != a.hg.cfg {
+			a.reconfigureHG()
+		}
+	}
+	a.settingsWasOpen = a.settingsOpen
+}
+
+// settingsBody is the rows of the page chosen, in cards.
+func (a *app) settingsBody(c *ui.Context) {
+	rows := 0 // in the card being built, each after the first under a line
+	group := func(title string, body func()) {
+		if title != "" {
+			ui.Text(c, title).FontSize(12).FontWeight(600).TextColor(pal.faint).Margin(18, 4, 8, 4)
+		}
+		ui.Column(c).Radius(12).Background(pal.hover).Children(func() {
+			rows = 0
+			body()
+		})
+	}
+	row := func(label, note string, control func()) {
+		if rows > 0 {
+			ui.Box(c).Height(1).Background(pal.hairline)
+		}
+		rows++
+		ui.Row(c).Gap(16).AlignItems(ui.Center).MinHeight(52).Padding(10, 16, 10, 16).Children(func() {
+			ui.Column(c).Gap(3).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+				ui.Text(c, label).FontSize(14).TextColor(pal.text)
+				if note != "" {
+					ui.Text(c, note).FontSize(12).TextColor(pal.faint)
+				}
+			})
+			if control != nil {
+				control()
 			}
 		})
-		section := func(title string) {
-			ui.Text(c, title).FontSize(12).FontWeight(600).TextColor(pal.faint).Margin(10, 0, 2, 0)
-		}
-		row := func(label, note string, control func()) {
-			ui.Row(c).Gap(12).AlignItems(ui.Center).MinHeight(40).Children(func() {
-				ui.Column(c).Gap(2).Grow(1).Shrink(1).MinWidth(0).Children(func() {
-					ui.Text(c, label).FontSize(14).TextColor(pal.text)
-					if note != "" {
-						ui.Text(c, note).FontSize(11.5).TextColor(pal.faint)
-					}
-				})
-				control()
-			})
-		}
-		ui.Scroll(c.Key("settings-scroll")).MaxHeight(580).Gap(6).Padding(0, barGutter, 0, 0).Children(func() {
-			if a.c != nil {
-				section("账号")
-				who := "没登录"
-				if a.signedIn {
-					who = a.me.Name
-				}
-				row("抖音账号", who, func() {
-					if !a.signedIn {
-						if ui.Button(c.Key("login"), "扫码登录").Clicked() {
-							a.settingsOpen = false
-							a.openLogin()
-						}
-					} else if ui.Button(c.Key("logout"), "退出登录").Clicked() {
-						a.settingsOpen = false
-						a.logout()
-					}
-				})
+	}
+	field := func(key string, box *ui.Handle, text *string, placeholder, label string) {
+		ui.Row(c.Key(key+"-wrap")).Width(230).Height(32).PaddingX(10).Radius(8).AlignItems(ui.Center).
+			Background(pal.searchTint).Border(1, onOff(c.Focused(*box), pal.focusBorder, pal.searchBorder)).Children(func() {
+			in := ui.TextInputBase(c.Key(key), text).Bind(box).Grow(1).Placeholder(placeholder).FontSize(12.5).Label(label)
+			if in.Submitted() {
+				a.reconfigureHG()
+				a.toast = "已应用红果签名配置"
 			}
-			section("播放")
-			row("连播", "一个视频播完接着播下一个", func() { ui.Switch(c.Key("autoNext"), &a.autoNext).Label("连播开关") })
-			on := !a.dmOff
+		})
+	}
+	switch a.settingsPage {
+	case settingsPlay:
+		q := a.quality
+		if q == "" {
+			q = "智能"
+		}
+		group("", func() {
+			row("连播", "播完自动下一个", func() { ui.Switch(c.Key("autoNext"), &a.autoNext).Label("连播开关") })
+			row("清晰度", "智能：按网速自动选择", func() {
+				if ui.Select(c.Key("quality"), &q, qualityChoices).Width(120).Label("清晰度").Changed() {
+					a.setQuality(q)
+				}
+			})
+		})
+	case settingsDanmaku:
+		on := !a.dmOff
+		group("", func() {
 			row("显示弹幕", "", func() {
 				if ui.Switch(c.Key("danmaku"), &on).Label("显示弹幕开关").Changed() {
 					a.dmOff = !on
 				}
 			})
-			dm := a.danmakuStyle()
-			dmSpeedLabel := dmLabelFor(dmSpeedChoices, dm.Speed, "1x")
-			dmSizeLabel := dmLabelFor(dmSizeChoices, dm.Size, "标准")
-			dmStrokeLabel := dmLabelFor(dmStrokeChoices, dm.Stroke, "阴影")
-			dmOpacityLabel := dmLabelFor(dmOpacityChoices, dm.Opacity, "90%")
-			ui.Column(c.Key("dm-style-settings")).Gap(6).Margin(2, 0, 4, 0).Children(func() {
-				dmCell := func(key, title string, value *string, opts []string, onChange func(string)) {
-					ui.Row(c.Key(key+"-cell")).Grow(1).Basis(0).MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, title).FontSize(12.5).TextColor(pal.muted).Grow(1).SingleLine()
-						if ui.Select(c.Key(key), value, opts).Width(96).Label("弹幕" + title).Changed() {
-							onChange(*value)
-						}
-					})
-				}
-				ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
-					dmCell("dmSpeed", "速度", &dmSpeedLabel, dmChoiceLabels(dmSpeedChoices), func(v string) {
-						dm.Speed = dmValueFor(dmSpeedChoices, v, defaultDanmakuStyle.Speed)
-						a.setDanmakuStyle(dm)
-					})
-					dmCell("dmSize", "字号", &dmSizeLabel, dmChoiceLabels(dmSizeChoices), func(v string) {
-						dm.Size = dmValueFor(dmSizeChoices, v, defaultDanmakuStyle.Size)
-						a.setDanmakuStyle(dm)
-					})
-				})
-				ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
-					dmCell("dmStroke", "描边", &dmStrokeLabel, dmChoiceLabels(dmStrokeChoices), func(v string) {
-						dm.Stroke = dmValueFor(dmStrokeChoices, v, defaultDanmakuStyle.Stroke)
-						a.setDanmakuStyle(dm)
-					})
-					dmCell("dmOpacity", "透明度", &dmOpacityLabel, dmChoiceLabels(dmOpacityChoices), func(v string) {
-						dm.Opacity = dmValueFor(dmOpacityChoices, v, defaultDanmakuStyle.Opacity)
-						a.setDanmakuStyle(dm)
-					})
-				})
-			})
-			q := a.quality
-			if q == "" {
-				q = "智能"
-			}
-			row("清晰度", "智能：由抖音按网速挑选", func() {
-				if ui.Select(c.Key("quality"), &q, qualityChoices).Width(110).Label("清晰度").Changed() {
-					a.setQuality(q)
+		})
+		dm := a.danmakuStyle()
+		styleRow := func(key, title, label string, labels []string, set func(v string)) {
+			row(title, "", func() {
+				if ui.Select(c.Key(key), &label, labels).Width(120).Label("弹幕" + title).Changed() {
+					set(label)
+					a.setDanmakuStyle(dm)
 				}
 			})
-			section("红果短剧 (MyHongguo)")
-			row("绕过系统代理直连", "直连红果接口与媒体，不走系统代理", func() {
+		}
+		group("样式", func() {
+			styleRow("dmSpeed", "速度", dmLabelFor(dmSpeedChoices, dm.Speed, "1x"), dmChoiceLabels(dmSpeedChoices), func(v string) {
+				dm.Speed = dmValueFor(dmSpeedChoices, v, defaultDanmakuStyle.Speed)
+			})
+			styleRow("dmSize", "字号", dmLabelFor(dmSizeChoices, dm.Size, "标准"), dmChoiceLabels(dmSizeChoices), func(v string) {
+				dm.Size = dmValueFor(dmSizeChoices, v, defaultDanmakuStyle.Size)
+			})
+			styleRow("dmStroke", "描边", dmLabelFor(dmStrokeChoices, dm.Stroke, "阴影"), dmChoiceLabels(dmStrokeChoices), func(v string) {
+				dm.Stroke = dmValueFor(dmStrokeChoices, v, defaultDanmakuStyle.Stroke)
+			})
+			styleRow("dmOpacity", "透明度", dmLabelFor(dmOpacityChoices, dm.Opacity, "90%"), dmChoiceLabels(dmOpacityChoices), func(v string) {
+				dm.Opacity = dmValueFor(dmOpacityChoices, v, defaultDanmakuStyle.Opacity)
+			})
+		})
+	case settingsHongguo:
+		group("", func() {
+			row("绕过系统代理", "红果接口和视频直连", func() {
 				if ui.Switch(c.Key("hgDirect"), &a.hgDirect).Label("红果直连开关").Changed() {
 					a.reconfigureHG()
 				}
 			})
-			urlFocused := c.Focused(a.hgSignerURLBox)
-			if a.hgSignerURLFocused && !urlFocused && a.hg != nil && a.hgConfig() != a.hg.cfg {
-				a.reconfigureHG()
-			}
-			a.hgSignerURLFocused = urlFocused
-			row("签名服务地址", "留空用内置签名；填写后内置取址失败自动回退到此服务", func() {
-				box := ui.Row(c.Key("hg-signer-url-wrap")).Width(188).Height(32).PaddingX(10).Radius(8).
-					AlignItems(ui.Center).Background(pal.searchTint).
-					Border(1, onOff(urlFocused, pal.focusBorder, pal.searchBorder))
-				box.Children(func() {
-					in := ui.TextInputBase(c.Key("hgSignerURL"), &a.hgSignerURL).Bind(&a.hgSignerURLBox).Grow(1).
-						Placeholder("https://...").FontSize(12.5).Label("红果签名服务地址")
-					if in.Submitted() {
-						a.reconfigureHG()
-						a.toast = "已应用红果签名配置"
-					}
-				})
-			})
-			tokFocused := c.Focused(a.hgSignerTokenBox)
-			if a.hgSignerTokenFocused && !tokFocused && a.hg != nil && a.hgConfig() != a.hg.cfg {
-				a.reconfigureHG()
-			}
-			a.hgSignerTokenFocused = tokFocused
-			row("签名服务 Token", "远程签名服务的鉴权令牌（可选）", func() {
-				box := ui.Row(c.Key("hg-signer-token-wrap")).Width(188).Height(32).PaddingX(10).Radius(8).
-					AlignItems(ui.Center).Background(pal.searchTint).
-					Border(1, onOff(tokFocused, pal.focusBorder, pal.searchBorder))
-				box.Children(func() {
-					in := ui.TextInputBase(c.Key("hgSignerToken"), &a.hgSignerToken).Bind(&a.hgSignerTokenBox).Grow(1).
-						Placeholder("可选 Token").FontSize(12.5).Label("红果签名服务 Token")
-					if in.Submitted() {
-						a.reconfigureHG()
-						a.toast = "已应用红果签名配置"
-					}
-				})
-			})
-			row("应用签名配置", "修改签名地址或 Token 后立即生效", func() {
-				if ui.Button(c.Key("hg-apply-config"), "应用配置").Clicked() {
-					a.reconfigureHG()
-					if a.toast == "" {
-						a.toast = "已应用红果配置"
-					}
-				}
-			})
-			row("匿名设备", "红果模式免登录运行，异常时可重置匿名设备标识", func() {
-				b := ui.Button(c.Key("hg-reset-device"), onOff(a.hgResetBusy, "重置中…", "重置匿名设备"))
+			row("匿名设备", "出问题时可以重置", func() {
+				b := ui.Button(c.Key("hg-reset-device"), onOff(a.hgResetBusy, "重置中…", "重置"))
 				if a.hgResetBusy {
 					b.Disabled(true)
 				} else if b.Clicked() {
 					a.resetHGDevice()
 				}
 			})
-			section("更新")
-			row("当前版本", "", func() {
-				v := mygo.App.Version()
-				if v == "" {
-					v = "开发版"
-				}
-				ui.Text(c, v).FontSize(13.5).TextColor(pal.muted)
-			})
-			u := &a.upd
-			if u.check == nil {
-				row("自动更新", "这个版本不是正式打包的，不能自动更新", func() {})
-			} else {
-				row("自动检查更新", "启动时和之后每 6 小时检查一次", func() { ui.Switch(c.Key("autoUpdate"), &u.auto).Label("自动检查更新") })
-				status := ""
-				switch {
-				case u.checking:
-					status = "正在检查…"
-				case u.busy && u.progress < 1:
-					status = "正在下载 " + percent(u.progress)
-				case u.busy:
-					status = "正在安装，装好后自动重启"
-				case u.err != "":
-					status = u.err
-				case u.found != nil:
-					status = "发现新版本 v" + u.found.Version
-				case u.checkErr != "":
-					status = u.checkErr
-				case u.latest:
-					status = "已是最新版本"
-				}
-				row("检查更新", status, func() {
-					switch {
-					case u.found != nil && !u.busy:
-						if ui.Button(c.Key("install"), "查看更新").Clicked() {
-							a.settingsOpen = false
-							u.dialogOpen = true
-						}
-					default:
-						b := ui.Button(c.Key("check"), "检查更新")
-						if u.checking || u.busy {
-							b.Disabled(true)
-						} else if b.Clicked() {
-							a.checkUpdate(true)
-						}
-					}
-				})
-			}
 		})
-	})
-	if a.hgSettingsWasOpen && !a.settingsOpen {
-		a.hgSignerURLFocused = false
-		a.hgSignerTokenFocused = false
-		if a.hg != nil && a.hgConfig() != a.hg.cfg {
-			a.reconfigureHG()
+		group("签名服务", func() {
+			row("地址", "留空使用内置签名", func() {
+				field("hgSignerURL", &a.hgSignerURLBox, &a.hgSignerURL, "https://...", "红果签名服务地址")
+			})
+			row("Token", "可选", func() {
+				field("hgSignerToken", &a.hgSignerTokenBox, &a.hgSignerToken, "Token", "红果签名服务 Token")
+			})
+		})
+	case settingsAccount:
+		who := "没登录"
+		if a.signedIn {
+			who = a.me.Name
 		}
+		group("", func() {
+			row("抖音账号", who, func() {
+				if !a.signedIn {
+					if ui.Button(c.Key("login"), "扫码登录").Clicked() {
+						a.settingsOpen = false
+						a.openLogin()
+					}
+				} else if ui.Button(c.Key("logout"), "退出登录").Clicked() {
+					a.settingsOpen = false
+					a.logout()
+				}
+			})
+		})
+	case settingsUpdate:
+		version := "开发版"
+		if v := mygo.App.Version(); v != "" {
+			version = "版本 " + v
+		}
+		u := &a.upd
+		if u.check == nil {
+			group("", func() { row(version, "这个版本不是正式打包的，不能自动更新", nil) })
+			return
+		}
+		status := ""
+		switch {
+		case u.checking:
+			status = "正在检查…"
+		case u.busy && u.progress < 1:
+			status = "正在下载 " + percent(u.progress)
+		case u.busy:
+			status = "正在安装，装好后自动重启"
+		case u.err != "":
+			status = u.err
+		case u.found != nil:
+			status = "发现新版本 v" + u.found.Version
+		case u.checkErr != "":
+			status = u.checkErr
+		case u.latest:
+			status = "已是最新版本"
+		}
+		group("", func() {
+			row(version, status, func() {
+				if u.found != nil && !u.busy {
+					if ui.Button(c.Key("install"), "查看更新").Clicked() {
+						a.settingsOpen = false
+						u.dialogOpen = true
+					}
+					return
+				}
+				b := ui.Button(c.Key("check"), "检查更新")
+				if u.checking || u.busy {
+					b.Disabled(true)
+				} else if b.Clicked() {
+					a.checkUpdate(true)
+				}
+			})
+			row("自动检查更新", "启动时及每 6 小时", func() { ui.Switch(c.Key("autoUpdate"), &u.auto).Label("自动检查更新") })
+		})
 	}
-	a.hgSettingsWasOpen = a.settingsOpen
 }

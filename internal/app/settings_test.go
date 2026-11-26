@@ -24,9 +24,21 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !a.settingsOpen || !tt.HasText("连播") || !tt.HasText("清晰度") || !tt.HasText("当前版本") || !tt.HasText("这个版本不是正式打包的，不能自动更新") {
+	if !a.settingsOpen || !tt.HasText("播完自动下一个") || !tt.HasText("清晰度") {
 		t.Fatalf("dialog: %q", tt.Texts())
 	}
+	// Each page shows alone, chosen at the side.
+	if err := tt.Click("更新"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("开发版") || !tt.HasText("这个版本不是正式打包的，不能自动更新") || tt.HasText("播完自动下一个") {
+		t.Fatalf("更新 page: %q", tt.Texts())
+	}
+	if err := tt.Click("播放"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
 	if err := tt.Click("连播开关"); err != nil {
 		t.Fatal(err)
 	}
@@ -57,8 +69,15 @@ func TestLoginEntries(t *testing.T) {
 	if !tt.HasText("登录") {
 		t.Fatalf("logged out dock: %q", tt.Texts())
 	}
-	a.settingsOpen = true
-	tt.Frame()
+	openAccount := func() {
+		a.settingsOpen = true
+		tt.Frame()
+		if err := tt.Click("账号"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+	}
+	openAccount()
 	if !tt.HasText("没登录") || !tt.HasText("扫码登录") {
 		t.Fatalf("logged out settings: %q", tt.Texts())
 	}
@@ -67,8 +86,7 @@ func TestLoginEntries(t *testing.T) {
 	if tt.HasText("登录") {
 		t.Fatalf("logged in dock: %q", tt.Texts())
 	}
-	a.settingsOpen = true
-	tt.Frame()
+	openAccount()
 	if !tt.HasText("小明") || !tt.HasText("退出登录") || tt.HasText("扫码登录") {
 		t.Fatalf("logged in settings: %q", tt.Texts())
 	}

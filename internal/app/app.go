@@ -351,6 +351,7 @@ type app struct {
 	historyWait  int // 观看历史's gen while it waits for them to be told to load (freshHistory), 0 none
 
 	settingsOpen bool     // the settings dialog (settings.go)
+	settingsPage settingsPage // the page of it shown
 	settingsFile string   // where the settings are kept, "" not to keep them
 	saved        settings // as last written
 
@@ -364,7 +365,7 @@ type app struct {
 	hgSignerTokenBox     ui.Handle
 	hgSignerURLFocused   bool
 	hgSignerTokenFocused bool
-	hgSettingsWasOpen    bool
+	settingsWasOpen      bool // as of the last frame, so the dialog knows it opened or closed
 	hgResetBusy          bool
 	douyinStarted        bool
 	newHGService         func(hg.Config) (hg.Service, error) // test hook for lazy Hongguo service creation
