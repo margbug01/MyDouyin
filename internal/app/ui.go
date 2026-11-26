@@ -863,7 +863,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 					a.playbackCover(c, a.img.get(s.v.Poster), ui.Contain)
 				}
 			}
-			a.slideIn(c, s, bounds.H)
+			a.slideIn(c, s, s.v.Poster, a.img, bounds.H)
 			if a.paused && s.vp != nil {
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Children(func() {
 					ui.Icon(c, iconPlay).Size(60, 60).TextColor(white).Opacity(0.85)
@@ -941,21 +941,21 @@ func (a *app) playbackCover(c *ui.Context, bmp *ui.Bitmap, fit ui.Fit) {
 type slide struct {
 	n    int    // which step, keying its element
 	from string // the cover of the video left
-	to   *slot  // the one stepped to: another showing, the slide is stale
+	to   any    // what was stepped to, a *slot or a Hongguo episode's key: another showing, the slide is stale
 	dir  int
 }
 
 const slideTime = 320 * time.Millisecond
 
-// slideIn draws the step to the video shown, by covers, over the picture
-// (whose native layer cannot move) and h tall, until it is over; then the
-// picture shows as it is.
-func (a *app) slideIn(c *ui.Context, s *slot, h float32) {
+// slideIn draws the step to what shows, to, whose cover from img is cover,
+// over the picture (whose native layer cannot move) and h tall, until it is
+// over; then the picture shows as it is.
+func (a *app) slideIn(c *ui.Context, to any, cover string, img *images, h float32) {
 	sl := a.slide
 	if sl == nil || h <= 0 {
 		return
 	}
-	if sl.to != s {
+	if sl.to != to {
 		a.slide = nil
 		return
 	}
@@ -974,9 +974,9 @@ func (a *app) slideIn(c *ui.Context, s *slot, h float32) {
 		for _, it := range []struct {
 			url string
 			y   float32
-		}{{sl.from, -off * t}, {s.v.Poster, off * (1 - t)}} {
+		}{{sl.from, -off * t}, {cover, off * (1 - t)}} {
 			page := ui.Box(c).Absolute().Left(0).Right(0).Top(it.y).Height(h)
-			if bmp := a.img.get(it.url); bmp != nil {
+			if bmp := img.get(it.url); bmp != nil {
 				page.Children(func() { ui.Image(c, bmp).Fill().Fit(ui.Contain) })
 			}
 		}

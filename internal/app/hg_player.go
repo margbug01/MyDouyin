@@ -152,6 +152,17 @@ func (hp *hgPlayer) currentEpisode() (hg.Episode, bool) {
 	return hp.episodes[hp.epIdx], true
 }
 
+// coverOf is episode idx's cover, else the series'.
+func (hp *hgPlayer) coverOf(idx int) string {
+	if idx >= 0 && idx < len(hp.episodes) && hp.episodes[idx].CoverURL != "" {
+		return hp.episodes[idx].CoverURL
+	}
+	return hp.series.CoverURL
+}
+
+// epKey tells episode idx of the series apart from others, as a slide's end.
+func (hp *hgPlayer) epKey(idx int) string { return fmt.Sprintf("%s:%d", hp.series.ID, idx) }
+
 func (hp *hgPlayer) episodeNumber(idx int) int {
 	if hp != nil && idx >= 0 && idx < len(hp.episodes) && hp.episodes[idx].Index > 0 {
 		return hp.episodes[idx].Index
@@ -1108,6 +1119,8 @@ func (a *app) hgStepEpisode(delta int) {
 		return
 	}
 	hp.lastNav = now
+	a.slides++ // as the feed's step slides
+	a.slide = &slide{n: a.slides, from: hp.coverOf(hp.epIdx), to: hp.epKey(next), dir: delta}
 	a.hgPlayEpisode(next)
 }
 
@@ -1196,7 +1209,7 @@ func (a *app) hgTick(hp *hgPlayer, at, dur time.Duration) {
 			a.post(func() {
 				if a.hg == h && h.player == hp && hp.epIdx+1 == nextIdx {
 					hp.lastNav = time.Time{}
-					a.hgPlayEpisode(nextIdx)
+					a.hgStepEpisode(1)
 				}
 			})
 		} else {
@@ -1376,7 +1389,7 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		pinned := hp.paused || hp.dragging || hp.loading || hp.listLoading || hp.dashUnsupported ||
 			hp.errInfo.Kind != hg.ErrKindNone || hp.listErr.Kind != hg.ErrKindNone ||
 			hp.qualityOpen || hp.speedOpen || hp.volumeOpen || hp.dmSettingsOpen || overBar || overOverlay
-		epKey := fmt.Sprintf("%s:%d", hp.series.ID, hp.epIdx)
+		epKey := hp.epKey(hp.epIdx)
 		wantControls, hideIn := hp.hud.want(epKey, now, px, py, over, pinned)
 		if hideIn > 0 {
 			c.After(hideIn)
@@ -1393,12 +1406,9 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 				a.mainVideo.video(c, hp.pl.vp, false, ui.Element{}, radius).Fill().Fit(ui.Contain)
 			}
 			if !videoPictureReady(hp.pl.vp) {
-				coverURL := hp.series.CoverURL
-				if ep, ok := hp.currentEpisode(); ok && ep.CoverURL != "" {
-					coverURL = ep.CoverURL
-				}
-				a.hgPlaybackCover(c, h, coverURL)
+				a.hgPlaybackCover(c, h, hp.coverOf(hp.epIdx))
 			}
+			a.slideIn(c, epKey, hp.coverOf(hp.epIdx), h.img, bounds.H)
 			if hp.paused && hp.pl.vp != nil && !hp.dashUnsupported && hp.errInfo.Kind == hg.ErrKindNone {
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().PassThrough().Children(func() {
 					ui.Icon(c, iconPlay).Size(60, 60).TextColor(white).Opacity(0.85)
