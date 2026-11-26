@@ -389,9 +389,63 @@ type login struct {
 	qr     *ui.Bitmap // the code, drawn
 	status string     // what the scan is at, for the panel
 	qrSlow bool
-	verify bool       // Douyin asks more than the scan: its page shows instead
-	stop   func()     // ends what waits for the verification (verifyFor), if any
-	retry  []func()   // what runs once Douyin's verification is passed
+	verify bool     // Douyin asks more than the scan: its page shows instead
+	hint   string   // over the page, instead of the usual line: its captcha does not load
+	stop   func()   // ends what waits for the verification (verify), if any
+	retry  []func() // what runs once Douyin's verification is passed
+}
+
+// captchaLoadTimeout is how long a captcha may stay hidden before the panel
+// says it did not load: Douyin's shows within a second, and stays hidden for
+// good when its frame (rmc.bytedance.com) cannot load, as behind a proxy that
+// resolved it to a blocking page (2026-11-26).
+const captchaLoadTimeout = 8 * time.Second
+
+const captchaHint = "验证码没能载入：网络或代理可能拦截了抖音的验证服务（rmc.bytedance.com）"
+
+// hiddenCaptcha follows looks at the page, one after another, for a captcha
+// that stays hidden.
+type hiddenCaptcha struct{ since time.Time }
+
+// hint is the panel's hint after this look: captchaHint once the captcha has
+// stayed hidden for captchaLoadTimeout, else "".
+func (h *hiddenCaptcha) hint(hidden bool, now time.Time) string {
+	if !hidden {
+		h.since = time.Time{}
+		return ""
+	}
+	if h.since.IsZero() {
+		h.since = now
+	}
+	if now.Sub(h.since) >= captchaLoadTimeout {
+		return captchaHint
+	}
+	return ""
+}
+
+// captchaState is whether the page holds Douyin's captcha, and whether it
+// shows: its frame stays hidden until its own page has loaded.
+type captchaState string
+
+const (
+	captchaNone    captchaState = "none"
+	captchaShown   captchaState = "shown"
+	captchaHidden  captchaState = "hidden"
+	captchaUnknown captchaState = "" // the page did not answer
+)
+
+const captchaStateJS = `
+const el = document.querySelector("iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper, .captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper");
+if (!el) return "none";
+return getComputedStyle(el).visibility === "hidden" ? "hidden" : "shown";`
+
+func (w *web) captchaState(ctx context.Context) captchaState {
+	b, err := w.Eval(ctx, captchaStateJS)
+	var s captchaState
+	if err != nil || json.Unmarshal(b, &s) != nil {
+		return captchaUnknown
+	}
+	return s
 }
 
 // loginJS reads the login the page shows: its code, the text about it, and
@@ -417,12 +471,14 @@ if (expired) { const r = [...document.querySelectorAll("*")].find(e => e.childre
 const hasCaptcha = [...document.querySelectorAll(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper")].some(vis)
   || [...document.querySelectorAll("#captcha_container > *")].some(e => e.id !== "nocaptcha-container" && !e.classList.contains("nocaptcha-container") && vis(e));
 const verify = !img && (/身份验证|安全验证|短信验证|二次验证/.test(body) || hasCaptcha);
+const capFrame = document.querySelector("iframe[src*='/verifycenter/captcha/']");
+const captchaHidden = !!capFrame && getComputedStyle(capFrame).visibility === "hidden";
 const signedIn = !img && !verify && document.readyState === "complete" && /抖音号/.test(body) && !/未登录|扫码登录/.test(body);
 if (!img && !verify && !signedIn && !window.__mdNoTabClick && !window.__mdQRTabClicked) {
   const tab = [...document.querySelectorAll("button, div, span, li, a")].find(e => e.children.length === 0 && (e.textContent || "").trim() === "扫码登录" && vis(e));
   if (tab) { window.__mdQRTabClicked = true; tab.click(); }
 }
-return { src: img ? img.src : "", scanned: window.__mdQR.status === 2 || /扫码成功|确认登录|手机上确认/.test(near), expired, verify, signedIn };`
+return { src: img ? img.src : "", scanned: window.__mdQR.status === 2 || /扫码成功|确认登录|手机上确认/.test(near), expired, verify, signedIn, captchaHidden };`
 
 // sessionID is the session cookie of cs, or "".
 func sessionID(cs []dy.Cookie) string {
@@ -500,6 +556,7 @@ func (a *app) pollLogin(gen int) {
 		old := sessionID(was)
 		started := time.Now()
 		checkedExisting := false
+		var captcha hiddenCaptcha
 		defer a.post(func() {
 			if a.loginGen == gen {
 				a.web.layout = false
@@ -530,8 +587,8 @@ func (a *app) pollLogin(gen int) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			var st struct {
-				Src                                string
-				Scanned, Expired, Verify, SignedIn bool
+				Src                                               string
+				Scanned, Expired, Verify, SignedIn, CaptchaHidden bool
 			}
 			js := loginJS
 			if inVerify {
@@ -568,6 +625,7 @@ func (a *app) pollLogin(gen int) {
 				}
 			}
 			slow := time.Since(started) >= 10*time.Second
+			hint := captcha.hint(st.CaptchaHidden, time.Now())
 			a.post(func() {
 				if a.loginGen != gen {
 					return
@@ -583,6 +641,7 @@ func (a *app) pollLogin(gen int) {
 				if st.Verify {
 					l.verify, l.qrSlow = true, false
 				}
+				l.hint = hint
 				switch {
 				case st.Expired:
 					l.status = "二维码过期了，正在换一张"
@@ -690,7 +749,11 @@ func (a *app) loginPanel(c *ui.Context) {
 			w, h := c.Size()
 			panel.Width(min(960, w-48)).Height(min(660, h-48))
 			ui.Row(c).Height(52).PaddingX(18).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "请在下方完成登录或身份验证").FontSize(14).FontWeight(600).TextColor(pal.strong).Grow(1)
+				if l.hint != "" {
+					ui.Text(c, l.hint).FontSize(13).FontWeight(600).TextColor(pal.accent).Grow(1)
+				} else {
+					ui.Text(c, "请在下方完成登录或身份验证").FontSize(14).FontWeight(600).TextColor(pal.strong).Grow(1)
+				}
 				if ui.Button(c.Key("later"), "以后再说").Clicked() {
 					a.loginOpen = false
 				}
@@ -740,21 +803,40 @@ func (a *app) loginPanel(c *ui.Context) {
 	}
 }
 
-// verify shows Douyin's verification (dy.ErrVerify) over the window: its
-// page asks path, a read Douyin held back, itself, and Douyin's scripts
-// bring up the captcha there, for the user to pass. Once the page has its
-// answer the verification closes and retry runs.
-func (a *app) verify(path string, retry func()) {
+// verifyFor tells what Douyin held back for its verification: a read the
+// page may hold behind its captcha already (pageGet), or a write.
+type verifyFor uint8
+
+const (
+	verifyRead verifyFor = iota
+	// verifyWrite never shows the captcha a write left on the page: once
+	// passed, Douyin's scripts would send the held write themselves, and the
+	// user, told to send again, would post it twice.
+	verifyWrite
+)
+
+// verify shows Douyin's verification (dy.ErrVerify) over the window for the
+// user to pass, then the page asks path, a read Douyin held back, itself,
+// and retry runs once it has its answer. A read's captcha the page holds
+// already is the one shown: loading douyinHome instead would throw it away
+// and have Douyin give another, each counting toward the attempts it allows
+// (likely what its captcha's [5014][502] said, 2026-11-26). Otherwise the page
+// loads douyinHome and asks path there, and Douyin's scripts bring up the
+// captcha.
+func (a *app) verify(path string, retry func(), kind verifyFor) {
 	if a.loginOpen {
 		if a.login.verify && a.login.stop != nil { // one verification open already: runs this too once passed
 			a.login.retry = append(a.login.retry, retry)
 		}
 		return
 	}
+	held := kind == verifyRead && a.web.v != nil // may hold the read's captcha
 	wasFull := a.web.v != nil && !a.web.signOnly
-	if err := a.web.open(douyinHome); err != nil {
-		a.toast = "验证页打不开：" + err.Error()
-		return
+	if !held {
+		if err := a.web.open(douyinHome); err != nil {
+			a.toast = "验证页打不开：" + err.Error()
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	a.loginOpen, a.web.layout = true, true
@@ -763,7 +845,29 @@ func (a *app) verify(path string, retry func()) {
 	gen := a.loginGen
 	go func() {
 		defer cancel()
-		if wasFull {
+		loaded := !held // the page went to douyinHome, rather than keep a captcha
+		if held {
+			st := a.web.captchaState(ctx)
+			loaded = st != captchaShown && st != captchaHidden
+		}
+		if held && loaded { // no captcha held after all: Douyin's page asks instead
+			var err error
+			a.call(func() {
+				wasFull = a.web.v != nil && !a.web.signOnly
+				err = a.web.open(douyinHome)
+			})
+			if err != nil {
+				a.post(func() {
+					if a.loginGen == gen {
+						a.loginOpen, a.web.layout, a.login = false, false, login{}
+						a.loginGen++
+						a.toast = "验证页打不开：" + err.Error()
+					}
+				})
+				return
+			}
+		}
+		if loaded && wasFull {
 			// Reloading douyinHome over a previous full page: wait past the old
 			// document's readyState === "complete" before polling for the new one.
 			select {
@@ -771,10 +875,7 @@ func (a *app) verify(path string, retry func()) {
 			case <-time.After(500 * time.Millisecond):
 			}
 		}
-		path, _ := json.Marshal(path)
-		b, err := a.web.Eval(ctx, "const r = await fetch("+string(path)+`, { credentials: "include" });
-return r.status === 200 && (await r.text()).length > 0;`)
-		passed := err == nil && string(b) == "true"
+		passed := a.passVerification(ctx, gen, path)
 		if passed && a.c != nil {
 			a.c.SyncCookies()
 			_ = a.c.RefreshGuard()
@@ -799,6 +900,44 @@ return r.status === 200 && (await r.text()).length > 0;`)
 			}
 		})
 	}()
+}
+
+// passVerification waits while the page's captcha is up, then has the page
+// ask path, which brings up a captcha again if Douyin wants one, and tells
+// whether Douyin gave the read. A captcha hidden past captchaLoadTimeout,
+// whose frame did not load, is told over the page (login.hint).
+func (a *app) passVerification(ctx context.Context, gen int, path string) bool {
+	q, _ := json.Marshal(path)
+	answer := make(chan bool, 1)
+	asked := false
+	var captcha hiddenCaptcha
+	shownHint := ""
+	for {
+		st := a.web.captchaState(ctx)
+		if !asked && st == captchaNone {
+			asked = true
+			go func() {
+				b, err := a.web.Eval(ctx, "const r = await fetch("+string(q)+`, { credentials: "include" });
+return r.status === 200 && (await r.text()).length > 0;`)
+				answer <- err == nil && string(b) == "true"
+			}()
+		}
+		if hint := captcha.hint(st == captchaHidden, time.Now()); hint != shownHint {
+			shownHint = hint
+			a.post(func() {
+				if a.loginGen == gen {
+					a.login.hint = hint
+				}
+			})
+		}
+		select {
+		case ok := <-answer:
+			return ok
+		case <-ctx.Done():
+			return false
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 var _ dy.Web = (*web)(nil)

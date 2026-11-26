@@ -1087,7 +1087,7 @@ func (a *app) moreReplies(th *thread) {
 				default:
 					th.msg += "，完成后会自动载入"
 					a.verify("/aweme/v1/web/comment/list/reply/?device_platform=webapp&aid=6383&channel=channel_pc_web&item_id="+th.video+
-						"&comment_id="+th.cid+"&cut_version=1&cursor=0&count=20&item_type=0", func() { th.verified = true; a.moreReplies(th) })
+						"&comment_id="+th.cid+"&cut_version=1&cursor=0&count=20&item_type=0", func() { th.verified = true; a.moreReplies(th) }, verifyRead)
 				}
 				return
 			}
@@ -1164,7 +1164,7 @@ func (a *app) moreComments(sh *sheet) {
 					if a.sheet == sh {
 						sh.msg += "，完成后会自动载入"
 						a.verify("/aweme/v1/web/comment/list/?device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id="+sh.v.ID+
-							"&cursor=0&count=20&item_type=0&insert_ids=&whale_cut_token=&cut_version=1&rcFT=", func() { sh.verified = true; a.moreComments(sh) })
+							"&cursor=0&count=20&item_type=0&insert_ids=&whale_cut_token=&cut_version=1&rcFT=", func() { sh.verified = true; a.moreComments(sh) }, verifyRead)
 					}
 				}
 				return

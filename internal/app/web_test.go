@@ -234,6 +234,36 @@ func TestLoginLostKeepsLoginUnlessInvalid(t *testing.T) {
 	}
 }
 
+func TestVerifyPanelSaysCaptchaDidNotLoad(t *testing.T) {
+	a := &app{loginOpen: true}
+	a.web.a, a.web.v = a, &mygo.WebView{}
+	tt := ui.NewTester(func(c *ui.Context) { a.loginPanel(c) }, 960, 700)
+	t0 := time.Now()
+	var captcha hiddenCaptcha
+	look := func(hidden bool, at time.Duration) {
+		a.login = login{verify: true, hint: captcha.hint(hidden, t0.Add(at))}
+		tt.Frame()
+	}
+
+	look(true, 0)
+	look(true, captchaLoadTimeout-time.Second)
+	if tt.HasText(captchaHint) || !tt.HasText("请在下方完成登录或身份验证") {
+		t.Fatalf("hint before the captcha had time to load: %q", tt.Texts())
+	}
+	look(true, captchaLoadTimeout)
+	if !tt.HasText(captchaHint) {
+		t.Fatalf("captcha hidden for %v, no hint: %q", captchaLoadTimeout, tt.Texts())
+	}
+	look(false, captchaLoadTimeout+time.Second) // its frame loaded after all
+	if tt.HasText(captchaHint) {
+		t.Fatalf("hint kept once the captcha showed: %q", tt.Texts())
+	}
+	look(true, captchaLoadTimeout+2*time.Second) // hidden again: the wait starts over
+	if tt.HasText(captchaHint) {
+		t.Fatalf("hint without a new wait: %q", tt.Texts())
+	}
+}
+
 func TestLoginPanelSlowFallback(t *testing.T) {
 	a := &app{
 		loginOpen: true,

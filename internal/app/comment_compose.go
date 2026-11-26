@@ -647,7 +647,7 @@ func (a *app) sendComment(sh *sheet) {
 					a.verify("/aweme/v1/web/comment/list/?device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id="+videoID+
 						"&cursor=0&count=20&item_type=0&insert_ids=&whale_cut_token=&cut_version=1&rcFT=", func() {
 						sh.draft.err = "验证已完成，请再点发送"
-					})
+					}, verifyWrite)
 				default:
 					sh.draft.err = err.Error()
 				}
