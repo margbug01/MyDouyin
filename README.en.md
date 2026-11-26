@@ -14,7 +14,9 @@
 
 [简体中文](README.md) · **English**
 
-[![Latest Release](https://img.shields.io/github/v/release/margbug01/MyDouyin?style=flat-square&label=latest&color=fe2c55)](https://github.com/margbug01/MyDouyin/releases/latest) ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?style=flat-square&logo=apple&logoColor=white) ![Windows 10/11 x64](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0078d4?style=flat-square) ![Go + MyGo](https://img.shields.io/badge/Go-MyGo%20Native-00add8?style=flat-square&logo=go&logoColor=white)
+[![Latest Release](https://img.shields.io/github/v/release/margbug01/MyDouyin?style=flat-square&label=latest&color=fe2c55)](https://github.com/margbug01/MyDouyin/releases/latest) ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?style=flat-square&logo=apple&logoColor=white) ![Windows 10/11 x64](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0078d4?style=flat-square) ![Go + MyGo](https://img.shields.io/badge/Go-MyGo%20Native-00add8?style=flat-square&logo=go&logoColor=white) [![Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-2563eb?style=flat-square)](LICENSE)
+
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/mydouyin)
 
 **[Download Latest Release](https://github.com/margbug01/MyDouyin/releases/latest)** · [What It Is](#what-is-mydouyin--myhongguo) · [Comparison](#why-use-mydouyin-instead-of-web-electron-or-android-emulators) · [Douyin Mode](#mydouyin-mode-orbit-native-playback-live-rooms-and-comments) · [Hongguo Mode](#myhongguo-mode-desktop-short-dramas-and-animated-dramas-without-login) · [Benchmarks](#measured-performance-and-resource-usage) · [Install](#installation-and-updates) · [FAQ](#faq)
 
@@ -212,3 +214,7 @@ MyDouyin · MyHongguo builds on and draws inspiration from the following open-so
 ## Community Links
 
 - **[LINUX DO](https://linux.do)**: A friendly, open-source and technology community.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).

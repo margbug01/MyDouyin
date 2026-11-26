@@ -14,7 +14,9 @@
 
 **简体中文** · [English](README.en.md)
 
-[![最新版本](https://img.shields.io/github/v/release/margbug01/MyDouyin?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=fe2c55)](https://github.com/margbug01/MyDouyin/releases/latest) ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?style=flat-square&logo=apple&logoColor=white) ![Windows 10/11 x64](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0078d4?style=flat-square) ![Go + MyGo](https://img.shields.io/badge/Go-MyGo%20Native-00add8?style=flat-square&logo=go&logoColor=white)
+[![最新版本](https://img.shields.io/github/v/release/margbug01/MyDouyin?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=fe2c55)](https://github.com/margbug01/MyDouyin/releases/latest) ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?style=flat-square&logo=apple&logoColor=white) ![Windows 10/11 x64](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0078d4?style=flat-square) ![Go + MyGo](https://img.shields.io/badge/Go-MyGo%20Native-00add8?style=flat-square&logo=go&logoColor=white) [![Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-2563eb?style=flat-square)](LICENSE)
+
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/mydouyin)
 
 **[下载最新版](https://github.com/margbug01/MyDouyin/releases/latest)** · [产品定义](#mydouyin--myhongguo-是什么) · [对比传统方案](#为什么用-mydouyin-替代网页版electron-客户端或安卓模拟器) · [抖音模式](#抖音模式mydouyin引力场原生播放直播与评论) · [红果短剧模式](#红果短剧模式myhongguo电脑端免登录看免费短剧与漫剧) · [性能实测](#实测性能与资源占用数据) · [安装指南](#如何在-macos-与-windows-上安装与更新) · [常见问题](#常见问题faq)
 
@@ -213,3 +215,7 @@ MyDouyin · MyHongguo 的实现借鉴并受益于以下优秀开源项目与社�
 ## 友链
 
 - **[LINUX DO](https://linux.do)**：真诚、友善、团结、专业的开源与技术交流社区（新的理想型社区）。
+
+## 开源许可
+
+本项目基于 [Apache License 2.0](LICENSE) 开源。
