@@ -17,6 +17,7 @@ func (l *Layer) PlaceIn(window uintptr, picture, clip ui.Rect, cover bool, radiu
 	return errors.New("media: native video layers are unavailable on Windows")
 }
 func (l *Layer) Ready() bool                   { return false }
+func (l *Layer) Hidden() bool                  { return false }
 func (l *Layer) VisibleIn(window uintptr) bool { return false }
 func (l *Layer) Hide(window uintptr)           {}
 func (l *Layer) Close()                        {}

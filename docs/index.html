@@ -36,7 +36,7 @@
         "alternateName": ["MyDouyin", "MyHongguo", "红果短剧电脑版", "抖音桌面客户端", "Mac 抖音客户端"],
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "macOS (Apple Silicon), Windows 10, Windows 11 (x64)",
-        "softwareVersion": "0.2.27",
+        "softwareVersion": "0.2.29",
         "isAccessibleForFree": true,
         "offers": {
           "@type": "Offer",
@@ -1271,7 +1271,7 @@
       <div class="container">
         <a class="release-pill" id="releasePill" href="https://github.com/margbug01/MyDouyin/releases/latest" target="_blank" rel="noopener">
           <span class="pulse-dot"></span>
-          <span class="release-tag" id="releaseTag">v0.2.27</span>
+          <span class="release-tag" id="releaseTag">v0.2.29</span>
           <span data-i18n="releaseDesc">开源免费 · 支持 macOS（Apple Silicon）与 Windows 10/11</span>
           <span aria-hidden="true">↗</span>
         </a>
@@ -1285,10 +1285,10 @@
         </p>
 
         <div class="hero-ctas">
-          <a class="btn btn-primary" id="primaryDl" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.27-arm64.dmg">
+          <a class="btn btn-primary" id="primaryDl" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.29-arm64.dmg">
             <span id="primaryDlText" data-i18n="dlMac">免费下载 macOS 版（Apple Silicon）</span>
           </a>
-          <a class="btn btn-secondary" id="secondaryDl" href="https://dl.imclawd.tech/mydouyin/mydouyin-setup-0.2.27-amd64.exe">
+          <a class="btn btn-secondary" id="secondaryDl" href="https://dl.imclawd.tech/mydouyin/mydouyin-setup-0.2.29-amd64.exe">
             <span id="secondaryDlText" data-i18n="dlWin">免费下载 Windows 版（x64）</span>
           </a>
           <a class="btn btn-ghost" href="#install" data-i18n="allInstall">安装步骤 ↓</a>
@@ -1622,17 +1622,17 @@
 
           <div class="os-pane active" data-os-pane="mac">
             <div class="dl-list">
-              <a class="dl-card" id="dlMacDmg" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.27-arm64.dmg">
+              <a class="dl-card" id="dlMacDmg" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.29-arm64.dmg">
                 <div>
                   <strong data-i18n="macDmgName">macOS 安装镜像（推荐）</strong>
-                  <span id="macDmgFile">mydouyin-0.2.27-arm64.dmg</span>
+                  <span id="macDmgFile">mydouyin-0.2.29-arm64.dmg</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
-              <a class="dl-card" id="dlMacTar" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.27-darwin-arm64.tar.gz">
+              <a class="dl-card" id="dlMacTar" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.29-darwin-arm64.tar.gz">
                 <div>
                   <strong data-i18n="macTarName">macOS 便携压缩包</strong>
-                  <span id="macTarFile">mydouyin-0.2.27-darwin-arm64.tar.gz</span>
+                  <span id="macTarFile">mydouyin-0.2.29-darwin-arm64.tar.gz</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
@@ -1660,17 +1660,17 @@
 
           <div class="os-pane" data-os-pane="win">
             <div class="dl-list">
-              <a class="dl-card" id="dlWinExe" href="https://dl.imclawd.tech/mydouyin/mydouyin-setup-0.2.27-amd64.exe">
+              <a class="dl-card" id="dlWinExe" href="https://dl.imclawd.tech/mydouyin/mydouyin-setup-0.2.29-amd64.exe">
                 <div>
                   <strong data-i18n="winExeName">Windows 安装程序（推荐）</strong>
-                  <span id="winExeFile">mydouyin-setup-0.2.27-amd64.exe</span>
+                  <span id="winExeFile">mydouyin-setup-0.2.29-amd64.exe</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
-              <a class="dl-card" id="dlWinTar" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.27-windows-amd64.tar.gz">
+              <a class="dl-card" id="dlWinTar" href="https://dl.imclawd.tech/mydouyin/mydouyin-0.2.29-windows-amd64.tar.gz">
                 <div>
                   <strong data-i18n="winTarName">Windows 免安装绿色版</strong>
-                  <span id="winTarFile">mydouyin-0.2.27-windows-amd64.tar.gz</span>
+                  <span id="winTarFile">mydouyin-0.2.29-windows-amd64.tar.gz</span>
                 </div>
                 <span class="dl-arrow" aria-hidden="true">↓</span>
               </a>
@@ -2120,10 +2120,10 @@
       const isWin = /Windows/i.test(navigator.userAgent);
       const cfBase = "https://dl.imclawd.tech/mydouyin/";
       let latestUrls = {
-        macDmg: cfBase + "mydouyin-0.2.27-arm64.dmg",
-        macTar: cfBase + "mydouyin-0.2.27-darwin-arm64.tar.gz",
-        winExe: cfBase + "mydouyin-setup-0.2.27-amd64.exe",
-        winTar: cfBase + "mydouyin-0.2.27-windows-amd64.tar.gz",
+        macDmg: cfBase + "mydouyin-0.2.29-arm64.dmg",
+        macTar: cfBase + "mydouyin-0.2.29-darwin-arm64.tar.gz",
+        winExe: cfBase + "mydouyin-setup-0.2.29-amd64.exe",
+        winTar: cfBase + "mydouyin-0.2.29-windows-amd64.tar.gz",
         sha: cfBase + "SHA256SUMS"
       };
 

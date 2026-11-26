@@ -69,3 +69,39 @@ func TestPlayURLQualities(t *testing.T) {
 		t.Fatalf("qualities %+v", qs)
 	}
 }
+
+func TestPlayURLSupports4KAnd2K(t *testing.T) {
+	type gear = struct {
+		Name   string `json:"gear_name"`
+		H265   int    `json:"is_h265"`
+		Format string
+		Addr   addr `json:"play_addr"`
+	}
+	g := func(name, format string, h265, w, h int, size int64) gear {
+		return gear{Name: name, Format: format, H265: h265, Addr: addr{URLs: []string{"https://x/aweme/v1/play/?" + name + "_" + format}, W: w, H: h, Size: size}}
+	}
+	u, _, qs := playURL(addr{}, []gear{
+		g("ame_bvc1_adapt_lower_4_1", "mp4", 1, 4096, 2048, 624),
+		g("ame_bvc1_adapt_lowest_4_1", "mp4", 1, 4096, 2048, 418),
+		g("ame_bvc1_adapt_lowest_4_1", "dash", 1, 4096, 2048, 391),
+		g("adapt_lowest_1440_1", "mp4", 1, 2880, 1440, 266),
+		g("normal_1080_0", "mp4", 0, 2160, 1080, 221),
+		g("normal_720_0", "mp4", 0, 1440, 720, 175),
+		g("lower_540_0", "mp4", 0, 1152, 576, 116),
+	})
+	if u != "https://x/aweme/v1/play/?lower_540_0_mp4" {
+		t.Fatalf("智能 picked %s", u)
+	}
+	want := []struct {
+		name string
+		size int64
+	}{{"4K", 418}, {"2K", 266}, {"1080P", 221}, {"720P", 175}, {"540P", 116}}
+	if len(qs) != len(want) {
+		t.Fatalf("qualities %+v", qs)
+	}
+	for i, w := range want {
+		if qs[i].Name != w.name || qs[i].Size != w.size {
+			t.Fatalf("quality[%d] = %+v, want %+v", i, qs[i], w)
+		}
+	}
+}

@@ -78,3 +78,36 @@ func TestStreamPlayerDrawsAndLoops(t *testing.T) {
 		t.Fatal("player did not resume")
 	}
 }
+
+func TestStreamWatchDoesNotFailWhileAdvancingAndClearsRecoveredTimeout(t *testing.T) {
+	t0 := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	p := &streamPlayer{}
+
+	// Engine reports ready+buffering (e.g. Media Foundation waiting event without
+	// a matching playing event), while playback position keeps advancing past 20s.
+	for i := 0; i <= 50; i++ {
+		now := t0.Add(time.Duration(i) * 500 * time.Millisecond)
+		pos := time.Duration(i) * 500 * time.Millisecond
+		p.watchState(now, true, true, pos)
+		if p.Err() != nil {
+			t.Fatalf("step %d (%v): false error while position advanced: %v", i, now.Sub(t0), p.Err())
+		}
+	}
+
+	// Genuine stall (position frozen while buffering for >20s) must still fail.
+	stallStart := t0.Add(26 * time.Second)
+	for i := 0; i <= 45; i++ {
+		now := stallStart.Add(time.Duration(i) * 500 * time.Millisecond)
+		p.watchState(now, true, true, 25*time.Second)
+	}
+	if p.Err() != errNoPicture {
+		t.Fatalf("expected errNoPicture after genuine stall, got %v", p.Err())
+	}
+
+	// Once playback resumes (not buffering, or position advances), the transient
+	// timeout error must clear so the error overlay does not stay over playing video.
+	p.watchState(stallStart.Add(23*time.Second), true, false, 26*time.Second)
+	if p.Err() != nil {
+		t.Fatalf("expected errNoPicture to clear once playback resumed, got %v", p.Err())
+	}
+}

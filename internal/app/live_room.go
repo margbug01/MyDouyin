@@ -143,7 +143,7 @@ func (a *app) addLiveMessages(chat *liveRoomView, s *slot, messages []dy.LiveMes
 		chat.seen = make(map[uint64]bool)
 	}
 	at := now.Sub(chat.started)
-	s.pruneDanmaku(at)
+	s.pruneDanmaku(at, a.dmRealFlight())
 	for _, msg := range messages {
 		if msg.ID != 0 {
 			if chat.seen[msg.ID] {

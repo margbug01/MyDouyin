@@ -203,7 +203,7 @@ func (a *app) switchMode(next appMode) {
 		return
 	}
 	a.sheet, a.notes, a.dms = nil, nil, nil
-	a.shareOpen, a.moreOpen, a.qualityOpen, a.speedOpen, a.volumeOpen = false, false, false, false, false
+	a.shareOpen, a.moreOpen, a.qualityOpen, a.speedOpen, a.volumeOpen, a.dmSettingsOpen = false, false, false, false, false, false
 	a.orbit.hotOpen = false
 	a.group.open = false
 	a.picViewer.open = false

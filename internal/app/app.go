@@ -274,10 +274,12 @@ type app struct {
 	sugSeq int  // the search box's changes, the last of which a suggestion waits for
 	dms    *dms // the direct messages open beside the page, or nil
 
-	speed     float64       // 1 as recorded
-	speedBits atomic.Uint64 // speed for the decoders
-	autoNext  bool          // 连播: the next video once one ends, rather than again
-	dmOff     bool          // bullet comments hidden
+	speed          float64       // 1 as recorded
+	speedBits      atomic.Uint64 // speed for the decoders
+	autoNext       bool          // 连播: the next video once one ends, rather than again
+	dmOff          bool          // bullet comments hidden
+	dmStyle        danmakuStyle  // bullet-comment speed, font size, stroke, opacity
+	dmSettingsOpen bool          // the bar's danmaku style popover
 
 	quality     string  // the definition chosen, "" or "智能" for Douyin's pick
 	liveQuality string  // the live room definition chosen, "" or "智能" for live default
@@ -712,7 +714,7 @@ func (a *app) seek(s *slot, t time.Duration) {
 	s.lastAt = t // not a loop, which 连播 would take for the end
 	s.seekTarget, s.seeking = t, true
 	s.clearDanmaku()
-	s.dmTo, s.dmLoading = max(0, t-flight)/(32*time.Second)*(32*time.Second), false
+	s.dmTo, s.dmLoading = max(0, t-a.dmVideoFlight())/(32*time.Second)*(32*time.Second), false
 	s.dmGen++
 }
 
@@ -909,8 +911,11 @@ func (a *app) setSpeed(s float64) {
 	a.hgApplySpeed(s)
 }
 
-func (s *slot) pruneDanmaku(at time.Duration) {
-	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flight }); i > 0 {
+func (s *slot) pruneDanmaku(at, flightDur time.Duration) {
+	if flightDur <= 0 {
+		flightDur = flight
+	}
+	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flightDur }); i > 0 {
 		for _, d := range s.danmaku[:i] {
 			delete(s.dm.lane, d)
 		}
@@ -921,9 +926,10 @@ func (s *slot) pruneDanmaku(at time.Duration) {
 // loadDanmaku loads s's bullet comments for the next 32 seconds, as Douyin's
 // page does, once the video nears where they end.
 func (a *app) loadDanmaku(s *slot, at time.Duration) {
-	s.pruneDanmaku(at)
-	if !s.dmLoading { // Skip windows missed while hidden, keeping the eight seconds still in flight.
-		s.dmTo = max(s.dmTo, max(0, at-flight)/(32*time.Second)*(32*time.Second))
+	flightDur := a.dmVideoFlight()
+	s.pruneDanmaku(at, flightDur)
+	if !s.dmLoading { // Skip windows missed while hidden, keeping comments still in flight.
+		s.dmTo = max(s.dmTo, max(0, at-flightDur)/(32*time.Second)*(32*time.Second))
 	}
 	if a.dmOff || a.c == nil || s.dmLoading || s.dmTo >= s.v.Duration || at+5*time.Second < s.dmTo {
 		return
@@ -1195,8 +1201,8 @@ func (a *app) escape() {
 		}
 		if a.hg != nil && a.hg.player != nil {
 			hp := a.hg.player
-			if hp.qualityOpen || hp.speedOpen || hp.volumeOpen {
-				hp.qualityOpen, hp.speedOpen, hp.volumeOpen = false, false, false
+			if hp.qualityOpen || hp.speedOpen || hp.volumeOpen || hp.dmSettingsOpen {
+				hp.qualityOpen, hp.speedOpen, hp.volumeOpen, hp.dmSettingsOpen = false, false, false, false
 				return
 			}
 		}
@@ -1208,6 +1214,10 @@ func (a *app) escape() {
 		return
 	}
 	if a.mode != modeDouyin {
+		return
+	}
+	if a.dmSettingsOpen {
+		a.dmSettingsOpen = false
 		return
 	}
 	if chat := a.liveChat; chat != nil && chat.gifts.open {
@@ -1730,10 +1740,26 @@ func copyTo(src, dir, name string) (string, error) {
 	return dst, nil
 }
 
+var qualityRank = map[string]int{"4K": 5, "2K": 4, "1080P": 3, "720P": 2, "540P": 1}
+
 func videoSource(v dy.Video, quality string) string {
+	if quality == "" || quality == "智能" {
+		return v.PlayURL
+	}
 	for _, q := range v.Qualities {
 		if q.Name == quality {
 			return q.URL
+		}
+	}
+	if want := qualityRank[quality]; want > 0 {
+		bestRank, bestURL := 0, ""
+		for _, q := range v.Qualities {
+			if r := qualityRank[q.Name]; r > 0 && r <= want && r > bestRank {
+				bestRank, bestURL = r, q.URL
+			}
+		}
+		if bestURL != "" {
+			return bestURL
 		}
 	}
 	return v.PlayURL
@@ -1981,7 +2007,7 @@ func (a *app) release(s *slot) {
 		s.comments = nil
 	}
 	s.dmLoading, s.seeking = false, false
-	s.dmTo = max(0, s.resume-flight) / (32 * time.Second) * (32 * time.Second)
+	s.dmTo = max(0, s.resume-a.dmVideoFlight()) / (32 * time.Second) * (32 * time.Second)
 	s.dmGen++
 }
 

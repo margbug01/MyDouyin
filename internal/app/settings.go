@@ -16,18 +16,22 @@ import (
 // (连播, the bullet comments, the definition, the volume). They live beside
 // the login's cookies, and are saved as soon as one changes.
 type settings struct {
-	AutoNext      bool    `json:"autoNext"`
-	Danmaku       bool    `json:"danmaku"`
-	Quality       string  `json:"quality"`               // "" or 智能 for Douyin's pick
-	LiveQuality   string  `json:"liveQuality,omitempty"` // "" or 智能 for live default
-	Volume        float64 `json:"volume"`
-	Muted         bool    `json:"muted"`
-	AutoUpdate    bool    `json:"autoUpdate"`
-	Theme         string  `json:"theme,omitempty"` // "", "light", or "dark"
-	Mode          string  `json:"mode,omitempty"`
-	HGDirect      *bool   `json:"hgDirect,omitempty"`
-	HGSignerURL   string  `json:"hgSignerURL,omitempty"`
-	HGSignerToken string  `json:"hgSignerToken,omitempty"`
+	AutoNext       bool    `json:"autoNext"`
+	Danmaku        bool    `json:"danmaku"`
+	DanmakuSpeed   float64 `json:"danmakuSpeed,omitempty"`
+	DanmakuSize    float32 `json:"danmakuSize,omitempty"`
+	DanmakuStroke  string  `json:"danmakuStroke,omitempty"`
+	DanmakuOpacity float32 `json:"danmakuOpacity,omitempty"`
+	Quality        string  `json:"quality"`               // "" or 智能 for Douyin's pick
+	LiveQuality    string  `json:"liveQuality,omitempty"` // "" or 智能 for live default
+	Volume         float64 `json:"volume"`
+	Muted          bool    `json:"muted"`
+	AutoUpdate     bool    `json:"autoUpdate"`
+	Theme          string  `json:"theme,omitempty"` // "", "light", or "dark"
+	Mode           string  `json:"mode,omitempty"`
+	HGDirect       *bool   `json:"hgDirect,omitempty"`
+	HGSignerURL    string  `json:"hgSignerURL,omitempty"`
+	HGSignerToken  string  `json:"hgSignerToken,omitempty"`
 }
 
 func (s settings) equal(other settings) bool {
@@ -40,6 +44,10 @@ func (s settings) equal(other settings) bool {
 	}
 	return s.AutoNext == other.AutoNext &&
 		s.Danmaku == other.Danmaku &&
+		s.DanmakuSpeed == other.DanmakuSpeed &&
+		s.DanmakuSize == other.DanmakuSize &&
+		s.DanmakuStroke == other.DanmakuStroke &&
+		s.DanmakuOpacity == other.DanmakuOpacity &&
 		s.Quality == other.Quality &&
 		s.LiveQuality == other.LiveQuality &&
 		s.Volume == other.Volume &&
@@ -80,6 +88,12 @@ func (a *app) loadSettings(file string) {
 		hgDirect = *s.HGDirect
 	}
 	a.autoNext, a.dmOff, a.quality, a.liveQuality, a.upd.auto = s.AutoNext, !s.Danmaku, s.Quality, s.LiveQuality, s.AutoUpdate
+	a.setDanmakuStyle(danmakuStyle{
+		Speed:   s.DanmakuSpeed,
+		Size:    s.DanmakuSize,
+		Stroke:  s.DanmakuStroke,
+		Opacity: s.DanmakuOpacity,
+	})
 	a.orbit.theme = s.Theme
 	a.mode = parseAppMode(s.Mode)
 	a.hgDirect = hgDirect
@@ -93,19 +107,24 @@ func (a *app) loadSettings(file string) {
 // current is the settings as they are now.
 func (a *app) current() settings {
 	hgDirect := a.hgDirect
+	dm := a.danmakuStyle()
 	return settings{
-		AutoNext:      a.autoNext,
-		Danmaku:       !a.dmOff,
-		Quality:       a.quality,
-		LiveQuality:   a.liveQuality,
-		Volume:        a.volume,
-		Muted:         a.muted,
-		AutoUpdate:    a.upd.auto,
-		Theme:         a.orbit.theme,
-		Mode:          a.mode.String(),
-		HGDirect:      &hgDirect,
-		HGSignerURL:   strings.TrimSpace(a.hgSignerURL),
-		HGSignerToken: strings.TrimSpace(a.hgSignerToken),
+		AutoNext:       a.autoNext,
+		Danmaku:        !a.dmOff,
+		DanmakuSpeed:   dm.Speed,
+		DanmakuSize:    dm.Size,
+		DanmakuStroke:  dm.Stroke,
+		DanmakuOpacity: dm.Opacity,
+		Quality:        a.quality,
+		LiveQuality:    a.liveQuality,
+		Volume:         a.volume,
+		Muted:          a.muted,
+		AutoUpdate:     a.upd.auto,
+		Theme:          a.orbit.theme,
+		Mode:           a.mode.String(),
+		HGDirect:       &hgDirect,
+		HGSignerURL:    strings.TrimSpace(a.hgSignerURL),
+		HGSignerToken:  strings.TrimSpace(a.hgSignerToken),
 	}
 }
 
@@ -131,7 +150,7 @@ func (a *app) saveSettings() {
 }
 
 // qualityChoices are the settings dialog's definitions, Douyin's pick first.
-var qualityChoices = []string{"智能", "1080P", "720P", "540P"}
+var qualityChoices = []string{"智能", "4K", "2K", "1080P", "720P", "540P"}
 
 // settingsDialog is the settings, over the window while open: playback,
 // Hongguo configuration, and updates.
@@ -160,7 +179,7 @@ func (a *app) settingsDialog(c *ui.Context) {
 				control()
 			})
 		}
-		ui.Scroll(c.Key("settings-scroll")).MaxHeight(540).Gap(6).Padding(0, barGutter, 0, 0).Children(func() {
+		ui.Scroll(c.Key("settings-scroll")).MaxHeight(580).Gap(6).Padding(0, barGutter, 0, 0).Children(func() {
 			if a.c != nil {
 				section("账号")
 				who := "没登录"
@@ -186,6 +205,41 @@ func (a *app) settingsDialog(c *ui.Context) {
 				if ui.Switch(c.Key("danmaku"), &on).Label("显示弹幕开关").Changed() {
 					a.dmOff = !on
 				}
+			})
+			dm := a.danmakuStyle()
+			dmSpeedLabel := dmLabelFor(dmSpeedChoices, dm.Speed, "1x")
+			dmSizeLabel := dmLabelFor(dmSizeChoices, dm.Size, "标准")
+			dmStrokeLabel := dmLabelFor(dmStrokeChoices, dm.Stroke, "阴影")
+			dmOpacityLabel := dmLabelFor(dmOpacityChoices, dm.Opacity, "90%")
+			ui.Column(c.Key("dm-style-settings")).Gap(6).Margin(2, 0, 4, 0).Children(func() {
+				dmCell := func(key, title string, value *string, opts []string, onChange func(string)) {
+					ui.Row(c.Key(key+"-cell")).Grow(1).Basis(0).MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, title).FontSize(12.5).TextColor(pal.muted).Grow(1).SingleLine()
+						if ui.Select(c.Key(key), value, opts).Width(96).Label("弹幕" + title).Changed() {
+							onChange(*value)
+						}
+					})
+				}
+				ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
+					dmCell("dmSpeed", "速度", &dmSpeedLabel, dmChoiceLabels(dmSpeedChoices), func(v string) {
+						dm.Speed = dmValueFor(dmSpeedChoices, v, defaultDanmakuStyle.Speed)
+						a.setDanmakuStyle(dm)
+					})
+					dmCell("dmSize", "字号", &dmSizeLabel, dmChoiceLabels(dmSizeChoices), func(v string) {
+						dm.Size = dmValueFor(dmSizeChoices, v, defaultDanmakuStyle.Size)
+						a.setDanmakuStyle(dm)
+					})
+				})
+				ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
+					dmCell("dmStroke", "描边", &dmStrokeLabel, dmChoiceLabels(dmStrokeChoices), func(v string) {
+						dm.Stroke = dmValueFor(dmStrokeChoices, v, defaultDanmakuStyle.Stroke)
+						a.setDanmakuStyle(dm)
+					})
+					dmCell("dmOpacity", "透明度", &dmOpacityLabel, dmChoiceLabels(dmOpacityChoices), func(v string) {
+						dm.Opacity = dmValueFor(dmOpacityChoices, v, defaultDanmakuStyle.Opacity)
+						a.setDanmakuStyle(dm)
+					})
+				})
 			})
 			q := a.quality
 			if q == "" {

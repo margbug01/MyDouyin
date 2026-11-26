@@ -35,6 +35,8 @@ type streamPlayer struct {
 	// lastUpdate is when the player last moved on, waitFrom since when it
 	// has played with no new picture.
 	lastUpdate, waitFrom time.Time
+	lastPos              time.Duration
+	hasPos               bool
 }
 
 // noPictureFor is how long a playing stream may show no new picture.
@@ -133,7 +135,7 @@ func (p *streamPlayer) fallback(reason error) {
 
 // update also runs while listening with the picture hidden, so loops still happen.
 func (p *streamPlayer) update() {
-	if p.closed || p.err != nil {
+	if p.closed || (p.err != nil && !errors.Is(p.err, errNoPicture)) {
 		return
 	}
 	if p.engine != nil {
@@ -161,8 +163,14 @@ func (p *streamPlayer) update() {
 			p.bitmap.Update(f.Image)
 		}
 		p.waitFrom = now
-	} else if p.native && (p.layer == nil || p.layer.Ready()) { // no pixels to wait for before mounting
+		if errors.Is(p.err, errNoPicture) {
+			p.err = nil
+		}
+	} else if p.native && (p.layer == nil || p.layer.Ready() || p.layer.Hidden()) { // no pixels to wait for before mounting or while hidden
 		p.waitFrom = now
+		if errors.Is(p.err, errNoPicture) {
+			p.err = nil
+		}
 	} else if now.Sub(p.waitFrom) > noPictureFor {
 		p.err = errNoPicture
 	}
@@ -172,8 +180,18 @@ func (p *streamPlayer) update() {
 // picture for noPictureFor: none yet, or a stream stuck buffering. MyGo
 // learns both only as it draws the player, so watch runs as video does.
 func (p *streamPlayer) watch(now time.Time) {
-	if p.paused || now.Sub(p.lastUpdate) > time.Second || p.engine.Ready() && !p.engine.Buffering() {
+	p.watchState(now, p.engine.Ready(), p.engine.Buffering(), p.engine.Position())
+}
+
+func (p *streamPlayer) watchState(now time.Time, ready, buffering bool, pos time.Duration) {
+	advancing := p.hasPos && pos != p.lastPos
+	p.lastPos, p.hasPos = pos, true
+	playing := ready && (!buffering || advancing)
+	if p.paused || now.Sub(p.lastUpdate) > time.Second || playing {
 		p.waitFrom = now
+		if errors.Is(p.err, errNoPicture) && playing {
+			p.err = nil
+		}
 	}
 	p.lastUpdate = now
 	if p.err == nil && now.Sub(p.waitFrom) > noPictureFor {

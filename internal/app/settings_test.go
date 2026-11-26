@@ -32,15 +32,19 @@ func TestSettings(t *testing.T) {
 	}
 	tt.Frame()
 	a.setVolume(0.4, false) // as the bar's volume
+	a.setDanmakuStyle(danmakuStyle{Speed: 0.75, Size: 21, Stroke: dmStrokeThick, Opacity: 0.75})
 	tt.Frame()
 	b, err := os.ReadFile(file)
-	if err != nil || !strings.Contains(string(b), `"autoNext": true`) || !strings.Contains(string(b), `"volume": 0.4`) {
+	if err != nil || !strings.Contains(string(b), `"autoNext": true`) || !strings.Contains(string(b), `"volume": 0.4`) || !strings.Contains(string(b), `"danmakuStroke": "thick"`) {
 		t.Fatalf("written: %s, %v", b, err)
 	}
 	next := &app{}
 	next.loadSettings(file)
 	if !next.autoNext || next.volume != 0.4 || next.dmOff {
 		t.Fatalf("read back: %+v", next.current())
+	}
+	if got := next.danmakuStyle(); got.Speed != 0.75 || got.Size != 21 || got.Stroke != dmStrokeThick || got.Opacity != 0.75 {
+		t.Fatalf("danmaku style read back: %+v", got)
 	}
 }
 

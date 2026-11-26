@@ -420,6 +420,7 @@ func (a *app) hgRankView(c *ui.Context, h *hgApp) {
 
 	nItems := len(h.rankItems)
 	totalRows := nItems + 1
+	h.rankList.KeepOffset = true
 	h.rankList.Key = func(row int) any {
 		if row == nItems {
 			return "foot"
@@ -1013,6 +1014,7 @@ func (a *app) hgSeriesGrid(c *ui.Context, h *hgApp, key string, l *hgSeriesList,
 		nCardRows = (len(l.items) + cols - 1) / cols
 	}
 	totalRows := nCardRows + 1
+	l.list.KeepOffset = true
 	l.list.Key = func(row int) any {
 		if row == nCardRows {
 			return "foot"

@@ -581,6 +581,7 @@ func (a *app) grid(c *ui.Context, p *page) {
 		nCardRows = (len(p.list) + cols - 1) / cols
 	}
 	totalRows := nCardRows + 1 // trailing status/footer row
+	p.gridList.KeepOffset = true
 	p.gridList.Key = func(row int) any {
 		if row == nCardRows {
 			return "foot"
@@ -817,7 +818,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 		overBar := over && bounds.H > 0 && py >= bounds.H-68
 		overOverlay := over && !a.clear && a.stageHUD.overlayHovered
 		pinned := a.paused || a.dragging || a.listen || a.pipOn ||
-			a.qualityOpen || a.speedOpen || a.volumeOpen || a.moreOpen || a.shareOpen ||
+			a.qualityOpen || a.speedOpen || a.volumeOpen || a.dmSettingsOpen || a.moreOpen || a.shareOpen ||
 			c.Focused(a.dmBox) || overBar || overOverlay
 		wantControls, hideIn := a.stageHUD.want(s, now, px, py, over, pinned)
 		if hideIn > 0 {
@@ -882,18 +883,26 @@ func (a *app) stage(c *ui.Context, p *page) {
 			}
 		}
 		if !a.clear && (s.v.Live == nil || !a.paused) {
+			isLive := s.v.Live != nil && a.liveChat != nil
 			clock := func() time.Duration { // as at: the player's, read again as each frame paints
 				if s.vp == nil {
 					return 0
 				}
 				return s.at()
 			}
-			if s.v.Live != nil && a.liveChat != nil {
+			if isLive {
 				started := a.liveChat.started
 				clock = func() time.Duration { return time.Since(started) }
 			}
 			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w float32) ([]dmFlying, time.Duration) {
-				return flyDanmaku(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w)
+				if isLive {
+					return flyDanmakuWith(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w, a.dmRealFlight())
+				}
+				flying, next := flyDanmaku(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w)
+				if next > 0 {
+					next = time.Duration(float64(next) / a.playSpeed())
+				}
+				return flying, next
 			})
 		}
 		if s.vp != nil && !a.paused {
@@ -1121,6 +1130,11 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 						a.dmOff = !a.dmOff
 						s.clearDanmaku()
 					}
+					if show[barDanmakuSet] {
+						a.danmakuSettingsButton(c, "live-dm-set", &a.dmSettingsOpen, func() {
+							a.qualityOpen, a.speedOpen, a.volumeOpen = false, false, false
+						})
+					}
 					if !a.theater && chip(c.Key("live-chat"), "互动", !chat.hidden && !a.clear).Clicked() {
 						chat.hidden = !chat.hidden && !a.clear
 						if !chat.hidden {
@@ -1137,6 +1151,11 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 				ui.Text(c, clock(shown)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.85)).Margin(0, 6, 0, 2).SingleLine()
 				if show[barDanmaku] && chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
 					a.dmOff = !a.dmOff
+				}
+				if show[barDanmakuSet] {
+					a.danmakuSettingsButton(c, "dm-set", &a.dmSettingsOpen, func() {
+						a.qualityOpen, a.speedOpen, a.volumeOpen = false, false, false
+					})
 				}
 				if show[barInput] {
 					a.danmakuInput(c, s)
@@ -1197,13 +1216,14 @@ const (
 	barNext
 	barPip
 	barLater
+	barDanmakuSet
 	barInput
 	barItems
 )
 
 // barWidth is how much of the bar each takes with the gap before it, as laid
 // out (measured 2026-11-24, the definition's widest, 1080P).
-var barWidth = [barItems]float32{51, 72, 51, 75, 75, 39, 39, 270}
+var barWidth = [barItems]float32{51, 72, 51, 75, 75, 39, 39, 36, 270}
 
 // barFit is which items a bar w wide shows: as many as fit, in barItem's
 // order, so that a narrower video, as with the comments open beside it,
@@ -1217,7 +1237,7 @@ func barFit(w float32, live bool) (show [barItems]bool) {
 	}
 	room := w - base
 	for it := range barItems {
-		if live && it != barQuality && it != barClear && it != barPip {
+		if live && it != barQuality && it != barClear && it != barPip && it != barDanmakuSet {
 			continue
 		}
 		if w > 0 && room < barWidth[it] {
@@ -1890,6 +1910,7 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 			}
 		}
 		sh.rows = append(sh.rows, commentRow{kind: rowFooter})
+		sh.list.KeepOffset = true
 		if sh.list.Key == nil {
 			sh.list.Key = func(i int) any {
 				r := sh.rows[i]

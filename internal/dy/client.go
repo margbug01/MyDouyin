@@ -95,8 +95,9 @@ type Video struct {
 	Qualities []Quality // the definitions to choose from, finest first; PlayURL is Douyin's 智能 pick
 }
 
-// Quality is a definition a video comes in: 1080P, 720P or 540P, H.264
-// with its sound, as AVFoundation plays it.
+// Quality is a definition a video comes in: 4K, 2K, 1080P, 720P or 540P
+// with its sound. 1080P and below prefer H.264; 4K and 2K allow HEVC MP4
+// because Douyin only serves UHD gears in H.265.
 type Quality struct {
 	Name string
 	URL  string
@@ -676,9 +677,36 @@ type addr struct {
 	Size int64    `json:"data_size"`
 }
 
-// playURL is the address of an H.264 stream with audio. The top play_addr can
-// be 1080p and 100 MB+ for a long video, and the window shows 540p fine, so
-// take the smallest file of at least 540p; the adapt_* gears have no audio.
+type qualityClass struct {
+	name      string
+	minShort  int
+	minLong   int
+	allowH265 bool
+}
+
+var qualityClasses = []qualityClass{
+	{name: "4K", minShort: 2000, minLong: 3840, allowH265: true},
+	{name: "2K", minShort: 1400, minLong: 2560, allowH265: true},
+	{name: "1080P", minShort: 1080},
+	{name: "720P", minShort: 720},
+	{name: "540P", minShort: 540},
+}
+
+func matchQualityClass(w, h int) (qualityClass, bool) {
+	short, long := min(w, h), max(w, h)
+	for _, cl := range qualityClasses {
+		if short >= cl.minShort || (cl.minLong > 0 && long >= cl.minLong) {
+			return cl, true
+		}
+	}
+	return qualityClass{}, false
+}
+
+// playURL is the address of an H.264 stream with audio for 智能, plus the
+// selectable definitions (4K, 2K, 1080P, 720P, 540P). The top play_addr can
+// be 1080p and 100 MB+ for a long video, so 智能 picks the smallest H.264 mp4
+// of at least 540p; dash gears have no audio. 4K and 2K accept muxed H.265 mp4
+// when no H.264 gear exists for that resolution.
 func playURL(top addr, gears []struct {
 	Name   string `json:"gear_name"`
 	H265   int    `json:"is_h265"`
@@ -693,34 +721,48 @@ func playURL(top addr, gears []struct {
 		}
 		return ""
 	}
+	smaller := func(cand, have addr) bool {
+		if have.Size == 0 {
+			return cand.Size > 0
+		}
+		return cand.Size > 0 && cand.Size < have.Size
+	}
 	bestSize := int64(0)
-	classes := []int{1080, 720, 540}
-	byClass := map[int]addr{}
+	h264ByClass := map[string]addr{}
+	h265ByClass := map[string]addr{}
 	for _, g := range gears {
-		short := min(g.Addr.W, g.Addr.H)
-		// A dash gear is the picture alone, an adapt_ one too; both come
-		// as small as the H.264 mp4 of the definition, which has the sound.
-		if g.H265 != 0 || g.Format == "dash" || strings.HasPrefix(g.Name, "adapt") || find(g.Addr) == "" || short < 540 {
+		// A dash gear is the picture alone without audio.
+		if g.Format == "dash" || find(g.Addr) == "" {
 			continue
 		}
-		if bestSize == 0 || g.Addr.Size < bestSize {
-			best, bestSize = g.Addr, g.Addr.Size
+		cl, ok := matchQualityClass(g.Addr.W, g.Addr.H)
+		if !ok {
+			continue
 		}
-		for _, cl := range classes { // the smallest of each definition
-			if short >= cl {
-				if have, ok := byClass[cl]; !ok || g.Addr.Size < have.Size {
-					byClass[cl] = g.Addr
-				}
-				break
+		if g.H265 == 0 {
+			if strings.HasPrefix(g.Name, "adapt") {
+				continue
+			}
+			if bestSize == 0 || (g.Addr.Size > 0 && g.Addr.Size < bestSize) {
+				best, bestSize = g.Addr, g.Addr.Size
+			}
+			if have, exists := h264ByClass[cl.name]; !exists || smaller(g.Addr, have) {
+				h264ByClass[cl.name] = g.Addr
+			}
+		} else if cl.allowH265 && g.Format == "mp4" {
+			if have, exists := h265ByClass[cl.name]; !exists || smaller(g.Addr, have) {
+				h265ByClass[cl.name] = g.Addr
 			}
 		}
 	}
 	if bestSize == 0 {
 		best = top
 	}
-	for _, cl := range classes {
-		if a, ok := byClass[cl]; ok {
-			qs = append(qs, Quality{fmt.Sprintf("%dP", cl), find(a), a.Size})
+	for _, cl := range qualityClasses {
+		if a, ok := h264ByClass[cl.name]; ok {
+			qs = append(qs, Quality{cl.name, find(a), a.Size})
+		} else if a, ok := h265ByClass[cl.name]; ok {
+			qs = append(qs, Quality{cl.name, find(a), a.Size})
 		}
 	}
 	return find(best), best, qs

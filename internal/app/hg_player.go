@@ -116,9 +116,10 @@ type hgPlayer struct {
 	swipeAt time.Time
 	lastNav time.Time
 
-	qualityOpen bool
-	speedOpen   bool
-	volumeOpen  bool
+	qualityOpen    bool
+	speedOpen      bool
+	volumeOpen     bool
+	dmSettingsOpen bool
 
 	// 75% next-episode pre-resolve & stream pre-warm cache (never populated from browse grids).
 	prefetchEpID string
@@ -1374,7 +1375,7 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		overOverlay := over && !a.clear && hp.hud.overlayHovered
 		pinned := hp.paused || hp.dragging || hp.loading || hp.listLoading || hp.dashUnsupported ||
 			hp.errInfo.Kind != hg.ErrKindNone || hp.listErr.Kind != hg.ErrKindNone ||
-			hp.qualityOpen || hp.speedOpen || hp.volumeOpen || overBar || overOverlay
+			hp.qualityOpen || hp.speedOpen || hp.volumeOpen || hp.dmSettingsOpen || overBar || overOverlay
 		epKey := fmt.Sprintf("%s:%d", hp.series.ID, hp.epIdx)
 		wantControls, hideIn := hp.hud.want(epKey, now, px, py, over, pinned)
 		if hideIn > 0 {
@@ -1411,7 +1412,11 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 
 		if !a.clear {
 			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w float32) ([]dmFlying, time.Duration) {
-				return flyDanmaku(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, hp.at(), w)
+				flying, next := flyDanmaku(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, hp.at(), w)
+				if next > 0 {
+					next = time.Duration(float64(next) / a.playSpeed())
+				}
+				return flying, next
 			})
 		}
 		if hp.pl.vp != nil && !hp.paused {
@@ -1593,6 +1598,9 @@ func (a *app) hgControls(c *ui.Context, hp *hgPlayer, at, dur time.Duration, w, 
 					}
 				}
 			}
+			a.danmakuSettingsButton(c, "hg-dm-set", &hp.dmSettingsOpen, func() {
+				hp.qualityOpen, hp.speedOpen, hp.volumeOpen = false, false, false
+			})
 
 			ui.Box(c).Grow(1)
 
@@ -1735,7 +1743,7 @@ func (a *app) hgQualityMenu(c *ui.Context, hp *hgPlayer) {
 	if b.Clicked() {
 		hp.qualityOpen = !hp.qualityOpen
 		if hp.qualityOpen {
-			hp.speedOpen, hp.volumeOpen = false, false
+			hp.speedOpen, hp.volumeOpen, hp.dmSettingsOpen = false, false, false
 		}
 	}
 	barMenu(c, "hg-quality-menu", b, &hp.qualityOpen, 96, func() {
@@ -1758,7 +1766,7 @@ func (a *app) hgSpeedMenu(c *ui.Context, hp *hgPlayer) {
 	if b.Clicked() {
 		hp.speedOpen = !hp.speedOpen
 		if hp.speedOpen {
-			hp.qualityOpen, hp.volumeOpen = false, false
+			hp.qualityOpen, hp.volumeOpen, hp.dmSettingsOpen = false, false, false
 		}
 	}
 	barMenu(c, "hg-speed-menu", b, &hp.speedOpen, 84, func() {
@@ -1781,7 +1789,7 @@ func (a *app) hgVolumeButton(c *ui.Context, hp *hgPlayer) {
 	if b.Clicked() {
 		hp.volumeOpen = !hp.volumeOpen
 		if hp.volumeOpen {
-			hp.qualityOpen, hp.speedOpen = false, false
+			hp.qualityOpen, hp.speedOpen, hp.dmSettingsOpen = false, false, false
 		}
 	}
 	barMenu(c, "hg-volume-menu", b, &hp.volumeOpen, 48, func() {
@@ -2067,6 +2075,7 @@ func (a *app) hgDanmakuDrawerBody(c *ui.Context, hp *hgPlayer) {
 
 	nItems := len(hp.danmaku)
 	totalRows := nItems + 1
+	hp.dmList.KeepOffset = true
 	hp.dmList.Key = func(row int) any {
 		if row == nItems {
 			return "dm-foot"

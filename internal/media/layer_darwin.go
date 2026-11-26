@@ -207,6 +207,11 @@ func (v *Layer) AttachedTo(window uintptr) bool {
 	return v.layer != 0 && v.window == window
 }
 
+// Hidden reports whether the layer is hidden or not yet mounted in a window.
+func (v *Layer) Hidden() bool {
+	return v.layer == 0 || v.hidden || v.window == 0
+}
+
 // Hide hides only this host's picture; another window may be presenting it.
 func (v *Layer) Hide(window uintptr) {
 	defer autorelease()()

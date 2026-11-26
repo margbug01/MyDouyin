@@ -2097,3 +2097,154 @@ func TestCommentsAndRepliesRetryAndPrefetchVerify(t *testing.T) {
 		t.Fatalf("after reply retry: %q", tt.Texts())
 	}
 }
+
+// Opening an empty author page (where only the loading footer renders first)
+// must stay scrolled at the top when its first page of videos arrives, rather
+// than chasing the footer row to the bottom.
+func TestAuthorGridStaysAtTopAfterLoad(t *testing.T) {
+	ch := make(chan []dy.Video, 1)
+	author := &page{
+		title:    "@博主",
+		authorID: "sec-author",
+		grid:     true,
+		covers:   portraitCovers,
+		next: func() ([]dy.Video, error) {
+			return <-ch, nil
+		},
+	}
+	a := withRoots(&app{pages: []*page{stub("推荐", 1), author}, posted: make(chan func(), 8)})
+	tt := newTester(a)
+	tt.Frame() // empty page: row 0 is the loading footer ("foot")
+	if !tt.HasText("载入中…") {
+		t.Fatalf("expected loading footer, got %q", tt.Texts())
+	}
+
+	batch := make([]dy.Video, 18)
+	for i := range batch {
+		batch[i] = dy.Video{ID: fmt.Sprintf("v%d", i), Desc: fmt.Sprintf("最新视频%d", i), Author: "博主"}
+	}
+	ch <- batch
+	select {
+	case fn := <-a.posted:
+		fn()
+	case <-time.After(2 * time.Second):
+		t.Fatal("author posts did not arrive")
+	}
+	tt.Frame()
+	tt.Frame()
+	if !tt.HasText("最新视频0") {
+		t.Fatalf("first video scrolled out of view after load; visible texts=%q", tt.Texts())
+	}
+}
+
+// Playing at 2x speed keeps bullet comments crossing at the same wall-clock
+// speed as 1x playback; adjusting danmaku speed, size, stroke, and opacity
+// from the control bar updates rendering immediately.
+func TestDanmakuPlaybackSpeedCompensationAndStyleControls(t *testing.T) {
+	// 1. Speed compensation: after 4 real seconds (4s video at 1x, 8s video at 2x),
+	// a bullet starting at 0s must be at the exact same x position.
+	dm := []dy.Danmaku{{At: 0, Text: "倍速弹幕测试"}}
+	a1 := &app{speed: 1}
+	f1 := &dmField{}
+	at1x, _ := flyDanmaku(a1, f1, dm, sameDanmaku, 4*time.Second, 800)
+
+	a2 := &app{speed: 2}
+	f2 := &dmField{}
+	at2x, _ := flyDanmaku(a2, f2, dm, sameDanmaku, 8*time.Second, 800)
+
+	if len(at1x) != 1 || len(at2x) != 1 || math.Abs(float64(at1x[0].x-at2x[0].x)) > 0.01 {
+		t.Fatalf("2x playback speed did not preserve real-time danmaku speed: 1x=%+v 2x=%+v", at1x, at2x)
+	}
+
+	// Slowing danmaku speed to 0.5x doubles crossing duration: at 4s it has only
+	// crossed half as far as at 1x.
+	aSlow := &app{speed: 1, dmStyle: danmakuStyle{Speed: 0.5}}
+	fSlow := &dmField{}
+	atSlow, _ := flyDanmaku(aSlow, fSlow, dm, sameDanmaku, 4*time.Second, 800)
+	if len(atSlow) != 1 || atSlow[0].x <= at1x[0].x {
+		t.Fatalf("0.5x danmaku speed should lag behind 1x: slow=%+v 1x=%+v", atSlow, at1x)
+	}
+
+	// 2. Control bar popover adjusts speed, size, stroke, and opacity live, and
+	// thick stroke draws dark outline pixels around white text over a bright bg.
+	p := stub("推荐", 1)
+	p.list[0].v = dy.Video{ID: "v4k", Author: "影视飓风", Duration: time.Minute}
+	p.list[0].danmaku = []dy.Danmaku{{At: 0, Text: "清晰描边"}}
+	p.list[0].resume = 2 * time.Second
+	ready(t, p.list[0])
+	a := withRoots(&app{pages: []*page{p}})
+	tt := newTester(a)
+	tt.Frame()
+
+	if err := tt.Click("弹幕设置"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.dmSettingsOpen {
+		t.Fatal("弹幕设置 popover did not open")
+	}
+	for _, label := range []string{"速度：0.75x", "字号：大", "描边：粗描边", "透明度：100%"} {
+		if err := tt.Click(label); err != nil {
+			t.Fatalf("click %s: %v (texts=%q)", label, err, tt.Texts())
+		}
+		tt.Frame()
+	}
+	got := a.danmakuStyle()
+	if got.Speed != 0.75 || got.Size != 21 || got.Stroke != dmStrokeThick || got.Opacity != 1 {
+		t.Fatalf("style after clicks: %+v", got)
+	}
+
+	// Verify thick stroke paints dark outline pixels on a bright background.
+	paintCheck := func(stroke string) int {
+		a.dmStyle.Stroke = stroke
+		var dark int
+		pt := ui.NewTester(func(c *ui.Context) {
+			ui.Box(c).Fill().Background(ui.RGB(240, 240, 240)).Children(func() {
+				a.danmakuLayer(c, "dm-stroke", false, func(w float32) ([]dmFlying, time.Duration) {
+					return flyDanmaku(a, &dmField{}, dm, sameDanmaku, 2*time.Second, w)
+				})
+			})
+		}, 400, 120)
+		img := pt.Image()
+		for i := 0; i < len(img.Pix); i += 4 {
+			if img.Pix[i] < 80 && img.Pix[i+1] < 80 && img.Pix[i+2] < 80 {
+				dark++
+			}
+		}
+		return dark
+	}
+	noneDark := paintCheck(dmStrokeNone)
+	thickDark := paintCheck(dmStrokeThick)
+	if noneDark != 0 || thickDark < 50 {
+		t.Fatalf("outline dark pixels: none=%d thick=%d", noneDark, thickDark)
+	}
+}
+
+func TestVideoSourceFallbackFor4K(t *testing.T) {
+	v4k := dy.Video{
+		PlayURL: "https://x/540",
+		Qualities: []dy.Quality{
+			{Name: "4K", URL: "https://x/4k"},
+			{Name: "2K", URL: "https://x/2k"},
+			{Name: "1080P", URL: "https://x/1080"},
+			{Name: "540P", URL: "https://x/540"},
+		},
+	}
+	v1080 := dy.Video{
+		PlayURL: "https://x/540",
+		Qualities: []dy.Quality{
+			{Name: "1080P", URL: "https://x/1080"},
+			{Name: "720P", URL: "https://x/720"},
+			{Name: "540P", URL: "https://x/540"},
+		},
+	}
+	if got := videoSource(v4k, "4K"); got != "https://x/4k" {
+		t.Fatalf("4K video with 4K pref = %s", got)
+	}
+	if got := videoSource(v1080, "4K"); got != "https://x/1080" {
+		t.Fatalf("1080P video with 4K pref fell back to %s, want 1080P", got)
+	}
+	if got := videoSource(v4k, "智能"); got != "https://x/540" {
+		t.Fatalf("智能 pref = %s", got)
+	}
+}
