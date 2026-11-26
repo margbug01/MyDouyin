@@ -39,7 +39,7 @@ func (a *app) preloadNextVideo(p *page) {
 		a.preload.close()
 		return
 	}
-	url := videoSource(next.v, a.quality)
+	url := videoQuality(next.v, a.quality).URL
 	if a.preload.slot == next && a.preload.url == url {
 		return
 	}

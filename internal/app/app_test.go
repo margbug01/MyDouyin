@@ -2272,13 +2272,36 @@ func TestVideoSourceFallbackFor4K(t *testing.T) {
 			{Name: "540P", URL: "https://x/540"},
 		},
 	}
-	if got := videoSource(v4k, "4K"); got != "https://x/4k" {
+	if got := videoQuality(v4k, "4K").URL; got != "https://x/4k" {
 		t.Fatalf("4K video with 4K pref = %s", got)
 	}
-	if got := videoSource(v1080, "4K"); got != "https://x/1080" {
+	if got := videoQuality(v1080, "4K").URL; got != "https://x/1080" {
 		t.Fatalf("1080P video with 4K pref fell back to %s, want 1080P", got)
 	}
-	if got := videoSource(v4k, "智能"); got != "https://x/540" {
+	if got := videoQuality(v4k, "智能").URL; got != "https://x/540" {
 		t.Fatalf("智能 pref = %s", got)
+	}
+
+	// The bar shows what each video plays in, and the next 4K one is 4K again.
+	a := &app{pages: []*page{stub("推荐", 3)}, quality: "4K"}
+	for i, v := range []dy.Video{v4k, v1080, v4k} {
+		s := a.pages[0].list[i]
+		v.Author = "作者"
+		s.v = v
+		ready(t, s)
+	}
+	tt := newTester(a)
+	for i, want := range []string{"4K", "1080P", "4K"} {
+		if i > 0 {
+			a.lastNav = time.Time{} // a step per swipe, not two in 400 ms
+			a.step(1)
+		}
+		tt.Frame()
+		if !tt.HasText(want) || want != "4K" && tt.HasText("4K") {
+			t.Fatalf("video %d with 4K chosen shows %q, want %s", i, tt.Texts(), want)
+		}
+	}
+	if a.quality != "4K" {
+		t.Fatalf("stepping changed the choice to %q", a.quality)
 	}
 }

@@ -1482,6 +1482,12 @@ func (a *app) qualityMenu(c *ui.Context, s *slot) {
 			shown = "智能"
 		}
 	}
+	if !live { // what this video plays in, as 1080P with 4K chosen where it has none
+		shown = videoQuality(s.v, cur).Name
+		if shown == "" {
+			shown = "智能"
+		}
+	}
 	b := chip(c.Key("quality"), shown, shown != "智能")
 	b.Label("清晰度：" + shown)
 	if b.Clicked() {

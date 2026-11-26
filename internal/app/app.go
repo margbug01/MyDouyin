@@ -1585,7 +1585,7 @@ func (a *app) prepare(s *slot) {
 		}
 	}
 	var preload *media.WarmVideo
-	if v.Live == nil && a.preload.slot == s && a.preload.url == videoSource(v, quality) {
+	if v.Live == nil && a.preload.slot == s && a.preload.url == videoQuality(v, quality).URL {
 		preload = a.preload.asset
 		a.preload = nextVideo{}
 	}
@@ -1696,7 +1696,7 @@ func (a *app) save(s *slot) {
 			dst, err = copyTo(src, filepath.Join(home, "Downloads"), fileName(v))
 		} else {
 			dst = filepath.Join(home, "Downloads", fileName(v))
-			err = a.c.Download(videoSource(v, quality), dst)
+			err = a.c.Download(videoQuality(v, quality).URL, dst)
 		}
 		a.post(func() {
 			if err != nil {
@@ -1750,27 +1750,31 @@ func copyTo(src, dir, name string) (string, error) {
 
 var qualityRank = map[string]int{"4K": 5, "2K": 4, "1080P": 3, "720P": 2, "540P": 1}
 
-func videoSource(v dy.Video, quality string) string {
+// videoQuality is what v plays in for the definition chosen: the one named,
+// else the best below it, as 1080P for 4K where the video has none, else
+// Douyin's pick (智能), which has no name. The bar shows its name.
+func videoQuality(v dy.Video, quality string) dy.Quality {
+	pick := dy.Quality{URL: v.PlayURL}
 	if quality == "" || quality == "智能" {
-		return v.PlayURL
+		return pick
 	}
 	for _, q := range v.Qualities {
 		if q.Name == quality {
-			return q.URL
+			return q
 		}
 	}
 	if want := qualityRank[quality]; want > 0 {
-		bestRank, bestURL := 0, ""
+		var best dy.Quality
 		for _, q := range v.Qualities {
-			if r := qualityRank[q.Name]; r > 0 && r <= want && r > bestRank {
-				bestRank, bestURL = r, q.URL
+			if r := qualityRank[q.Name]; r > 0 && r <= want && r > qualityRank[best.Name] {
+				best = q
 			}
 		}
-		if bestURL != "" {
-			return bestURL
+		if best.URL != "" {
+			return best
 		}
 	}
-	return v.PlayURL
+	return pick
 }
 
 func liveCandidates(v dy.Video, quality string, preferH264 bool) []string {
@@ -1926,7 +1930,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 		}
 		return players{}, lastErr
 	}
-	url, headers := videoSource(v, quality), videoHeaders
+	url, headers := videoQuality(v, quality).URL, videoHeaders
 	switch {
 	case native:
 		if preload != nil {
