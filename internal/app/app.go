@@ -331,6 +331,14 @@ type app struct {
 	openAuthorFn  func(p *page, name, id string) // test override for openAuthor
 	fetchLiveRoom func(ctx context.Context, webRID string) (dy.Video, error)
 	openLive      func(ctx context.Context, url string, native bool) (players, error)
+	// keepAwake keeps the computer, and with display the display, from
+	// sleeping until release; a test puts its own.
+	keepAwake func(reason string, display bool) (release func())
+	// awake releases what keeps the computer awake while a video plays,
+	// which also kept the display on if awakeDisplay (syncAwake).
+	awake        func()
+	awakeDisplay bool
+
 	listen   bool    // 听抖音: the cover in the picture's place, the sound on
 	moreOpen bool    // the rail's 更多 menu
 	upd      updates // checking for new versions and installing them (update.go)
@@ -2028,6 +2036,37 @@ func (a *app) sync() {
 		default:
 			s.pause()
 		}
+	}
+}
+
+// syncAwake keeps the computer from sleeping while the video shown plays,
+// and the display on too unless it plays as sound alone (听抖音), as each
+// frame finds it: a pause, an error or leaving the video lets them sleep.
+func (a *app) syncAwake() {
+	on, display := false, false
+	switch {
+	case a.mode == modeDouyin:
+		if p := a.cur(); p.plays() && p.idx < len(p.list) {
+			vp := p.list[p.idx].vp
+			on, display = vp != nil && vp.Playing(), !a.listen
+		}
+	case a.hgPlaying() && a.hg.player != nil:
+		vp := a.hg.player.pl.vp
+		on, display = vp != nil && vp.Playing(), true
+	}
+	if on == (a.awake != nil) && (!on || display == a.awakeDisplay) {
+		return
+	}
+	if a.awake != nil {
+		a.awake()
+		a.awake = nil
+	}
+	hold := a.keepAwake
+	if hold == nil && a.win != nil {
+		hold = mygo.Power.KeepAwake
+	}
+	if on && hold != nil {
+		a.awake, a.awakeDisplay = hold("播放视频", display), display
 	}
 }
 

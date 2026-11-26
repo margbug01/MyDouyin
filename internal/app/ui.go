@@ -82,6 +82,7 @@ func (a *app) view(c *ui.Context) {
 	} else {
 		a.mainVideo.off = giftOpen || a.group.open || a.picViewer.open || a.upd.dialogOpen || a.loginOpen && a.login.verify && a.web.v != nil
 	}
+	a.syncAwake()
 	t.Accent, t.AccentText = pal.accent, white
 	t.Inverse, t.InverseText = onOff(pal.dark, white, ui.Hex("#11141e")), onOff(pal.dark, ui.Hex("#11141e"), white) // toasts': by default the text is the Background, clear here
 	t.Selection = pal.accent.Alpha(0.35)
@@ -1278,6 +1279,7 @@ func (a *app) pipView(c *ui.Context) {
 	t.Background = ui.Color{}
 	t.Font = appFont
 	c.SetTheme(&t)
+	a.syncAwake() // paused here while the main window builds no frame
 	a.pipVideo.begin(a.pip)
 	defer a.pipVideo.end()
 	box := ui.Box(c).Fill().DragWindow()

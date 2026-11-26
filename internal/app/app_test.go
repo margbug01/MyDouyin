@@ -50,6 +50,40 @@ func ready(t *testing.T, s *slot) {
 	s.loading, s.vp = false, vp
 }
 
+// While the video shown plays the display stays on, 听抖音 keeps only the
+// computer awake, and a pause lets both sleep.
+func TestPlayingKeepsAwake(t *testing.T) {
+	a := &app{pages: []*page{stub("推荐", 2)}}
+	held := map[bool]int{} // holds not released, by whether they keep the display on
+	a.keepAwake = func(_ string, display bool) func() {
+		held[display]++
+		return func() { held[display]-- }
+	}
+	tt := newTester(a)
+	tt.Frame()
+	if held[true]+held[false] != 0 {
+		t.Fatalf("kept %v awake before the video loaded", held)
+	}
+	ready(t, a.pages[0].list[0])
+	a.fill() // as once the video has loaded
+	tt.Frame()
+	if held[true] != 1 || held[false] != 0 {
+		t.Fatalf("playing keeps %v awake, want the display", held)
+	}
+	if err := tt.Click("听抖音"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if held[true] != 0 || held[false] != 1 {
+		t.Fatalf("听抖音 keeps %v awake, want the computer alone", held)
+	}
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	if held[true]+held[false] != 0 {
+		t.Fatalf("paused, %v still kept awake", held)
+	}
+}
+
 // Typing in the search box does not pause, and Space types there; a click
 // on the video pauses; Escape and the back button close the page on top,
 // and nothing closes the feed.
