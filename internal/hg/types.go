@@ -2,8 +2,38 @@ package hg
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 )
+
+type ReleaseStatus uint8
+
+const (
+	ReleaseUnknown ReleaseStatus = iota
+	ReleaseUpcoming
+	ReleaseReleased
+	ReleaseOngoing
+	ReleaseFinished
+)
+
+func (r ReleaseStatus) IsUpcoming() bool {
+	return r == ReleaseUpcoming
+}
+
+func (r ReleaseStatus) IsReleased() bool {
+	return r == ReleaseReleased || r == ReleaseOngoing || r == ReleaseFinished
+}
+
+func isZeroEpisodeStatusText(raw string) bool {
+	compact := strings.Join(strings.Fields(raw), "")
+	switch compact {
+	case "全0集", "更新至0集", "共0集", "0集":
+		return true
+	default:
+		return false
+	}
+}
 
 type Config struct {
 	ProfileDir  string
@@ -13,18 +43,53 @@ type Config struct {
 }
 
 type Series struct {
-	ID           string
-	Title        string
-	CoverURL     string
-	Abstract     string
-	Score        string
-	Category     string
-	StatusText   string
-	AlbumID      string
-	EpisodeCount int
-	Finished     bool
-	Actors       []string
-	Tags         []string
+	ID            string
+	Title         string
+	CoverURL      string
+	Abstract      string
+	Score         string
+	Category      string
+	StatusText    string
+	AlbumID       string
+	EpisodeCount  int
+	Finished      bool
+	ReleaseStatus ReleaseStatus
+	Actors        []string
+	Tags          []string
+}
+
+func (s Series) IsUpcoming() bool {
+	return s.ReleaseStatus == ReleaseUpcoming
+}
+
+func (s Series) DisplayStatus() string {
+	st := strings.TrimSpace(s.StatusText)
+	if isZeroEpisodeStatusText(st) {
+		st = ""
+	}
+	if s.IsUpcoming() {
+		if st != "" {
+			return st
+		}
+		return "暂未上线"
+	}
+	if st != "" {
+		return st
+	}
+	if s.EpisodeCount > 0 {
+		if s.ReleaseStatus == ReleaseOngoing {
+			return fmt.Sprintf("更新至%d集", s.EpisodeCount)
+		}
+		return fmt.Sprintf("全%d集", s.EpisodeCount)
+	}
+	switch {
+	case s.ReleaseStatus == ReleaseOngoing:
+		return "连载中"
+	case s.ReleaseStatus == ReleaseFinished || s.Finished:
+		return "已完结"
+	default:
+		return ""
+	}
 }
 
 type Episode struct {
@@ -177,12 +242,32 @@ type NewReleasePage struct {
 }
 
 type Season struct {
-	SeriesID     string
-	Title        string
-	Label        string
-	CoverURL     string
-	EpisodeCount int
-	Current      bool
+	SeriesID      string
+	Title         string
+	Label         string
+	CoverURL      string
+	EpisodeCount  int
+	ReleaseStatus ReleaseStatus
+	StatusText    string
+	Current       bool
+}
+
+func (s Season) IsUpcoming() bool {
+	return s.ReleaseStatus == ReleaseUpcoming
+}
+
+func (s Season) DisplayStatus() string {
+	st := strings.TrimSpace(s.StatusText)
+	if isZeroEpisodeStatusText(st) {
+		st = ""
+	}
+	if s.IsUpcoming() {
+		if st != "" {
+			return st
+		}
+		return "待上线"
+	}
+	return st
 }
 
 type Person struct {

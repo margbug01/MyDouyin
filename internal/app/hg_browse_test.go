@@ -886,3 +886,118 @@ func TestHGDetailPageRendersSeriesReviewsAndReplies(t *testing.T) {
 		t.Fatalf("expected detail review reply rendered, texts=%q", tt.Texts())
 	}
 }
+
+func TestHGDetailUpcomingSeasonSwitchAndNewReleaseNote(t *testing.T) {
+	var mu sync.Mutex
+	var epCalls []string
+	svc := &stubHGService{
+		getSeriesFn: func(_ context.Context, id string) (hg.Series, error) {
+			switch id {
+			case "s4":
+				return hg.Series{
+					ID:            "s4",
+					Title:         "保镖第四季",
+					StatusText:    "暂未上线",
+					ReleaseStatus: hg.ReleaseUpcoming,
+					Abstract:      "第四季剧情预告",
+				}, nil
+			case "nr-up":
+				return hg.Series{
+					ID:            "nr-up",
+					Title:         "许你向阳",
+					StatusText:    "暂未上线",
+					ReleaseStatus: hg.ReleaseUpcoming,
+					Abstract:      "即将上线新剧",
+				}, nil
+			default:
+				return hg.Series{
+					ID:            id,
+					Title:         "保镖第三季",
+					StatusText:    "全100集",
+					EpisodeCount:  100,
+					Finished:      true,
+					ReleaseStatus: hg.ReleaseFinished,
+				}, nil
+			}
+		},
+		episodesFn: func(_ context.Context, id string) ([]hg.Episode, error) {
+			mu.Lock()
+			epCalls = append(epCalls, id)
+			mu.Unlock()
+			if id == "s4" || id == "nr-up" {
+				return nil, nil
+			}
+			return []hg.Episode{{ID: "ep-1", Index: 1}, {ID: "ep-2", Index: 2}}, nil
+		},
+		seasonsFn: func(_ context.Context, id string) ([]hg.Season, error) {
+			if id == "nr-up" {
+				return []hg.Season{{SeriesID: "nr-up", Label: "第1季", Title: "许你向阳", EpisodeCount: 0, ReleaseStatus: hg.ReleaseUpcoming, StatusText: "待上线", Current: true}}, nil
+			}
+			return []hg.Season{
+				{SeriesID: "s3", Label: "第3季", Title: "保镖第三季", EpisodeCount: 100, ReleaseStatus: hg.ReleaseFinished, Current: id == "s3"},
+				{SeriesID: "s4", Label: "第4季", Title: "保镖第四季", EpisodeCount: 0, ReleaseStatus: hg.ReleaseUpcoming, StatusText: "待上线", Current: id == "s4"},
+			}, nil
+		},
+	}
+
+	a, tt := newHGTestApp(t, svc)
+	a.switchMode(modeHongguo)
+	tt.Frame()
+
+	a.hgOpenDetail(hg.Series{ID: "s3", Title: "保镖第三季", EpisodeCount: 100})
+	waitUntil(t, a, tt, "s3 detail loaded", func() bool {
+		top := a.hg.top()
+		return top != nil && top.kind == hgPageDetail && !top.loading && !top.epLoading && !top.seasonsLoading
+	})
+	tt.Frame()
+	if !tt.HasText("第4季 · 待上线") {
+		t.Fatalf("expected upcoming season pill label, texts=%q", tt.Texts())
+	}
+
+	// Switch to upcoming season 4: no ListEpisodes call, no loading/error text, CTA disabled to 暂未上线.
+	if err := tt.Click("第4季 · 待上线"); err != nil {
+		t.Fatalf("click upcoming season pill failed: %v, texts=%q", err, tt.Texts())
+	}
+	waitUntil(t, a, tt, "s4 detail loaded", func() bool {
+		top := a.hg.top()
+		return top != nil && top.seriesID == "s4" && !top.loading && !top.seasonsLoading
+	})
+	tt.Frame()
+
+	mu.Lock()
+	calledS4 := slices.Contains(epCalls, "s4")
+	mu.Unlock()
+	if calledS4 {
+		t.Fatalf("ListEpisodes should not be called for known upcoming season s4: calls=%v", epCalls)
+	}
+	if tt.HasText("正在加载剧集列表…") || tt.HasText("开始播放") || tt.HasText("更新至0集") {
+		t.Fatalf("unexpected loading/play/0-ep text on upcoming season: %q", tt.Texts())
+	}
+	for _, want := range []string{"保镖第四季", "暂未上线", "该季暂未上线，上线后即可观看", "追剧"} {
+		if !tt.HasText(want) {
+			t.Fatalf("upcoming season detail missing %q: %q", want, tt.Texts())
+		}
+	}
+	top := a.hg.top()
+	if len(top.seasons) != 2 || top.seasons[0].Current || !top.seasons[1].Current {
+		t.Fatalf("season current flags wrong after switch: %+v", top.seasons)
+	}
+
+	// Opening an upcoming NewReleases card preserves its specific release date note.
+	a.hgOpenDetail(hg.Series{
+		ID:            "nr-up",
+		Title:         "许你向阳",
+		StatusText:    "预计12月4日上线",
+		ReleaseStatus: hg.ReleaseUpcoming,
+	})
+	waitUntil(t, a, tt, "new release upcoming detail loaded", func() bool {
+		top := a.hg.top()
+		return top != nil && top.seriesID == "nr-up" && !top.loading
+	})
+	tt.Frame()
+	for _, want := range []string{"预计12月4日上线", "该剧暂未上线（预计12月4日上线），上线后即可观看"} {
+		if !tt.HasText(want) {
+			t.Fatalf("upcoming new release detail missing %q: %q", want, tt.Texts())
+		}
+	}
+}

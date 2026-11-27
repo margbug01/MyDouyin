@@ -21,8 +21,10 @@ type settings struct {
 	Danmaku        bool    `json:"danmaku"`
 	DanmakuSpeed   float64 `json:"danmakuSpeed,omitempty"`
 	DanmakuSize    float32 `json:"danmakuSize,omitempty"`
+	DanmakuWeight  int     `json:"danmakuWeight,omitempty"`
 	DanmakuStroke  string  `json:"danmakuStroke,omitempty"`
 	DanmakuOpacity float32 `json:"danmakuOpacity,omitempty"`
+	DanmakuArea    float32 `json:"danmakuArea,omitempty"`
 	Quality        string  `json:"quality"`               // "" or 智能 for Douyin's pick
 	LiveQuality    string  `json:"liveQuality,omitempty"` // "" or 智能 for live default
 	Volume         float64 `json:"volume"`
@@ -47,8 +49,10 @@ func (s settings) equal(other settings) bool {
 		s.Danmaku == other.Danmaku &&
 		s.DanmakuSpeed == other.DanmakuSpeed &&
 		s.DanmakuSize == other.DanmakuSize &&
+		s.DanmakuWeight == other.DanmakuWeight &&
 		s.DanmakuStroke == other.DanmakuStroke &&
 		s.DanmakuOpacity == other.DanmakuOpacity &&
+		s.DanmakuArea == other.DanmakuArea &&
 		s.Quality == other.Quality &&
 		s.LiveQuality == other.LiveQuality &&
 		s.Volume == other.Volume &&
@@ -92,8 +96,10 @@ func (a *app) loadSettings(file string) {
 	a.setDanmakuStyle(danmakuStyle{
 		Speed:   s.DanmakuSpeed,
 		Size:    s.DanmakuSize,
+		Weight:  s.DanmakuWeight,
 		Stroke:  s.DanmakuStroke,
 		Opacity: s.DanmakuOpacity,
+		Area:    s.DanmakuArea,
 	})
 	a.orbit.theme = s.Theme
 	a.mode = parseAppMode(s.Mode)
@@ -114,8 +120,10 @@ func (a *app) current() settings {
 		Danmaku:        !a.dmOff,
 		DanmakuSpeed:   dm.Speed,
 		DanmakuSize:    dm.Size,
+		DanmakuWeight:  dm.Weight,
 		DanmakuStroke:  dm.Stroke,
 		DanmakuOpacity: dm.Opacity,
+		DanmakuArea:    dm.Area,
 		Quality:        a.quality,
 		LiveQuality:    a.liveQuality,
 		Volume:         a.volume,
@@ -306,17 +314,23 @@ func (a *app) settingsBody(c *ui.Context) {
 			})
 		}
 		group("样式", func() {
-			styleRow("dmSpeed", "速度", dmLabelFor(dmSpeedChoices, dm.Speed, "1x"), dmChoiceLabels(dmSpeedChoices), func(v string) {
-				dm.Speed = dmValueFor(dmSpeedChoices, v, defaultDanmakuStyle.Speed)
+			styleRow("dmStroke", "描边", dmLabelFor(dmStrokeChoices, dm.Stroke, "重墨"), dmChoiceLabels(dmStrokeChoices), func(v string) {
+				dm.Stroke = dmValueFor(dmStrokeChoices, v, defaultDanmakuStyle.Stroke)
 			})
 			styleRow("dmSize", "字号", dmLabelFor(dmSizeChoices, dm.Size, "标准"), dmChoiceLabels(dmSizeChoices), func(v string) {
 				dm.Size = dmValueFor(dmSizeChoices, v, defaultDanmakuStyle.Size)
 			})
-			styleRow("dmStroke", "描边", dmLabelFor(dmStrokeChoices, dm.Stroke, "阴影"), dmChoiceLabels(dmStrokeChoices), func(v string) {
-				dm.Stroke = dmValueFor(dmStrokeChoices, v, defaultDanmakuStyle.Stroke)
+			styleRow("dmWeight", "字重", dmLabelFor(dmWeightChoices, dm.Weight, "粗体"), dmChoiceLabels(dmWeightChoices), func(v string) {
+				dm.Weight = dmValueFor(dmWeightChoices, v, defaultDanmakuStyle.Weight)
 			})
-			styleRow("dmOpacity", "透明度", dmLabelFor(dmOpacityChoices, dm.Opacity, "90%"), dmChoiceLabels(dmOpacityChoices), func(v string) {
+			styleRow("dmOpacity", "不透明度", dmLabelFor(dmOpacityChoices, dm.Opacity, "100%"), dmChoiceLabels(dmOpacityChoices), func(v string) {
 				dm.Opacity = dmValueFor(dmOpacityChoices, v, defaultDanmakuStyle.Opacity)
+			})
+			styleRow("dmArea", "显示区域", dmLabelFor(dmAreaChoices, dm.Area, "半屏"), dmChoiceLabels(dmAreaChoices), func(v string) {
+				dm.Area = dmValueFor(dmAreaChoices, v, defaultDanmakuStyle.Area)
+			})
+			styleRow("dmSpeed", "速度", dmLabelFor(dmSpeedChoices, dm.Speed, "1x"), dmChoiceLabels(dmSpeedChoices), func(v string) {
+				dm.Speed = dmValueFor(dmSpeedChoices, v, defaultDanmakuStyle.Speed)
 			})
 		})
 	case settingsHongguo:

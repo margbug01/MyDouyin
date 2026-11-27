@@ -895,11 +895,11 @@ func (a *app) stage(c *ui.Context, p *page) {
 				started := a.liveChat.started
 				clock = func() time.Duration { return time.Since(started) }
 			}
-			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w float32) ([]dmFlying, time.Duration) {
+			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w, h float32) ([]dmFlying, time.Duration) {
 				if isLive {
-					return flyDanmakuWith(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w, a.dmRealFlight())
+					return flyDanmakuIn(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w, h, a.dmRealFlight())
 				}
-				flying, next := flyDanmaku(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w)
+				flying, next := flyDanmakuArea(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w, h)
 				if next > 0 {
 					next = time.Duration(float64(next) / a.playSpeed())
 				}

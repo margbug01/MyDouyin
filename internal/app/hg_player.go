@@ -89,6 +89,7 @@ type hgPlayer struct {
 	commentTab int // 0 = 本集评论, 1 = 剧评
 
 	listLoading bool
+	listLoaded  bool
 	listErr     hg.ErrorInfo
 	listGen     int
 
@@ -525,9 +526,14 @@ func (a *app) hgOpenPlayer(series hg.Series, episodes []hg.Episode, epIndex int)
 		a.hgFetchPlayerSeasons(hp)
 	}
 	if len(hp.episodes) == 0 {
+		if hp.series.IsUpcoming() {
+			hp.listLoaded = true
+			return
+		}
 		a.hgFetchPlayerEpisodes(hp)
 		return
 	}
+	hp.listLoaded = true
 	a.hgPlayEpisode(epIndex)
 }
 
@@ -559,6 +565,7 @@ func (a *app) hgFetchPlayerEpisodes(hp *hgPlayer) {
 	}
 	hp.listGen++
 	hp.listLoading = true
+	hp.listLoaded = false
 	hp.listErr = hg.ErrorInfo{}
 	gen, id, svc := hp.listGen, hp.series.ID, h.svc
 	go func() {
@@ -574,21 +581,25 @@ func (a *app) hgFetchPlayerEpisodes(hp *hgPlayer) {
 				hp.listErr = hg.ClassifyError(err)
 				return
 			}
+			hp.listLoaded = true
 			hp.listErr = hg.ErrorInfo{}
 			hp.episodes = eps
-			if hp.series.EpisodeCount == 0 && len(eps) > 0 {
-				hp.series.EpisodeCount = len(eps)
+			if len(eps) > 0 {
+				if hp.series.EpisodeCount == 0 {
+					hp.series.EpisodeCount = len(eps)
+				}
+				if hp.series.IsUpcoming() || hp.series.ReleaseStatus == hg.ReleaseUnknown {
+					hp.series.ReleaseStatus = hg.ReleaseReleased
+				}
+			} else if hp.series.ReleaseStatus == hg.ReleaseUnknown {
+				hp.series.ReleaseStatus = hg.ReleaseUpcoming
 			}
 			if top := h.top(); top != nil && top.kind == hgPagePlayer {
 				top.episodes = eps
 				top.series = hp.series
 			}
 			if len(eps) == 0 {
-				hp.errInfo = hg.ErrorInfo{
-					Kind:      hg.ErrKindContentUnavailable,
-					Message:   "暂无可播放剧集",
-					Retryable: true,
-				}
+				hp.errInfo = hg.ErrorInfo{}
 				return
 			}
 			idx := 0
@@ -739,21 +750,29 @@ func (a *app) hgPlayerSwitchSeason(sn hg.Season) {
 	if h == nil || h.player == nil || sn.SeriesID == "" || sn.SeriesID == h.player.series.ID {
 		return
 	}
+	if sn.IsUpcoming() {
+		a.toast = hgSeasonBaseLabel(sn, 0) + "暂未上线"
+		return
+	}
 	hp := h.player
 	if hp.pl.vp != nil && !hp.finished {
 		a.hgCheckpoint(true)
 	}
 	hp.releasePlayer()
 	hp.series = hg.Series{
-		ID:           sn.SeriesID,
-		Title:        hgFirstNonEmpty(sn.Title, hp.series.Title),
-		CoverURL:     hgFirstNonEmpty(sn.CoverURL, hp.series.CoverURL),
-		EpisodeCount: sn.EpisodeCount,
+		ID:            sn.SeriesID,
+		Title:         hgFirstNonEmpty(sn.Title, hp.series.Title),
+		CoverURL:      hgFirstNonEmpty(sn.CoverURL, hp.series.CoverURL),
+		EpisodeCount:  sn.EpisodeCount,
+		ReleaseStatus: sn.ReleaseStatus,
+		StatusText:    sn.StatusText,
 	}
 	for i := range hp.seasons {
 		hp.seasons[i].Current = hp.seasons[i].SeriesID == sn.SeriesID
 	}
 	hp.episodes = nil
+	hp.listLoaded = false
+	hp.listErr = hg.ErrorInfo{}
 	hp.epIdx = 0
 	hp.epGroup = 0
 	hp.pb = hg.Playback{}
@@ -1022,7 +1041,7 @@ func (a *app) hgEnsurePlayerResumed() {
 	}
 	ep, ok := hp.currentEpisode()
 	if !ok {
-		if len(hp.episodes) == 0 && hp.series.ID != "" {
+		if len(hp.episodes) == 0 && hp.series.ID != "" && !hp.listLoaded && hp.listErr.Kind == hg.ErrKindNone && !hp.series.IsUpcoming() {
 			a.hgFetchPlayerEpisodes(hp)
 		}
 		return
@@ -1387,6 +1406,7 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		overBar := over && bounds.H > 0 && py >= bounds.H-72
 		overOverlay := over && !a.clear && hp.hud.overlayHovered
 		pinned := hp.paused || hp.dragging || hp.loading || hp.listLoading || hp.dashUnsupported ||
+			(len(hp.episodes) == 0 && (hp.series.IsUpcoming() || hp.listLoaded)) ||
 			hp.errInfo.Kind != hg.ErrKindNone || hp.listErr.Kind != hg.ErrKindNone ||
 			hp.qualityOpen || hp.speedOpen || hp.volumeOpen || hp.dmSettingsOpen || overBar || overOverlay
 		epKey := hp.epKey(hp.epIdx)
@@ -1421,8 +1441,8 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		a.hgTick(hp, at, dur)
 
 		if !a.clear {
-			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w float32) ([]dmFlying, time.Duration) {
-				flying, next := flyDanmaku(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, hp.at(), w)
+			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w, h float32) ([]dmFlying, time.Duration) {
+				flying, next := flyDanmakuArea(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, hp.at(), w, h)
 				if next > 0 {
 					next = time.Duration(float64(next) / a.playSpeed())
 				}
@@ -1541,6 +1561,20 @@ func (a *app) hgStageStatusOverlay(c *ui.Context, hp *hgPlayer) {
 	if errInfo.Kind != hg.ErrKindNone {
 		ui.Column(c.Key("hg-player-err")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Padding(24).Children(func() {
 			a.hgErrorBanner(c, "player", errInfo, onRetry)
+		})
+		return
+	}
+
+	if len(hp.episodes) == 0 && (hp.series.IsUpcoming() || (hp.listLoaded && !hp.listLoading)) {
+		msg := hgEmptyEpisodesNotice(hp.series, len(hp.seasons) > 1)
+		ui.Column(c.Key("hg-player-empty")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Padding(24).Children(func() {
+			ui.Column(c).MaxWidth(420).Padding(20, 24).Gap(12).Radius(14).AlignItems(ui.Center).
+				Background(ui.RGBA(20, 22, 30, 0.9)).Border(1, ui.RGBA(255, 255, 255, 0.16)).Children(func() {
+				ui.Text(c, msg).FontSize(14).FontWeight(600).TextColor(white).TextAlign(ui.Center)
+				if ui.Button(c.Key("hg-empty-back"), "返回").Clicked() {
+					a.hgPop()
+				}
+			})
 		})
 		return
 	}
@@ -1853,11 +1887,9 @@ func (a *app) hgEpisodeDrawer(c *ui.Context, h *hgApp, hp *hgPlayer) {
 				}
 			})
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				meta := hp.series.StatusText
+				meta := hp.series.DisplayStatus()
 				if meta == "" && len(hp.episodes) > 0 {
 					meta = fmt.Sprintf("全 %d 集", len(hp.episodes))
-				} else if meta == "" && hp.series.EpisodeCount > 0 {
-					meta = fmt.Sprintf("全 %d 集", hp.series.EpisodeCount)
 				}
 				if meta != "" {
 					ui.Text(c, meta).FontSize(12).TextColor(pal.muted).SingleLine().Grow(1)
@@ -1959,9 +1991,9 @@ func (a *app) hgEpisodeDrawer(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		if len(hp.seasons) > 1 {
 			ui.ScrollHorizontal(c.Key("hg-drawer-seasons")).Height(34+barGutter).Padding(6, 14, barGutter, 14).Gap(6).AlignItems(ui.Center).Children(func() {
 				for i, sn := range hp.seasons {
-					label := hgFirstNonEmpty(sn.Label, sn.Title, fmt.Sprintf("第%d季", i+1))
-					on := sn.SeriesID == hp.series.ID || sn.Current
-					if a.hgPill(c, fmt.Sprintf("pseason:%s:%d", sn.SeriesID, i), label, on) {
+					label := hgSeasonPillLabel(sn, i)
+					on := sn.SeriesID == hp.series.ID
+					if a.hgSeasonPill(c, fmt.Sprintf("pseason:%s:%d", sn.SeriesID, i), label, on, sn.IsUpcoming()) {
 						a.hgPlayerSwitchSeason(sn)
 					}
 				}
@@ -1990,12 +2022,17 @@ func (a *app) hgEpisodeDrawer(c *ui.Context, h *hgApp, hp *hgPlayer) {
 
 		// Episode grid
 		ui.Scroll(c.Key("hg-drawer-scroll")).Grow(1).Padding(10, 14, 16, 14).Children(func() {
-			if hp.listLoading && len(hp.episodes) == 0 {
-				ui.Text(c, "正在加载剧集列表…").FontSize(12.5).TextColor(pal.faint)
-				return
-			}
 			if len(hp.episodes) == 0 {
-				ui.Text(c, "暂无可播放剧集").FontSize(12.5).TextColor(pal.faint)
+				switch {
+				case hp.series.IsUpcoming():
+					ui.Text(c, hgEmptyEpisodesNotice(hp.series, len(hp.seasons) > 1)).FontSize(12.5).TextColor(pal.faint)
+				case hp.listErr.Kind != hg.ErrKindNone:
+					ui.Text(c, "剧集列表加载失败").FontSize(12.5).TextColor(pal.faint)
+				case hp.listLoading:
+					ui.Text(c, "正在加载剧集列表…").FontSize(12.5).TextColor(pal.faint)
+				default:
+					ui.Text(c, "暂无可播放剧集").FontSize(12.5).TextColor(pal.faint)
+				}
 				return
 			}
 			groups := (len(hp.episodes) + hgEpisodeGroupSize - 1) / hgEpisodeGroupSize

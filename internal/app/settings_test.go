@@ -44,10 +44,10 @@ func TestSettings(t *testing.T) {
 	}
 	tt.Frame()
 	a.setVolume(0.4, false) // as the bar's volume
-	a.setDanmakuStyle(danmakuStyle{Speed: 0.75, Size: 21, Stroke: dmStrokeThick, Opacity: 0.75})
+	a.setDanmakuStyle(danmakuStyle{Speed: 0.75, Size: 21, Weight: dmWeightNormal, Stroke: dmStrokeThick, Opacity: 0.75, Area: 0.75})
 	tt.Frame()
 	b, err := os.ReadFile(file)
-	if err != nil || !strings.Contains(string(b), `"autoNext": true`) || !strings.Contains(string(b), `"volume": 0.4`) || !strings.Contains(string(b), `"danmakuStroke": "thick"`) {
+	if err != nil || !strings.Contains(string(b), `"autoNext": true`) || !strings.Contains(string(b), `"volume": 0.4`) || !strings.Contains(string(b), `"danmakuStroke": "thick"`) || !strings.Contains(string(b), `"danmakuWeight": 500`) || !strings.Contains(string(b), `"danmakuArea": 0.75`) {
 		t.Fatalf("written: %s, %v", b, err)
 	}
 	next := &app{}
@@ -55,7 +55,7 @@ func TestSettings(t *testing.T) {
 	if !next.autoNext || next.volume != 0.4 || next.dmOff {
 		t.Fatalf("read back: %+v", next.current())
 	}
-	if got := next.danmakuStyle(); got.Speed != 0.75 || got.Size != 21 || got.Stroke != dmStrokeThick || got.Opacity != 0.75 {
+	if got := next.danmakuStyle(); got.Speed != 0.75 || got.Size != 21 || got.Weight != dmWeightNormal || got.Stroke != dmStrokeThick || got.Opacity != 0.75 || got.Area != 0.75 {
 		t.Fatalf("danmaku style read back: %+v", got)
 	}
 }

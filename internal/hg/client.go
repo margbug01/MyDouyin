@@ -387,6 +387,14 @@ func (c *Client) ListEpisodes(ctx context.Context, seriesID string) ([]Episode, 
 	for pageNum := 0; pageNum < maxEpisodePages; pageNum++ {
 		page, err := sc.ListEpisodes(ctx, seriesID, sdk.EpisodeOptions{Cursor: cursor})
 		if err != nil {
+			// openhongguo treats an empty episode list as ErrAnonymousLimited;
+			// confirm via GetSeries whether the series legitimately has 0 episodes
+			// (e.g. an announced/unreleased season) instead of surfacing a bogus error.
+			if pageNum == 0 && len(out) == 0 && errors.Is(err, sdk.ErrAnonymousLimited) {
+				if series, serr := sc.GetSeries(ctx, seriesID); serr == nil && series != nil && series.EpisodeCount == 0 {
+					return nil, nil
+				}
+			}
 			return nil, err
 		}
 		if page == nil {
@@ -440,13 +448,27 @@ func (c *Client) Seasons(ctx context.Context, seriesID string) ([]Season, error)
 		if s.Index > 0 {
 			label = fmt.Sprintf("第%d季", s.Index)
 		}
+		releaseStatus := ReleaseReleased
+		statusText := ""
+		if s.EpisodeCount <= 0 {
+			releaseStatus = ReleaseUpcoming
+			statusText = "待上线"
+		} else if s.SeriesID == seriesID {
+			if s.Status == model.SeriesEnd {
+				releaseStatus = ReleaseFinished
+			} else {
+				releaseStatus = ReleaseOngoing
+			}
+		}
 		out = append(out, Season{
-			SeriesID:     s.SeriesID,
-			Title:        s.Title,
-			Label:        label,
-			CoverURL:     s.CoverURL,
-			EpisodeCount: s.EpisodeCount,
-			Current:      s.SeriesID == seriesID,
+			SeriesID:      s.SeriesID,
+			Title:         s.Title,
+			Label:         label,
+			CoverURL:      s.CoverURL,
+			EpisodeCount:  s.EpisodeCount,
+			ReleaseStatus: releaseStatus,
+			StatusText:    statusText,
+			Current:       s.SeriesID == seriesID,
 		})
 	}
 	return out, nil
@@ -668,16 +690,29 @@ func mapSeriesDetail(m *model.Series) Series {
 	if m == nil {
 		return Series{}
 	}
+	releaseStatus := ReleaseOngoing
+	finished := false
+	if m.EpisodeCount <= 0 {
+		releaseStatus = ReleaseUpcoming
+	} else if m.Status == model.SeriesEnd {
+		releaseStatus = ReleaseFinished
+		finished = true
+	}
+	statusText := strings.TrimSpace(m.RightText)
+	if isZeroEpisodeStatusText(statusText) {
+		statusText = ""
+	}
 	s := Series{
-		ID:           m.ID,
-		Title:        m.Title,
-		CoverURL:     m.CoverURL,
-		Abstract:     m.Description,
-		Category:     m.Category,
-		StatusText:   strings.TrimSpace(m.RightText),
-		AlbumID:      m.RelatedAlbumID,
-		EpisodeCount: m.EpisodeCount,
-		Finished:     m.Status == model.SeriesEnd,
+		ID:            m.ID,
+		Title:         m.Title,
+		CoverURL:      m.CoverURL,
+		Abstract:      m.Description,
+		Category:      m.Category,
+		StatusText:    statusText,
+		AlbumID:       m.RelatedAlbumID,
+		EpisodeCount:  m.EpisodeCount,
+		Finished:      finished,
+		ReleaseStatus: releaseStatus,
 	}
 
 	var actors []string
@@ -705,7 +740,7 @@ func mapSeriesDetail(m *model.Series) Series {
 		case model.InfoTwoActors:
 			actors = append(actors, parseActors(text)...)
 		case model.InfoCreationStatus:
-			if s.StatusText == "" {
+			if s.StatusText == "" && !isZeroEpisodeStatusText(text) {
 				s.StatusText = text
 			}
 		}
@@ -714,7 +749,11 @@ func mapSeriesDetail(m *model.Series) Series {
 		s.Score = formatHeat(m.Heat)
 	}
 	if s.StatusText == "" {
-		s.StatusText = formatSeriesStatus(m.Status, m.EpisodeCount)
+		if s.IsUpcoming() {
+			s.StatusText = "暂未上线"
+		} else {
+			s.StatusText = formatSeriesStatus(m.Status, m.EpisodeCount)
+		}
 	}
 	s.Actors = compactStrings(actors)
 	s.Tags = compactStrings(tags)
@@ -889,23 +928,30 @@ func mapNewReleasePage(page *model.NewReleasePage, reqDate string) NewReleasePag
 			cat = nr.Categories[0]
 		}
 		status := strings.TrimSpace(nr.Note)
-		if status == "" {
-			if nr.Online {
+		releaseStatus := ReleaseUpcoming
+		if nr.Online {
+			releaseStatus = ReleaseReleased
+			if status == "" {
 				status = "已上线"
-			} else if !nr.PublishAt.IsZero() {
+			}
+		} else if status == "" {
+			if !nr.PublishAt.IsZero() {
 				status = nr.PublishAt.Format("01-02上线")
+			} else {
+				status = "暂未上线"
 			}
 		}
 		items = append(items, Series{
-			ID:           nr.SeriesID,
-			Title:        nr.Title,
-			CoverURL:     nr.CoverURL,
-			Abstract:     nr.Description,
-			Score:        nr.Heat,
-			Category:     cat,
-			StatusText:   status,
-			EpisodeCount: nr.EpisodeCount,
-			Tags:         compactStrings(nr.Categories),
+			ID:            nr.SeriesID,
+			Title:         nr.Title,
+			CoverURL:      nr.CoverURL,
+			Abstract:      nr.Description,
+			Score:         nr.Heat,
+			Category:      cat,
+			StatusText:    status,
+			EpisodeCount:  nr.EpisodeCount,
+			ReleaseStatus: releaseStatus,
+			Tags:          compactStrings(nr.Categories),
 		})
 	}
 	return NewReleasePage{

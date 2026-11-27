@@ -829,10 +829,8 @@ func (a *app) hgOrbitCards(c *ui.Context, h *hgApp, w, hWin float32) {
 
 func hgOrbitMeta(s hg.Series) string {
 	var parts []string
-	if s.StatusText != "" {
-		parts = append(parts, s.StatusText)
-	} else if s.EpisodeCount > 0 {
-		parts = append(parts, fmt.Sprintf("全%d集", s.EpisodeCount))
+	if status := s.DisplayStatus(); status != "" {
+		parts = append(parts, status)
 	}
 	if s.Category != "" {
 		parts = append(parts, s.Category)

@@ -352,6 +352,53 @@ func (a *app) hgPill(c *ui.Context, key, label string, active bool) bool {
 	return b.Clicked()
 }
 
+func hgSeasonBaseLabel(sn hg.Season, idx int) string {
+	fallback := "该季"
+	if idx >= 0 {
+		fallback = fmt.Sprintf("第%d季", idx+1)
+	}
+	return hgFirstNonEmpty(sn.Label, sn.Title, fallback)
+}
+
+func hgSeasonPillLabel(sn hg.Season, idx int) string {
+	base := hgSeasonBaseLabel(sn, idx)
+	if sn.IsUpcoming() {
+		if st := sn.DisplayStatus(); st != "" {
+			return base + " · " + st
+		}
+	}
+	return base
+}
+
+func hgEmptyEpisodesNotice(s hg.Series, multiSeason bool) string {
+	if s.IsUpcoming() {
+		subject := "该剧"
+		if multiSeason {
+			subject = "该季"
+		}
+		if st := s.DisplayStatus(); st != "" && st != "暂未上线" && st != "待上线" {
+			return fmt.Sprintf("%s暂未上线（%s），上线后即可观看", subject, st)
+		}
+		return subject + "暂未上线，上线后即可观看"
+	}
+	return "暂无可播放剧集"
+}
+
+func (a *app) hgSeasonPill(c *ui.Context, key, label string, active, upcoming bool) bool {
+	if !upcoming || active {
+		return a.hgPill(c, key, label, active)
+	}
+	b := ui.ButtonBase(c.Key(key)).Height(28).PaddingX(12).Radius(14).Center().FocusRing(false).Label(label)
+	bg, tc := pal.well, pal.faint
+	if b.Hovered() {
+		bg, tc = pal.tabHoverBg, pal.muted
+	}
+	b.Background(bg).Border(1, pal.hairline).Children(func() {
+		ui.Text(c, label).FontSize(12.5).FontWeight(500).TextColor(tc).SingleLine()
+	})
+	return b.Clicked()
+}
+
 func (a *app) hgErrorBanner(c *ui.Context, key string, info hg.ErrorInfo, onRetry func()) {
 	if info.Kind == hg.ErrKindNone {
 		return
@@ -774,13 +821,18 @@ func (a *app) hgDetailView(c *ui.Context, h *hgApp, p *hgPage) {
 							ui.Text(c, s.Score).FontSize(12).FontWeight(700).TextColor(pal.accent).SingleLine()
 						})
 					}
-					status := s.StatusText
-					if status == "" && s.EpisodeCount > 0 {
-						status = fmt.Sprintf("全%d集", s.EpisodeCount)
-					}
+					status := s.DisplayStatus()
 					if status != "" {
-						ui.Row(c).Height(24).PaddingX(9).Radius(12).AlignItems(ui.Center).Background(pal.pillBg).Border(1, pal.pillBorder).Children(func() {
-							ui.Text(c, status).FontSize(12).FontWeight(500).TextColor(pal.text).SingleLine()
+						pill := ui.Row(c).Height(24).PaddingX(9).Radius(12).AlignItems(ui.Center)
+						tc := pal.text
+						if s.IsUpcoming() {
+							pill.Background(ui.Hex("#ff9f43").Alpha(0.14)).Border(1, ui.Hex("#ff9f43").Alpha(0.35))
+							tc = ui.Hex("#e08b36")
+						} else {
+							pill.Background(pal.pillBg).Border(1, pal.pillBorder)
+						}
+						pill.Children(func() {
+							ui.Text(c, status).FontSize(12).FontWeight(onOff(s.IsUpcoming(), 600, 500)).TextColor(tc).SingleLine()
 						})
 					}
 					seenTag := map[string]bool{}
@@ -825,24 +877,33 @@ func (a *app) hgDetailView(c *ui.Context, h *hgApp, p *hgPage) {
 
 				// Primary CTA + Favorite toggle
 				ui.Row(c.Key("hg-detail-actions")).Gap(10).Margin(6, 0, 0, 0).AlignItems(ui.Center).Children(func() {
-					resumeIdx := 0
-					playLabel := "开始播放"
-					if hasHist && histEntry.EpisodeIndex > 0 {
-						resumeIdx = hgResumeEpisodeIndex(p.episodes, histEntry)
-						playLabel = fmt.Sprintf("继续观看第 %d 集", histEntry.EpisodeIndex)
-					}
-					playBtn := ui.ButtonBase(c.Key("hg-detail-play")).Height(38).PaddingX(20).Gap(8).Radius(10).
-						AlignItems(ui.Center).FocusRing(false).Label(playLabel).
-						Background(pal.accent)
-					if playBtn.Hovered() {
-						playBtn.Background(pal.accent.Alpha(0.9))
-					}
-					playBtn.Children(func() {
-						ui.Icon(c, iconPlay).Size(14, 14).TextColor(white)
-						ui.Text(c, playLabel).FontSize(13.5).FontWeight(700).TextColor(white).SingleLine()
-					})
-					if playBtn.Clicked() {
-						a.hgOpenPlayer(p.series, p.episodes, resumeIdx)
+					if s.IsUpcoming() && len(p.episodes) == 0 {
+						playBtn := ui.ButtonBase(c.Key("hg-detail-play")).Height(38).PaddingX(20).Gap(8).Radius(10).
+							AlignItems(ui.Center).FocusRing(false).Label("暂未上线").Disabled(true).
+							Background(pal.pillBg).Border(1, pal.pillBorder)
+						playBtn.Children(func() {
+							ui.Text(c, "暂未上线").FontSize(13.5).FontWeight(600).TextColor(pal.muted).SingleLine()
+						})
+					} else {
+						resumeIdx := 0
+						playLabel := "开始播放"
+						if hasHist && histEntry.EpisodeIndex > 0 {
+							resumeIdx = hgResumeEpisodeIndex(p.episodes, histEntry)
+							playLabel = fmt.Sprintf("继续观看第 %d 集", histEntry.EpisodeIndex)
+						}
+						playBtn := ui.ButtonBase(c.Key("hg-detail-play")).Height(38).PaddingX(20).Gap(8).Radius(10).
+							AlignItems(ui.Center).FocusRing(false).Label(playLabel).
+							Background(pal.accent)
+						if playBtn.Hovered() {
+							playBtn.Background(pal.accent.Alpha(0.9))
+						}
+						playBtn.Children(func() {
+							ui.Icon(c, iconPlay).Size(14, 14).TextColor(white)
+							ui.Text(c, playLabel).FontSize(13.5).FontWeight(700).TextColor(white).SingleLine()
+						})
+						if playBtn.Clicked() {
+							a.hgOpenPlayer(p.series, p.episodes, resumeIdx)
+						}
 					}
 
 					favLabel := onOff(fav, "已追剧", "追剧")
@@ -870,9 +931,9 @@ func (a *app) hgDetailView(c *ui.Context, h *hgApp, p *hgPage) {
 				ui.Text(c, "系列季数").FontSize(15).FontWeight(700).TextColor(pal.strong)
 				ui.ScrollHorizontal(c.Key("hg-seasons-row")).Height(34+barGutter).Padding(0, 0, barGutter, 0).Gap(8).AlignItems(ui.Center).Children(func() {
 					for i, sn := range p.seasons {
-						label := hgFirstNonEmpty(sn.Label, sn.Title, fmt.Sprintf("第%d季", i+1))
-						on := sn.Current || sn.SeriesID == p.seriesID
-						if a.hgPill(c, fmt.Sprintf("season:%s:%d", sn.SeriesID, i), label, on) {
+						label := hgSeasonPillLabel(sn, i)
+						on := sn.SeriesID == p.seriesID
+						if a.hgSeasonPill(c, fmt.Sprintf("season:%s:%d", sn.SeriesID, i), label, on, sn.IsUpcoming()) {
 							a.hgSwitchSeason(p, sn)
 						}
 					}
@@ -886,9 +947,13 @@ func (a *app) hgDetailView(c *ui.Context, h *hgApp, p *hgPage) {
 				ui.Text(c, "选集").FontSize(15).FontWeight(700).TextColor(pal.strong)
 				if len(p.episodes) > 0 {
 					ui.Text(c, fmt.Sprintf("共 %d 集", len(p.episodes))).FontSize(12.5).TextColor(pal.muted)
+				} else if s.IsUpcoming() {
+					ui.Text(c, s.DisplayStatus()).FontSize(12.5).TextColor(pal.faint)
 				}
 			})
-			if p.epErr.Kind != hg.ErrKindNone {
+			if s.IsUpcoming() && len(p.episodes) == 0 {
+				ui.Text(c, hgEmptyEpisodesNotice(s, len(p.seasons) > 1)).FontSize(12.5).TextColor(pal.faint)
+			} else if p.epErr.Kind != hg.ErrKindNone {
 				a.hgErrorBanner(c, "ep:"+p.seriesID, p.epErr, func() {
 					a.hgLoadDetail(p)
 				})
@@ -1072,10 +1137,7 @@ func (a *app) hgSeriesCard(c *ui.Context, h *hgApp, s hg.Series) ui.Element {
 			if b.Hovered() {
 				ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGBA(255, 255, 255, 0.06))
 			}
-			badge := s.StatusText
-			if badge == "" && s.EpisodeCount > 0 {
-				badge = fmt.Sprintf("全%d集", s.EpisodeCount)
-			}
+			badge := s.DisplayStatus()
 			if badge != "" || s.Score != "" {
 				ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Padding(22, 8, 7, 8).Gap(6).AlignItems(ui.Center).
 					Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.72), 180).Children(func() {

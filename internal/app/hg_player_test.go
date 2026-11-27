@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/beilunyang/openhongguo/sdk"
 	"github.com/egoist/mygo/ui"
 
 	"douyin/internal/hg"
@@ -1156,6 +1158,130 @@ func TestHGPlayerCommentsDrawerAndReplyThreads(t *testing.T) {
 	tt.Frame()
 	if !slices.Contains(tt.Texts(), "第二集反转绝了[爽]") {
 		t.Fatalf("expected episode 2 comment rendered, texts=%q", tt.Texts())
+	}
+}
+
+func TestHGPlayerListEpisodesErrorDoesNotLoopLoading(t *testing.T) {
+	var epCalls atomic.Int32
+	svc := &playerStubHGService{
+		stubHGService: stubHGService{
+			episodesFn: func(_ context.Context, _ string) ([]hg.Episode, error) {
+				epCalls.Add(1)
+				return nil, sdk.ErrAnonymousLimited
+			},
+		},
+	}
+
+	a, tt, _, _ := newHGPlayerTestEnv(t, svc, 60*time.Second)
+	a.switchMode(modeHongguo)
+	tt.Frame()
+
+	a.hgOpenPlayer(hg.Series{ID: "s-unreleased", Title: "未上线新季"}, nil, 0)
+	// Pump frames: before the fix, hgEnsurePlayerResumed ignores listErr and
+	// re-fires hgFetchPlayerEpisodes on every frame after the first failure,
+	// keeping "正在加载剧集列表…" stuck on screen.
+	deadline := time.Now().Add(150 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		select {
+		case fn := <-a.posted:
+			fn()
+			tt.Frame()
+		default:
+			tt.Frame()
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if calls := epCalls.Load(); calls != 1 {
+		t.Fatalf("ListEpisodes called %d times, want 1 (stuck loading=%v texts=%q)", calls, a.hg.player.listLoading, tt.Texts())
+	}
+	if tt.HasText("正在加载剧集列表…") {
+		t.Fatalf("player still stuck on loading text: %q", tt.Texts())
+	}
+}
+
+func TestHGPlayerUpcomingSeasonKeepsPlaybackAndEmptySeriesShowsNotice(t *testing.T) {
+	var epCalls atomic.Int32
+	svc := &playerStubHGService{
+		stubHGService: stubHGService{
+			episodesFn: func(_ context.Context, id string) ([]hg.Episode, error) {
+				epCalls.Add(1)
+				return nil, nil
+			},
+			seasonsFn: func(_ context.Context, id string) ([]hg.Season, error) {
+				if id == "s-empty" {
+					return nil, nil
+				}
+				return []hg.Season{
+					{SeriesID: "s3", Label: "第3季", Title: "保镖第三季", EpisodeCount: 2, ReleaseStatus: hg.ReleaseFinished, Current: id == "s3"},
+					{SeriesID: "s4", Label: "第4季", Title: "保镖第四季", EpisodeCount: 0, ReleaseStatus: hg.ReleaseUpcoming, StatusText: "待上线", Current: id == "s4"},
+				}, nil
+			},
+		},
+		resolveFn: func(_ context.Context, epID string) (hg.Playback, error) {
+			return hg.Playback{
+				EpisodeID: epID,
+				Duration:  60 * time.Second,
+				ExpiresAt: time.Now().Add(10 * time.Minute),
+				Streams:   []hg.Stream{{Definition: "720p", Codec: "h264", URL: "https://cdn.example/" + epID + ".mp4", Height: 720}},
+			}, nil
+		},
+	}
+
+	a, tt, _, _ := newHGPlayerTestEnv(t, svc, 60*time.Second)
+	a.switchMode(modeHongguo)
+	tt.Frame()
+
+	a.hgOpenPlayer(
+		hg.Series{ID: "s3", Title: "保镖第三季", EpisodeCount: 2, ReleaseStatus: hg.ReleaseFinished},
+		[]hg.Episode{{ID: "ep-1", Index: 1}, {ID: "ep-2", Index: 2}},
+		0,
+	)
+	a.hg.player.drawerOpen = true
+	waitUntil(t, a, tt, "player seasons and playback ready", func() bool {
+		return a.hg.player != nil && a.hg.player.pl.vp != nil && len(a.hg.player.seasons) == 2
+	})
+	tt.Frame()
+
+	if !tt.HasText("第4季 · 待上线") {
+		t.Fatalf("player drawer missing upcoming season pill: %q", tt.Texts())
+	}
+	if err := tt.Click("第4季 · 待上线"); err != nil {
+		t.Fatalf("click upcoming season pill in drawer failed: %v", err)
+	}
+	tt.Frame()
+
+	// Clicking an upcoming season in the player must NOT interrupt active playback or fetch episodes.
+	if a.hg.player.series.ID != "s3" || a.hg.player.pl.vp == nil {
+		t.Fatalf("active playback interrupted: series=%s vp=%v", a.hg.player.series.ID, a.hg.player.pl.vp)
+	}
+	if !tt.HasText("第4季暂未上线") && a.toast != "第4季暂未上线" {
+		t.Fatalf("expected toast %q, toast=%q texts=%q", "第4季暂未上线", a.toast, tt.Texts())
+	}
+	if epCalls.Load() != 0 {
+		t.Fatalf("ListEpisodes called %d times on upcoming season click, want 0", epCalls.Load())
+	}
+
+	// Opening the player directly on an empty/unreleased series settles cleanly without looping.
+	a.hgOpenPlayer(hg.Series{ID: "s-empty", Title: "未上线新剧"}, nil, 0)
+	deadline := time.Now().Add(150 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		select {
+		case fn := <-a.posted:
+			fn()
+			tt.Frame()
+		default:
+			tt.Frame()
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if epCalls.Load() != 1 {
+		t.Fatalf("ListEpisodes called %d times for empty series, want 1", epCalls.Load())
+	}
+	if tt.HasText("正在加载剧集列表…") {
+		t.Fatalf("empty/unreleased series stuck on loading: %q", tt.Texts())
+	}
+	if !tt.HasText("该剧暂未上线，上线后即可观看") {
+		t.Fatalf("missing upcoming notice on stage/drawer: %q", tt.Texts())
 	}
 }
 

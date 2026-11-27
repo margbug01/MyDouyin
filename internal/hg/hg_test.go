@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/beilunyang/openhongguo/adapters/filestore"
 	"github.com/beilunyang/openhongguo/adapters/httptransport"
 	"github.com/beilunyang/openhongguo/sdk"
+	"github.com/beilunyang/openhongguo/sdk/model"
 )
 
 func TestNewNoNetworkAndProfilePaths(t *testing.T) {
@@ -618,5 +620,116 @@ func TestHistoryStorePersistenceFavoritesAndPruning(t *testing.T) {
 	}
 	if _, ok := reloaded.Get("hist-001"); ok {
 		t.Fatal("oldest non-favorite entry hist-001 was not pruned")
+	}
+}
+
+func TestUpcomingSeriesAndSeasonsBoundary(t *testing.T) {
+	// Zero-episode series detail maps to ReleaseUpcoming and hides "更新至0集"/"全0集".
+	upUpdating := mapSeriesDetail(&model.Series{
+		SeriesSummary: model.SeriesSummary{ID: "s-up1", Title: "新季预告", EpisodeCount: 0},
+		Status:        model.SeriesUpdating,
+		RightText:     "更新至0集",
+	})
+	if !upUpdating.IsUpcoming() || upUpdating.Finished || upUpdating.DisplayStatus() != "暂未上线" {
+		t.Fatalf("upcoming updating detail = %+v, want ReleaseUpcoming/Finished=false/暂未上线", upUpdating)
+	}
+
+	upEnd := mapSeriesDetail(&model.Series{
+		SeriesSummary: model.SeriesSummary{ID: "s-up2", Title: "预告新剧", EpisodeCount: 0},
+		Status:        model.SeriesEnd,
+		RightText:     "全0集",
+	})
+	if !upEnd.IsUpcoming() || upEnd.Finished || upEnd.DisplayStatus() != "暂未上线" {
+		t.Fatalf("upcoming end detail = %+v, want ReleaseUpcoming/Finished=false/暂未上线", upEnd)
+	}
+
+	released := mapSeriesDetail(&model.Series{
+		SeriesSummary: model.SeriesSummary{ID: "s-rel", Title: "已播剧", EpisodeCount: 80},
+		Status:        model.SeriesEnd,
+		RightText:     "全80集",
+	})
+	if released.IsUpcoming() || !released.Finished || released.ReleaseStatus != ReleaseFinished || released.DisplayStatus() != "全80集" {
+		t.Fatalf("released detail = %+v, want ReleaseFinished/Finished=true/全80集", released)
+	}
+
+	nrPage := mapNewReleasePage(&model.NewReleasePage{
+		Date: "20261204",
+		Items: []model.NewRelease{
+			{SeriesID: "nr-up", Title: "待播新剧", Online: false, Note: "预计12月4日上线"},
+			{SeriesID: "nr-on", Title: "已播新剧", Online: true, EpisodeCount: 60},
+		},
+	}, "20261204")
+	if len(nrPage.Items) != 2 {
+		t.Fatalf("len(nrPage.Items) = %d, want 2", len(nrPage.Items))
+	}
+	if !nrPage.Items[0].IsUpcoming() || nrPage.Items[0].DisplayStatus() != "预计12月4日上线" {
+		t.Fatalf("nr upcoming = %+v", nrPage.Items[0])
+	}
+	if nrPage.Items[1].IsUpcoming() || nrPage.Items[1].ReleaseStatus != ReleaseReleased {
+		t.Fatalf("nr online = %+v", nrPage.Items[1])
+	}
+
+	// Verify Client.ListEpisodes and Client.Seasons against an httptest API server:
+	// - 0-episode series returns nil, nil (not ErrAnonymousLimited)
+	// - >0-episode series with empty video_list still returns ErrAnonymousLimited
+	// - Seasons marks 0-episode seasons as ReleaseUpcoming ("待上线")
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "device_register"):
+			http.SetCookie(w, &http.Cookie{Name: "ttreq", Value: "ticket-ok"})
+			_, _ = w.Write([]byte(`{"device_id":7100000000000001,"install_id":7200000000000001,"device_id_str":"7100000000000001","install_id_str":"7200000000000001"}`))
+		case strings.Contains(r.URL.Path, "video_detail"):
+			bodyBytes, _ := io.ReadAll(r.Body)
+			body := string(bodyBytes)
+			switch {
+			case strings.Contains(body, "7100000000000044"):
+				_, _ = w.Write([]byte(`{"code":0,"data":{"video_data":{"series_id_str":"7100000000000044","series_title":"第四季","episode_cnt":0,"episode_right_text":"更新至0集","series_status":0,"is_multi_season":true,"season_index":4,"video_list":[]}}}`))
+			case strings.Contains(body, "7100000000000099"):
+				_, _ = w.Write([]byte(`{"code":0,"data":{"video_data":{"series_id_str":"7100000000000099","series_title":"受限剧","episode_cnt":60,"episode_right_text":"全60集","series_status":1,"video_list":[]}}}`))
+			default:
+				_, _ = w.Write([]byte(`{"code":0,"data":{"video_data":{"series_id_str":"7100000000000033","series_title":"第三季","episode_cnt":100,"episode_right_text":"全100集","series_status":1,"is_multi_season":true,"season_index":3,"video_list":[{"vid":"7100000000001001","title":"第1集","vid_index":1}]}}}`))
+			}
+		case strings.Contains(r.URL.Path, "/reading/bookapi/plan/"):
+			_, _ = w.Write([]byte(`{"code":0,"data":[{"show_type":547,"video_data":[{"series_id":"7100000000000033","title":"第三季","episode_cnt":100,"season_index":3},{"series_id":"7100000000000044","title":"第四季","episode_cnt":0,"season_index":4}]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	c, err := New(Config{Direct: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.sdk, err = sdk.NewClient(sdk.Options{
+		Transport:      newDirectTransport(),
+		ProfileStore:   filestore.New(filepath.Join(t.TempDir(), defaultProfileFile)),
+		APIOrigin:      apiSrv.URL,
+		RegisterOrigin: apiSrv.URL,
+		DeviceResets:   sdk.Int(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eps, err := c.ListEpisodes(context.Background(), "7100000000000044")
+	if err != nil || len(eps) != 0 {
+		t.Fatalf("ListEpisodes(upcoming 0-ep) = (%v, %v), want (nil, nil)", eps, err)
+	}
+
+	if _, err := c.ListEpisodes(context.Background(), "7100000000000099"); !errors.Is(err, sdk.ErrAnonymousLimited) {
+		t.Fatalf("ListEpisodes(60-ep empty video_list) err = %v, want ErrAnonymousLimited", err)
+	}
+
+	seasons, err := c.Seasons(context.Background(), "7100000000000033")
+	if err != nil || len(seasons) != 2 {
+		t.Fatalf("Seasons() = (%+v, %v), want 2 seasons", seasons, err)
+	}
+	if seasons[0].IsUpcoming() || !seasons[0].Current || seasons[0].ReleaseStatus != ReleaseFinished {
+		t.Fatalf("season[0] = %+v, want current finished", seasons[0])
+	}
+	if !seasons[1].IsUpcoming() || seasons[1].Current || seasons[1].DisplayStatus() != "待上线" {
+		t.Fatalf("season[1] = %+v, want upcoming 待上线", seasons[1])
 	}
 }

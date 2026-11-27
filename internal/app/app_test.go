@@ -676,8 +676,8 @@ func TestDanmakuLayerPaintsWithoutBuildingTheView(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		builds++
 		ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).Children(func() {
-			a.danmakuLayer(c, "dm", moving, func(w float32) ([]dmFlying, time.Duration) {
-				return flyDanmaku(a, &s.dm, s.danmaku, sameDanmaku, at, w)
+			a.danmakuLayer(c, "dm", moving, func(w, h float32) ([]dmFlying, time.Duration) {
+				return flyDanmakuArea(a, &s.dm, s.danmaku, sameDanmaku, at, w, h)
 			})
 		})
 	}, 800, 200)
@@ -2217,29 +2217,32 @@ func TestDanmakuPlaybackSpeedCompensationAndStyleControls(t *testing.T) {
 	if !a.dmSettingsOpen {
 		t.Fatal("弹幕设置 popover did not open")
 	}
-	for _, label := range []string{"速度：0.75x", "字号：大", "描边：粗描边", "透明度：100%"} {
+	for _, label := range []string{"速度：0.75x", "字号：大", "字重：粗体", "描边：45°投影", "不透明度：75%", "显示区域：满屏"} {
 		if err := tt.Click(label); err != nil {
 			t.Fatalf("click %s: %v (texts=%q)", label, err, tt.Texts())
 		}
 		tt.Frame()
 	}
 	got := a.danmakuStyle()
-	if got.Speed != 0.75 || got.Size != 21 || got.Stroke != dmStrokeThick || got.Opacity != 1 {
+	if got.Speed != 0.75 || got.Size != 21 || got.Weight != dmWeightNormal || got.Stroke != dmStrokeShadow || got.Opacity != 0.75 || got.Area != 1 {
 		t.Fatalf("style after clicks: %+v", got)
 	}
 
-	// Verify thick stroke paints dark outline pixels on a bright background.
-	paintCheck := func(stroke string) int {
-		a.dmStyle.Stroke = stroke
-		var dark int
+	// Verify stroke paints dark outline pixels on a bright background and
+	// semi-transparent group opacity keeps white text bright instead of graying
+	// out over its own black outline.
+	renderOver := func(st danmakuStyle, bg ui.Color) *image.RGBA {
+		a.setDanmakuStyle(st)
 		pt := ui.NewTester(func(c *ui.Context) {
-			ui.Box(c).Fill().Background(ui.RGB(240, 240, 240)).Children(func() {
-				a.danmakuLayer(c, "dm-stroke", false, func(w float32) ([]dmFlying, time.Duration) {
-					return flyDanmaku(a, &dmField{}, dm, sameDanmaku, 2*time.Second, w)
+			ui.Box(c).Fill().Background(bg).Children(func() {
+				a.danmakuLayer(c, "dm-stroke", false, func(w, h float32) ([]dmFlying, time.Duration) {
+					return flyDanmakuArea(a, &dmField{}, dm, sameDanmaku, 2*time.Second, w, h)
 				})
 			})
 		}, 400, 120)
-		img := pt.Image()
+		return pt.Image()
+	}
+	countDark := func(img *image.RGBA) (dark int) {
 		for i := 0; i < len(img.Pix); i += 4 {
 			if img.Pix[i] < 80 && img.Pix[i+1] < 80 && img.Pix[i+2] < 80 {
 				dark++
@@ -2247,10 +2250,31 @@ func TestDanmakuPlaybackSpeedCompensationAndStyleControls(t *testing.T) {
 		}
 		return dark
 	}
-	noneDark := paintCheck(dmStrokeNone)
-	thickDark := paintCheck(dmStrokeThick)
-	if noneDark != 0 || thickDark < 50 {
-		t.Fatalf("outline dark pixels: none=%d thick=%d", noneDark, thickDark)
+	noneDark := countDark(renderOver(danmakuStyle{Stroke: dmStrokeNone, Opacity: 1, Size: 21}, ui.RGB(240, 240, 240)))
+	heavyDark := countDark(renderOver(danmakuStyle{Stroke: dmStrokeThick, Opacity: 1, Size: 21}, ui.RGB(240, 240, 240)))
+	if noneDark != 0 || heavyDark < 50 {
+		t.Fatalf("outline dark pixels: none=%d heavy=%d", noneDark, heavyDark)
+	}
+
+	// At 55% opacity over a mid-light bg (200), group compositing blends pure
+	// white (255) with 200 -> ~230 (brighter than background), whereas the old
+	// non-grouped path blended white over stacked black -> ~140 (dark gray).
+	semiImg := renderOver(danmakuStyle{Stroke: dmStrokeThick, Opacity: 0.55, Size: 21, Weight: dmWeightBold}, ui.RGB(200, 200, 200))
+	brightFill := 0
+	for i := 0; i < len(semiImg.Pix); i += 4 {
+		if semiImg.Pix[i] >= 220 && semiImg.Pix[i+1] >= 220 && semiImg.Pix[i+2] >= 220 {
+			brightFill++
+		}
+	}
+	if brightFill < 50 {
+		t.Fatalf("55%% opacity danmaku text grayed out over outline: brightFill=%d, want >=50", brightFill)
+	}
+
+	// Display area scales usable lane count proportionally to video height.
+	aQuarter := &app{dmStyle: danmakuStyle{Area: 0.25, Size: 18}}
+	aFull := &app{dmStyle: danmakuStyle{Area: 1, Size: 18}}
+	if q, full := aQuarter.dmLaneCount(720), aFull.dmLaneCount(720); q >= full || q < 2 || full <= dmLanes {
+		t.Fatalf("area lane scaling broken: quarter=%d full=%d", q, full)
 	}
 }
 

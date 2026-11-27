@@ -83,6 +83,7 @@ type hgDetailCacheEntry struct {
 	episodes   []hg.Episode
 	seasons    []hg.Season
 	recommends []hg.Series
+	epLoaded   bool
 	savedAt    time.Time
 }
 
@@ -155,6 +156,7 @@ type hgPage struct {
 	epGroup        int
 	loading        bool
 	epLoading      bool
+	epLoaded       bool
 	seasonsLoading bool
 	recLoading     bool
 	err            hg.ErrorInfo
@@ -365,6 +367,9 @@ func (h *hgApp) saveDetailCache(p *hgPage) {
 	e.series = p.series
 	if len(p.episodes) > 0 {
 		e.episodes = slices.Clone(p.episodes)
+		e.epLoaded = true
+	} else if p.epLoaded {
+		e.epLoaded = true
 	}
 	if len(p.seasons) > 0 {
 		e.seasons = slices.Clone(p.seasons)
@@ -1107,11 +1112,14 @@ func (a *app) hgOpenDetail(seed hg.Series) {
 		}
 		if len(cached.episodes) > 0 {
 			p.episodes = slices.Clone(cached.episodes)
+			p.epLoaded = true
 			if h.hist != nil {
 				if entry, ok := h.hist.Get(seed.ID); ok {
 					p.epGroup = hgResumeEpisodeIndex(p.episodes, entry) / hgEpisodeGroupSize
 				}
 			}
+		} else if cached.epLoaded {
+			p.epLoaded = true
 		}
 		if len(cached.seasons) > 0 {
 			p.seasons = slices.Clone(cached.seasons)
@@ -1133,14 +1141,24 @@ func (a *app) hgSwitchSeason(p *hgPage, s hg.Season) {
 	}
 	p.closePrefetch()
 	p.seriesID = s.SeriesID
+	statusText := s.StatusText
+	if s.IsUpcoming() && statusText == "待上线" {
+		statusText = ""
+	}
 	p.series = hg.Series{
-		ID:           s.SeriesID,
-		Title:        hgFirstNonEmpty(s.Title, p.series.Title),
-		CoverURL:     hgFirstNonEmpty(s.CoverURL, p.series.CoverURL),
-		EpisodeCount: s.EpisodeCount,
+		ID:            s.SeriesID,
+		Title:         hgFirstNonEmpty(s.Title, p.series.Title),
+		CoverURL:      hgFirstNonEmpty(s.CoverURL, p.series.CoverURL),
+		EpisodeCount:  s.EpisodeCount,
+		ReleaseStatus: s.ReleaseStatus,
+		StatusText:    statusText,
+	}
+	for i := range p.seasons {
+		p.seasons[i].Current = p.seasons[i].SeriesID == s.SeriesID
 	}
 	p.title = hgFirstNonEmpty(s.Title, "剧集详情")
 	p.episodes = nil
+	p.epLoaded = false
 	p.recommends = nil
 	p.reviews = newHGCommentFeed(s.SeriesID, "")
 	p.epGroup = 0
@@ -1202,6 +1220,58 @@ func (a *app) hgPrefetchDetailTargetEpisode(p *hgPage) {
 	}()
 }
 
+func (a *app) hgFetchDetailEpisodes(p *hgPage, gen int, id string) {
+	h := a.hg
+	if h == nil || h.svc == nil || p == nil || id == "" {
+		return
+	}
+	p.epLoading = true
+	p.epErr = hg.ErrorInfo{}
+	svc := h.svc
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), hgRequestTimeout)
+		eps, err := svc.ListEpisodes(ctx, id)
+		cancel()
+		a.post(func() {
+			if p.gen != gen {
+				return
+			}
+			p.epLoading = false
+			if err != nil {
+				if p.series.IsUpcoming() && hg.ClassifyError(err).Kind == hg.ErrKindAnonymousLimited {
+					p.epLoaded = true
+					p.epErr = hg.ErrorInfo{}
+					h.saveDetailCache(p)
+					return
+				}
+				p.epErr = hg.ClassifyError(err)
+				return
+			}
+			p.epLoaded = true
+			p.epErr = hg.ErrorInfo{}
+			p.episodes = eps
+			if len(eps) > 0 {
+				if p.series.EpisodeCount == 0 {
+					p.series.EpisodeCount = len(eps)
+				}
+				if p.series.IsUpcoming() || p.series.ReleaseStatus == hg.ReleaseUnknown {
+					p.series.ReleaseStatus = hg.ReleaseReleased
+				}
+			} else if p.series.ReleaseStatus == hg.ReleaseUnknown {
+				p.series.ReleaseStatus = hg.ReleaseUpcoming
+			}
+			if h.hist != nil {
+				if entry, ok := h.hist.Get(id); ok {
+					idx := hgResumeEpisodeIndex(eps, entry)
+					p.epGroup = idx / hgEpisodeGroupSize
+				}
+			}
+			h.saveDetailCache(p)
+			a.hgPrefetchDetailTargetEpisode(p)
+		})
+	}()
+}
+
 func (a *app) hgLoadDetail(p *hgPage) {
 	h := a.hg
 	if h == nil || h.svc == nil || p == nil || p.seriesID == "" {
@@ -1209,7 +1279,8 @@ func (a *app) hgLoadDetail(p *hgPage) {
 	}
 	p.gen++
 	p.loading = true
-	p.epLoading = true
+	p.epLoading = false
+	p.epLoaded = false
 	p.seasonsLoading = true
 	p.recLoading = true
 	p.err = hg.ErrorInfo{}
@@ -1234,38 +1305,20 @@ func (a *app) hgLoadDetail(p *hgPage) {
 			if p.series.Title != "" {
 				p.title = p.series.Title
 			}
+			if p.series.IsUpcoming() && len(p.episodes) == 0 {
+				p.epLoading = false
+				p.epLoaded = true
+				p.epErr = hg.ErrorInfo{}
+			} else if !p.epLoading && !p.epLoaded && len(p.episodes) == 0 {
+				a.hgFetchDetailEpisodes(p, gen, id)
+			}
 			h.saveDetailCache(p)
 		})
 	}()
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), hgRequestTimeout)
-		eps, err := svc.ListEpisodes(ctx, id)
-		cancel()
-		a.post(func() {
-			if p.gen != gen {
-				return
-			}
-			p.epLoading = false
-			if err != nil {
-				p.epErr = hg.ClassifyError(err)
-				return
-			}
-			p.epErr = hg.ErrorInfo{}
-			p.episodes = eps
-			if p.series.EpisodeCount == 0 && len(eps) > 0 {
-				p.series.EpisodeCount = len(eps)
-			}
-			if h.hist != nil {
-				if entry, ok := h.hist.Get(id); ok {
-					idx := hgResumeEpisodeIndex(eps, entry)
-					p.epGroup = idx / hgEpisodeGroupSize
-				}
-			}
-			h.saveDetailCache(p)
-			a.hgPrefetchDetailTargetEpisode(p)
-		})
-	}()
+	if !p.series.IsUpcoming() || len(p.episodes) > 0 {
+		a.hgFetchDetailEpisodes(p, gen, id)
+	}
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), hgRequestTimeout)
@@ -1277,7 +1330,15 @@ func (a *app) hgLoadDetail(p *hgPage) {
 			}
 			p.seasonsLoading = false
 			if err == nil {
-				p.seasons = seasons
+				if len(seasons) > 1 || len(p.seasons) <= 1 {
+					p.seasons = seasons
+				}
+				for i := range p.seasons {
+					p.seasons[i].Current = p.seasons[i].SeriesID == p.seriesID
+					if p.seasons[i].Current && p.series.ReleaseStatus == hg.ReleaseUnknown && p.seasons[i].ReleaseStatus != hg.ReleaseUnknown {
+						p.series.ReleaseStatus = p.seasons[i].ReleaseStatus
+					}
+				}
 				h.saveDetailCache(p)
 			}
 		})
@@ -1325,8 +1386,16 @@ func mergeHGSeries(base, detail hg.Series) hg.Series {
 	if detail.Category != "" {
 		out.Category = detail.Category
 	}
+	if detail.ReleaseStatus != hg.ReleaseUnknown {
+		out.ReleaseStatus = detail.ReleaseStatus
+	}
 	if detail.StatusText != "" {
-		out.StatusText = detail.StatusText
+		keepBaseUpcomingNote := out.IsUpcoming() &&
+			base.StatusText != "" && base.StatusText != "暂未上线" && base.StatusText != "待上线" &&
+			(detail.StatusText == "暂未上线" || detail.StatusText == "待上线")
+		if !keepBaseUpcomingNote {
+			out.StatusText = detail.StatusText
+		}
 	}
 	if detail.AlbumID != "" {
 		out.AlbumID = detail.AlbumID
@@ -1334,7 +1403,9 @@ func mergeHGSeries(base, detail hg.Series) hg.Series {
 	if detail.EpisodeCount > 0 {
 		out.EpisodeCount = detail.EpisodeCount
 	}
-	if detail.Finished {
+	if out.IsUpcoming() {
+		out.Finished = false
+	} else if detail.Finished {
 		out.Finished = true
 	}
 	if len(detail.Actors) > 0 {
