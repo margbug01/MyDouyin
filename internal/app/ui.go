@@ -885,21 +885,21 @@ func (a *app) stage(c *ui.Context, p *page) {
 		}
 		if !a.clear && (s.v.Live == nil || !a.paused) {
 			isLive := s.v.Live != nil && a.liveChat != nil
-			clock := func() time.Duration { // as at: the player's, read again as each frame paints
+			clock := func(late time.Duration) time.Duration { // as at: the player's, read again as each frame paints, at the frame's time
 				if s.vp == nil {
 					return 0
 				}
-				return s.at()
+				return s.at() - time.Duration(float64(late)*a.playSpeed())
 			}
 			if isLive {
 				started := a.liveChat.started
-				clock = func() time.Duration { return time.Since(started) }
+				clock = func(late time.Duration) time.Duration { return time.Since(started) - late }
 			}
-			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w, h float32) ([]dmFlying, time.Duration) {
+			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w, h float32, late time.Duration) ([]dmFlying, time.Duration) {
 				if isLive {
-					return flyDanmakuIn(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w, h, a.dmRealFlight())
+					return flyDanmakuIn(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(late), w, h, a.dmRealFlight())
 				}
-				flying, next := flyDanmakuArea(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(), w, h)
+				flying, next := flyDanmakuArea(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(late), w, h)
 				if next > 0 {
 					next = time.Duration(float64(next) / a.playSpeed())
 				}

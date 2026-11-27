@@ -1441,8 +1441,9 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		a.hgTick(hp, at, dur)
 
 		if !a.clear {
-			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w, h float32) ([]dmFlying, time.Duration) {
-				flying, next := flyDanmakuArea(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, hp.at(), w, h)
+			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w, h float32, late time.Duration) ([]dmFlying, time.Duration) {
+				at := hp.at() - time.Duration(float64(late)*a.playSpeed())
+				flying, next := flyDanmakuArea(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, at, w, h)
 				if next > 0 {
 					next = time.Duration(float64(next) / a.playSpeed())
 				}

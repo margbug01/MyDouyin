@@ -429,13 +429,22 @@ func (a *app) danmakuText(text string) dmShaped {
 // layer's size. They move in repaint-only frames at the display's native
 // refresh rate, without building the view, using GPU subpixel translation so
 // glyphs and their outlines glide smoothly without pixel-snap jitter.
-func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h float32) ([]dmFlying, time.Duration)) {
+//
+// fly gets late, how long ago the frame began while they move: the layer
+// paints up to a frame's length after that (9 ms measured at 144 Hz), so a
+// clock read in fly, set back by late, places each frame's comments at the
+// frame's own time and they move evenly, not by how late their layer painted.
+func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h float32, late time.Duration) ([]dmFlying, time.Duration)) {
 	if a.dmOff {
 		return
 	}
 	st := a.danmakuStyle()
 	draw := func(p *ui.Painter, r ui.Rect) {
-		flying, next := fly(r.W, r.H)
+		var late time.Duration
+		if moving {
+			late = time.Since(p.Now())
+		}
+		flying, next := fly(r.W, r.H, late)
 		for _, f := range flying {
 			sh := a.danmakuText(f.d.Text)
 			if f.x+sh.w <= 0 || f.x >= r.W {
