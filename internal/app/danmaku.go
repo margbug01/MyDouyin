@@ -21,10 +21,6 @@ const (
 	dmWeightBold   = 700    // Bilibili-style bold default
 	dmWeightNormal = 500
 	dmAreaDefault  = 0.5 // half screen
-	// dmFPS is how often flying comments repaint: smooth for text crossing
-	// the video, where each of the display's refreshes (up to 144 a second)
-	// cost as much again.
-	dmFPS = 60
 )
 
 const (
@@ -430,8 +426,9 @@ func (a *app) danmakuText(text string) dmShaped {
 }
 
 // danmakuLayer paints over the video the bullet comments fly gives for the
-// layer's size. They move in frames that only paint, without building the
-// view, dmFPS a second while moving.
+// layer's size. They move in repaint-only frames at the display's native
+// refresh rate, without building the view, using GPU subpixel translation so
+// glyphs and their outlines glide smoothly without pixel-snap jitter.
 func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h float32) ([]dmFlying, time.Duration)) {
 	if a.dmOff {
 		return
@@ -441,25 +438,34 @@ func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h
 		flying, next := fly(r.W, r.H)
 		for _, f := range flying {
 			sh := a.danmakuText(f.d.Text)
-			x, y := r.X+f.x, r.Y+f.y
-			if sh.outline != nil {
-				for _, off := range sh.offsets {
-					p.TextLayout(sh.outline, x+off[0], y+off[1], sh.outColor)
-				}
+			if f.x+sh.w <= 0 || f.x >= r.W {
+				continue
 			}
-			p.TextLayout(sh.l, x, y, white)
-			for i, o := range sh.l.Objects() {
-				if i < len(sh.pics) {
-					if bmp := a.img.getSized(sh.pics[i], emojiEdge); bmp != nil {
-						p.Image(bmp, ui.Rect{X: x + o.Rect.X, Y: y + o.Rect.Y, W: o.Rect.W, H: o.Rect.H}, ui.Contain)
+			x := r.X + f.x
+			y := float32(math.Round(float64(r.Y + f.y)))
+			if !moving {
+				x = float32(math.Round(float64(x)))
+			}
+			p.Transform(ui.Translation(x, y), 0, 0, func() {
+				if sh.outline != nil {
+					for _, off := range sh.offsets {
+						p.TextLayout(sh.outline, off[0], off[1], sh.outColor)
 					}
 				}
-			}
+				p.TextLayout(sh.l, 0, 0, white)
+				for i, o := range sh.l.Objects() {
+					if i < len(sh.pics) {
+						if bmp := a.img.getSized(sh.pics[i], emojiEdge); bmp != nil {
+							p.Image(bmp, ui.Rect{X: o.Rect.X, Y: o.Rect.Y, W: o.Rect.W, H: o.Rect.H}, ui.Contain)
+						}
+					}
+				}
+			})
 		}
 		switch {
 		case !moving:
 		case len(flying) > 0:
-			p.AnimationFrameRate(dmFPS)
+			p.AnimationFrame()
 		case next >= 0:
 			p.After(next)
 		}

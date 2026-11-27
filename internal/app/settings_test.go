@@ -110,3 +110,46 @@ func TestLoginPanel(t *testing.T) {
 		t.Fatal("以后再说 left it open")
 	}
 }
+
+// Settings dropdown popups must paint an opaque panel background even though
+// the window theme leaves Background transparent for the native video layer.
+func TestSettingsSelectPopupBackgroundOpaque(t *testing.T) {
+	for _, theme := range []string{"dark", "light"} {
+		t.Run(theme, func(t *testing.T) {
+			a := withRoots(&app{pages: []*page{stub("推荐", 1)}, settingsOpen: true})
+			a.orbit.theme = theme
+			tt := newTester(a)
+			tt.Frame()
+			if err := tt.Click("弹幕"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+			if err := tt.Click("弹幕描边"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+			if !tt.HasText("45°投影") || !tt.HasText("无") {
+				t.Fatalf("select popup did not open: %q", tt.Texts())
+			}
+			// Sample the right side of the unselected "无" row inside the popup
+			// panel, where the underlying "不透明度" select box sits behind it.
+			r, ok := tt.Find("无")
+			if !ok {
+				t.Fatal("missing 无 option")
+			}
+			want := paletteFor(theme == "dark", modeDouyin).popover
+			img := tt.Image()
+			px := img.RGBAAt(int(r.X+r.W+24), int(r.Y+r.H/2))
+			diff := func(a, b uint8) int {
+				if a > b {
+					return int(a - b)
+				}
+				return int(b - a)
+			}
+			if diff(px.R, want.R) > 3 || diff(px.G, want.G) > 3 || diff(px.B, want.B) > 3 || px.A != 255 {
+				t.Fatalf("theme=%s select popup pixel at (%d,%d) = rgba(%d,%d,%d,%d), want opaque popover rgb(%d,%d,%d)",
+					theme, int(r.X+r.W+24), int(r.Y+r.H/2), px.R, px.G, px.B, px.A, want.R, want.G, want.B)
+			}
+		})
+	}
+}

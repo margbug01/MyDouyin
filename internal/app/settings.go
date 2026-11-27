@@ -193,42 +193,49 @@ func (a *app) settingsDialog(c *ui.Context) {
 		back.Background(ui.RGBA(0, 0, 0, 0.45))
 		panel.Width(720).Height(min(520, winH-48)).Radius(14).Clip().Background(pal.popover).
 			Border(1, pal.popoverBd).Shadow(0, 10, 30, -6, pal.cardShadow).Label("设置")
-		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
-			ui.Column(c.Key("settings-nav")).Width(172).Padding(22, 12, 22, 12).Gap(2).
-				Background(onOff(pal.dark, pal.raised, pal.bg)).Role(ui.RoleTabList).Children(func() {
-				ui.Text(c, "设置").FontSize(17).FontWeight(700).TextColor(pal.strong).Padding(0, 10, 14, 10)
-				for i, name := range settingsPageNames {
-					p := settingsPage(i)
-					if p == settingsAccount && a.c == nil {
-						continue
-					}
-					on := p == a.settingsPage
-					b := ui.ButtonBase(c.Key("settings-nav-" + name)).Role(ui.RoleTab).AccessSelected(on).Label(name).
-						Height(36).PaddingX(12).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false)
-					switch {
-					case on:
-						b.Background(pal.press)
-					case b.Hovered() || b.FocusVisible():
-						b.Background(pal.hover)
-					}
-					b.Children(func() {
-						ui.Text(c, name).FontSize(14).FontWeight(onOff(on, 600, 400)).TextColor(onOff(on, pal.strong, pal.muted))
-					})
-					if b.Clicked() {
-						a.settingsPage = p
-					}
-				}
-			})
-			ui.Box(c).Width(1).Background(pal.hairline)
-			ui.Column(c).Grow(1).MinWidth(0).Padding(22, 16, 0, 28).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Padding(0, barGutter, 0, 0).Margin(0, 0, 16, 0).Children(func() {
-					ui.Text(c, settingsPageNames[a.settingsPage]).FontSize(15).FontWeight(700).TextColor(pal.strong).Grow(1)
-					if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭设置").Clicked() {
-						a.settingsOpen = false
+		// Window theme leaves Background transparent for the native video hole;
+		// restore an opaque background inside the dialog so ui.Select popups do
+		// not render transparent over the rows behind them.
+		dlgTheme := *c.Theme()
+		dlgTheme.Background = pal.popover
+		ui.Themed(c, &dlgTheme).Grow(1).Background(ui.Transparent).Children(func() {
+			ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
+				ui.Column(c.Key("settings-nav")).Width(172).Padding(22, 12, 22, 12).Gap(2).
+					Background(onOff(pal.dark, pal.raised, pal.bg)).Role(ui.RoleTabList).Children(func() {
+					ui.Text(c, "设置").FontSize(17).FontWeight(700).TextColor(pal.strong).Padding(0, 10, 14, 10)
+					for i, name := range settingsPageNames {
+						p := settingsPage(i)
+						if p == settingsAccount && a.c == nil {
+							continue
+						}
+						on := p == a.settingsPage
+						b := ui.ButtonBase(c.Key("settings-nav-" + name)).Role(ui.RoleTab).AccessSelected(on).Label(name).
+							Height(36).PaddingX(12).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false)
+						switch {
+						case on:
+							b.Background(pal.press)
+						case b.Hovered() || b.FocusVisible():
+							b.Background(pal.hover)
+						}
+						b.Children(func() {
+							ui.Text(c, name).FontSize(14).FontWeight(onOff(on, 600, 400)).TextColor(onOff(on, pal.strong, pal.muted))
+						})
+						if b.Clicked() {
+							a.settingsPage = p
+						}
 					}
 				})
-				ui.Scroll(c.Key(fmt.Sprint("settings-page", a.settingsPage))).Grow(1).Padding(0, barGutter, 24, 0).Children(func() {
-					a.settingsBody(c)
+				ui.Box(c).Width(1).Background(pal.hairline)
+				ui.Column(c).Grow(1).MinWidth(0).Padding(22, 16, 0, 28).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Padding(0, barGutter, 0, 0).Margin(0, 0, 16, 0).Children(func() {
+						ui.Text(c, settingsPageNames[a.settingsPage]).FontSize(15).FontWeight(700).TextColor(pal.strong).Grow(1)
+						if iconButton(c.Key("close"), iconClose, 16, pal.muted, "关闭设置").Clicked() {
+							a.settingsOpen = false
+						}
+					})
+					ui.Scroll(c.Key(fmt.Sprint("settings-page", a.settingsPage))).Grow(1).Padding(0, barGutter, 24, 0).Children(func() {
+						a.settingsBody(c)
+					})
 				})
 			})
 		})

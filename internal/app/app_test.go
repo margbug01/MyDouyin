@@ -696,7 +696,7 @@ func TestDanmakuLayerPaintsWithoutBuildingTheView(t *testing.T) {
 	}
 	frame0 := slices.Clone(first.Pix)
 	at += 500 * time.Millisecond
-	tt.Advance(time.Second / dmFPS)
+	tt.Advance(time.Second / 60)
 	if builds != before || slices.Equal(frame0, tt.Image().Pix) {
 		t.Fatalf("moving took %d builds of the view, picture changed %v", builds-before, !slices.Equal(frame0, tt.Image().Pix))
 	}
