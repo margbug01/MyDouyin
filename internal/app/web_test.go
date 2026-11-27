@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,44 @@ func TestResolveStartupLogin(t *testing.T) {
 			t.Fatalf("got=%v http=%v page=%v", got, httpCalled, pageCalled)
 		}
 	})
+}
+
+// WebKit's store, as WebKit 26 answers at a cold start: no cookies until one
+// is written; and as it answers when its network process restarts: none, ever.
+func TestWholeReadDoesNotTakeAnEmptyAnswerForTheStore(t *testing.T) {
+	jar := []mygo.Cookie{{Name: "sessionid", Value: "abc", Domain: ".douyin.com", Path: "/"}}
+	for _, tc := range []struct {
+		name    string
+		marks   bool // whether a written mark shows in later reads
+		wantJar bool
+		wantErr bool
+	}{
+		{name: "cold start answers once a cookie is written", marks: true, wantJar: true},
+		{name: "a store that keeps answering none is no answer", marks: false, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marked := false
+			list := func() ([]mygo.Cookie, error) {
+				if !marked || !tc.marks {
+					return nil, nil
+				}
+				return append(slices.Clone(jar), readMark), nil
+			}
+			got, err := wholeRead(list, func() error { marked = true; return nil })
+			if (err != nil) != tc.wantErr || (sessionValue(got) == "abc") != tc.wantJar {
+				t.Fatalf("got=%v err=%v", got, err)
+			}
+		})
+	}
+}
+
+func sessionValue(cs []mygo.Cookie) string {
+	for _, k := range cs {
+		if k.Name == "sessionid" {
+			return k.Value
+		}
+	}
+	return ""
 }
 
 func TestLoginLostKeepsLoginUnlessInvalid(t *testing.T) {

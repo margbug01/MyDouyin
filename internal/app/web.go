@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -288,8 +289,51 @@ func (w *web) Load(ctx context.Context, url string, layout bool) error {
 	return err
 }
 
+// readMark is a session cookie kept in WebKit's store for no site: a read
+// that holds it is whole. WebKit answers a read with no cookies and no error
+// right after its network process restarts (3 runs of 3 on macOS 27.2,
+// 2026-11-27), and on WebKit 26 at the first read of a cold start, until a
+// cookie is written (Capacitor #8700, measured on iOS 26.5). Taken for the
+// store, such a read lost the login at launch: cookies.json went and the
+// login showed, every launch (#4). WebView2 has shown neither, and keeps no mark.
+var readMark = mygo.Cookie{Name: "mydouyin_whole_read", Value: "1", Domain: "whole-read.mydouyin.invalid", Path: "/"}
+
+func isReadMark(k mygo.Cookie) bool { return k.Name == readMark.Name }
+
+// wholeRead is a read of list that holds the mark, which it sets once when
+// the first read misses it; with no mark, list's first answer.
+func wholeRead(list func() ([]mygo.Cookie, error), mark func() error) ([]mygo.Cookie, error) {
+	cs, err := list()
+	if err != nil || mark == nil || slices.ContainsFunc(cs, isReadMark) {
+		return cs, err
+	}
+	if err := mark(); err != nil {
+		return nil, err
+	}
+	if cs, err = list(); err == nil && !slices.ContainsFunc(cs, isReadMark) {
+		err = errors.New("WebKit 的 cookie 没读全")
+	}
+	return cs, err
+}
+
+// douyinCookies are the store's douyin.com cookies, from a whole read.
+func douyinCookies() ([]mygo.Cookie, error) {
+	var mark func() error
+	if runtime.GOOS == "darwin" {
+		mark = func() error { return mygo.Cookies.Set(readMark) }
+	}
+	all, err := wholeRead(func() ([]mygo.Cookie, error) { return mygo.Cookies.List(mygo.CookieFilter{}) }, mark)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(all, func(k mygo.Cookie) bool {
+		host := strings.TrimPrefix(k.Domain, ".")
+		return host != "douyin.com" && !strings.HasSuffix(host, ".douyin.com")
+	}), nil
+}
+
 func (w *web) Cookies() ([]dy.Cookie, error) {
-	list, err := mygo.Cookies.List(mygo.CookieFilter{Domain: "douyin.com"})
+	list, err := douyinCookies()
 	if err != nil {
 		return nil, err
 	}
@@ -719,7 +763,7 @@ func (a *app) logout() {
 	a.web.destroy()
 	go func() {
 		err := a.c.Logout()
-		if list, lerr := mygo.Cookies.List(mygo.CookieFilter{Domain: "douyin.com"}); lerr == nil {
+		if list, lerr := douyinCookies(); lerr == nil {
 			for _, k := range list {
 				mygo.Cookies.Delete(k)
 			}
