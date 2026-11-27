@@ -25,16 +25,18 @@ import (
 	"douyin/internal/dy"
 	"douyin/internal/hg"
 	"douyin/internal/media"
+	"douyin/internal/platform"
+	"douyin/internal/tiktok"
 )
 
 // slot holds a feed entry, its playback state, and its player while visible.
 type slot struct {
 	v dy.Video
 	players
-	loading bool
-	cached  bool // seeded from disk fast-start cache: refresh PlayURL before playing
-	cancel  context.CancelFunc
-	loadGen int
+	loading     bool
+	cached      bool // seeded from disk fast-start cache: refresh PlayURL before playing
+	cancel      context.CancelFunc
+	loadGen     int
 	gone        bool // dropped while loading: close what arrives
 	err         error
 	liveFreshAt time.Time // when LiveRoom last refreshed this live slot's streams
@@ -55,6 +57,18 @@ type slot struct {
 	lastAt    time.Duration // where the view last saw it, which a loop goes back from
 	reported  bool          // queued to tell Douyin it was watched (watched.go)
 	comments  *sheet        // its comments, fetched ahead once it played a moment
+
+	subRawCues      []tiktok.SubtitleCue
+	subTransCues    []tiktok.SubtitleCue
+	subTrack        int
+	subPicked       bool
+	subLoading      bool
+	subTranslating  bool
+	subTransFailed  bool
+	subLoadedURL    string
+	descTrans       string
+	descShowTrans   bool
+	descTranslating bool
 }
 
 // players are what plays a video once it is opened: vp shows it, ap plays
@@ -155,16 +169,16 @@ type page struct {
 	title    string
 	next     dy.Pager[dy.Video]
 	list     []*slot
-	grid      bool
-	playing   bool // a grid page playing its idx
-	gridList  ui.ListState
-	idx       int
+	grid     bool
+	playing  bool // a grid page playing its idx
+	gridList ui.ListState
+	idx      int
 	fetching bool
 	gen      int  // counts refreshes: a page fetched before one is dropped
 	done     bool // next returned its last page
 	msg      string
-	paused   bool   // playback state while another page is open
-	authorID string // an author's works, where is_top is meaningful
+	paused   bool       // playback state while another page is open
+	authorID string     // an author's works, where is_top is meaningful
 	covers   coverShape // the shape of the covers Douyin serves this list, which its cards take
 
 	restart func() dy.Pager[dy.Video] // a root's list from the top, as refresh takes it; nil goes on with next
@@ -224,7 +238,7 @@ type app struct {
 	mainVideo, pipVideo nativeSurface
 	c                   *dy.Client
 	dir                 string
-	cacheDir            string // persistent cache root (empty in tests unless explicitly configured)
+	cacheDir            string            // persistent cache root (empty in tests unless explicitly configured)
 	pages               []*page           // the window shows the last
 	stacks              map[*page][]*page // each root's pages, as they were when another root was shown, by root
 	query               string            // the search box
@@ -246,13 +260,13 @@ type app struct {
 	follows   []dy.User // the accounts it follows, atop 关注
 	followMsg string    // why they did not load
 
-	picks, feed *page             // the roots: 精选's covers, 推荐's videos one by one
-	home        *page             // 引力场: centered search with orbiting covers
-	orbitPicks  *page             // 引力场's own deduplicated, infinitely refreshable 精选 stream
-	picksIDs    sync.Map          // video IDs already shown in sidebar 精选 (race-free lookup from orbit pager)
-	orbit       orbitState        // 引力场 state (orbit.go)
-	winBg       string            // the window's background color, as last set (view)
-	img        *images                   // covers and avatars
+	picks, feed  *page                    // the roots: 精选's covers, 推荐's videos one by one
+	home         *page                    // 引力场: centered search with orbiting covers
+	orbitPicks   *page                    // 引力场's own deduplicated, infinitely refreshable 精选 stream
+	picksIDs     sync.Map                 // video IDs already shown in sidebar 精选 (race-free lookup from orbit pager)
+	orbit        orbitState               // 引力场 state (orbit.go)
+	winBg        string                   // the window's background color, as last set (view)
+	img          *images                  // covers and avatars
 	emoji        map[string]string        // Douyin's emoji by name, as [微笑], once a text asked for them (emojiSpans)
 	emojiList    []dy.Emoji               // Douyin's emojis in official order for the picker
 	emojiLoading bool                     // emoji list request in flight
@@ -350,14 +364,34 @@ type app struct {
 	watchTimer   *time.Timer
 	historyWait  int // 观看历史's gen while it waits for them to be told to load (freshHistory), 0 none
 
-	settingsOpen bool     // the settings dialog (settings.go)
+	settingsOpen bool         // the settings dialog (settings.go)
 	settingsPage settingsPage // the page of it shown
-	settingsFile string   // where the settings are kept, "" not to keep them
-	saved        settings // as last written
+	settingsFile string       // where the settings are kept, "" not to keep them
+	saved        settings     // as last written
 
-	mode                 appMode
-	brandMenuOpen        bool
-	hg                   *hgApp
+	mode          appMode
+	brandMenuOpen bool
+	hg            *hgApp
+
+	// Multi-platform state (platform.go, tt_web.go).
+	platform             platform.ID
+	tt                   *tiktok.Client
+	ttWeb                ttWeb
+	proxyURL             string
+	proxyDraft           string
+	ttRegion             string
+	ttFeed               *page
+	ttFollow             *page
+	ttLive               *page
+	dySnap               *platformSnapshot
+	ttSnap               *platformSnapshot
+	subtitlesOff         bool
+	subTranslateOff      bool
+	subtitleLang         string
+	subtitleOpen         bool
+	fetchSubtitle        func(string) ([]tiktok.SubtitleCue, error)
+	translateCues        func([]tiktok.SubtitleCue, string) ([]tiktok.SubtitleCue, error)
+	translateText        func(string, string) (string, error)
 	hgDirect             bool
 	hgSignerURL          string
 	hgSignerToken        string
@@ -504,7 +538,7 @@ func (a *app) toggleFollow(secUID, uid, name string, fallback int) {
 		return
 	}
 	if !a.signedIn {
-		a.openLogin()
+		a.openActiveLogin()
 		return
 	}
 	send := a.setFollowed
@@ -532,11 +566,19 @@ func (a *app) toggleFollow(secUID, uid, name string, fallback int) {
 	a.followBusy[secUID] = true
 	a.adjustProfileFollowers(secUID, step)
 
+	isTT := a.isTikTok()
+	ttClient := a.tt
 	go func() {
 		targetUID := uid
-		if targetUID == "" && a.c != nil {
-			if u, err := a.c.Profile(secUID); err == nil {
-				targetUID = u.UID
+		if targetUID == "" {
+			if isTT && ttClient != nil {
+				if u, err := ttClient.Profile(secUID); err == nil {
+					targetUID = u.UID
+				}
+			} else if !isTT && a.c != nil {
+				if u, err := a.c.Profile(secUID); err == nil {
+					targetUID = u.UID
+				}
 			}
 		}
 		st, err := send(targetUID, secUID, want)
@@ -546,7 +588,11 @@ func (a *app) toggleFollow(secUID, uid, name string, fallback int) {
 				a.followState[secUID] = prev
 				a.adjustProfileFollowers(secUID, -step)
 				a.toast = onOff(want, "关注", "取消关注") + "没成功：" + err.Error()
-				if errors.Is(err, dy.ErrNeedLogin) {
+				switch {
+				case errors.Is(err, tiktok.ErrNeedLogin):
+					a.signedIn = false
+					a.openTikTokLogin()
+				case errors.Is(err, dy.ErrNeedLogin):
 					a.recheckLogin(onOff(want, "关注", "取消关注"))
 				}
 				return
@@ -600,7 +646,13 @@ func (a *app) write(s *slot, busy, on *bool, n *int, send func(string, bool) err
 			if err != nil {
 				*on, *n = !want, *n-step
 				a.toast = onOff(want, "", "取消") + what + "没成功：" + err.Error()
-				if errors.Is(err, dy.ErrNeedLogin) {
+				switch {
+				case errors.Is(err, tiktok.ErrNeedLogin):
+					a.signedIn = false
+					a.openTikTokLogin()
+				case errors.Is(err, tiktok.ErrVerify):
+					a.verifyTikTok(id, nil)
+				case errors.Is(err, dy.ErrNeedLogin):
 					a.recheckLogin(onOff(want, "", "取消") + what)
 				}
 			}
@@ -654,7 +706,13 @@ func (a *app) toggleCommentLike(sh *sheet, id string, reply bool) {
 				cm.Liked, cm.Likes = !want, cm.Likes-step
 			}
 			a.toast = onOff(want, "", "取消") + "赞评论没成功：" + err.Error()
-			if errors.Is(err, dy.ErrNeedLogin) {
+			switch {
+			case errors.Is(err, tiktok.ErrNeedLogin):
+				a.signedIn = false
+				a.openTikTokLogin()
+			case errors.Is(err, tiktok.ErrVerify):
+				a.verifyTikTok(video, nil)
+			case errors.Is(err, dy.ErrNeedLogin):
 				a.recheckLogin(onOff(want, "", "取消") + "赞评论")
 			}
 		})
@@ -1024,7 +1082,9 @@ func (a *app) comments(s *slot) {
 	a.notes, a.dms = nil, nil
 	if s.comments == nil {
 		var next dy.Pager[dy.Comment]
-		if a.c != nil {
+		if a.isTikTok() && a.tt != nil {
+			next = a.tt.Comments(s.v.ID)
+		} else if a.c != nil {
 			next = a.c.Comments(s.v.ID)
 		}
 		s.comments = &sheet{total: s.v.Comments, next: next, done: next == nil, v: s.v}
@@ -1033,7 +1093,7 @@ func (a *app) comments(s *slot) {
 	if len(a.sheet.items) == 0 && a.sheet.next != nil { // not fetched ahead, or that failed: again
 		a.moreComments(a.sheet)
 	}
-	if a.signedIn {
+	if a.signedIn && !a.isTikTok() {
 		a.web.warm() // for the replies, which Douyin gives only the page, and the likes
 	}
 }
@@ -1055,10 +1115,19 @@ func (a *app) followSheet(s *slot, related bool) {
 // out empty. Not before s has played a moment, so as not to ask for every
 // video flicked past.
 func (a *app) prefetchComments(s *slot) {
-	if s.comments != nil || a.c == nil || s.v.Live != nil {
+	if s.comments != nil || s.v.Live != nil {
 		return
 	}
-	s.comments = &sheet{total: s.v.Comments, next: a.c.Comments(s.v.ID), v: s.v}
+	var next dy.Pager[dy.Comment]
+	if a.isTikTok() && a.tt != nil {
+		next = a.tt.Comments(s.v.ID)
+	} else if a.c != nil {
+		next = a.c.Comments(s.v.ID)
+	}
+	if next == nil {
+		return
+	}
+	s.comments = &sheet{total: s.v.Comments, next: next, v: s.v}
 	a.moreComments(s.comments)
 }
 
@@ -1092,6 +1161,14 @@ func (a *app) moreReplies(th *thread) {
 			if err != nil {
 				th.msg = err.Error()
 				switch {
+				case errors.Is(err, tiktok.ErrVerify):
+					if th.verified {
+						th.msg = "验证过了，TikTok 仍限制回复加载，稍后可点「展开」重试"
+						th.verified = false
+					} else {
+						th.msg = "TikTok 需要验证，完成后会自动载入"
+						a.verifyTikTok(th.video, func() { th.verified = true; a.moreReplies(th) })
+					}
 				case !errors.Is(err, dy.ErrVerify):
 				case th.verified: // passed, and held back still: asking again would only flash the verification
 					th.msg = "验证过了，抖音仍没给回复，稍后点「展开」再试"
@@ -1168,6 +1245,14 @@ func (a *app) moreComments(sh *sheet) {
 			if err != nil {
 				sh.msg = err.Error()
 				switch {
+				case errors.Is(err, tiktok.ErrVerify):
+					if sh.verified {
+						sh.msg = "验证过了，TikTok 仍限制评论加载，稍后可点「重试」或在设置中登录 TikTok"
+						sh.verified = false
+					} else if a.sheet == sh {
+						sh.msg = "TikTok 需要验证，完成后会自动载入"
+						a.verifyTikTok(sh.v.ID, func() { sh.verified = true; a.moreComments(sh) })
+					}
 				case !errors.Is(err, dy.ErrVerify):
 				case sh.verified:
 					sh.msg = "验证过了，抖音仍没给评论，稍后点「重试」再试"
@@ -1190,6 +1275,10 @@ func (a *app) moreComments(sh *sheet) {
 // escape leaves a chat for the inbox, closes what is open beside the page,
 // or else the page on top.
 func (a *app) escape() {
+	if a.ttWeb.layout {
+		a.ttWeb.layout = false
+		return
+	}
 	if a.brandMenuOpen {
 		a.brandMenuOpen = false
 		return
@@ -1509,6 +1598,28 @@ func (a *app) loadAccount() {
 			}
 		}
 		a.post(func() {
+			if a.isTikTok() {
+				if a.dySnap == nil {
+					a.dySnap = &platformSnapshot{}
+				}
+				a.dySnap.me = me
+				if me.ID != "" && a.dySnap.mine == nil {
+					list := func(title string, from func() dy.Pager[dy.Video]) *page {
+						return &page{title: title, next: from(), grid: true, restart: from, covers: portraitCovers}
+					}
+					posts := list("作品", func() dy.Pager[dy.Video] { return a.c.MyPosts(me.ID) })
+					posts.authorID = me.ID
+					a.dySnap.mine = map[string]*page{
+						"作品":   posts,
+						"喜欢":   list("喜欢", func() dy.Pager[dy.Video] { return a.c.Liked(me.ID) }),
+						"收藏":   list("收藏", a.c.Collected),
+						"观看历史": list("观看历史", a.c.History),
+						"稍后再看": list("稍后再看", a.c.WatchLater),
+					}
+					a.dySnap.mineTab = "作品"
+				}
+				return
+			}
 			a.me, a.follows, a.unread = me, us, unread
 			if me.ID != "" {
 				a.resumeWatched(me.ID)
@@ -1934,9 +2045,10 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 		}
 		return players{}, lastErr
 	}
-	url, headers := videoQuality(v, quality).URL, videoHeaders
+	url, headers := videoQuality(v, quality).URL, a.activeVideoHeaders(v)
+	useNative := native && !a.isTikTok()
 	switch {
-	case native:
+	case useNative:
 		if preload != nil {
 			pl.live, _ = preload.Open()
 		}
@@ -2173,6 +2285,16 @@ func (a *app) toggle() {
 // search opens the videos found for q, and the accounts above them.
 func (a *app) search(q string) {
 	if q = strings.TrimSpace(q); q != "" {
+		if a.isTikTok() && a.tt != nil {
+			p := &page{title: "搜索：" + q, next: a.tt.Search(q), grid: true}
+			a.open(p)
+			go func() {
+				if us, err := a.tt.SearchUsers(q); err == nil {
+					a.post(func() { p.users = us })
+				}
+			}()
+			return
+		}
 		p := &page{title: "搜索：" + q, next: a.c.Search(q), grid: true}
 		a.open(p)
 		go func() {
@@ -2186,6 +2308,9 @@ func (a *app) search(q string) {
 // suggest asks Douyin what it suggests for the search box's text once the
 // typing rests a moment.
 func (a *app) suggest() {
+	if a.isTikTok() || a.c == nil {
+		return
+	}
 	a.sugSeq++
 	seq, q := a.sugSeq, strings.TrimSpace(a.query)
 	if q == "" || q == a.sugFor {
@@ -2215,6 +2340,16 @@ func (a *app) openAuthor(p *page, name, id string) {
 	}
 	if a.openAuthorFn != nil {
 		a.openAuthorFn(p, name, id)
+		return
+	}
+	if a.isTikTok() && a.tt != nil {
+		q := &page{title: "@" + name, authorID: id, next: a.tt.Posts(id), grid: true, covers: portraitCovers}
+		a.open(q)
+		go func() {
+			if u, err := a.tt.Profile(id); err == nil {
+				a.post(func() { q.user = &u })
+			}
+		}()
 		return
 	}
 	if a.c != nil {
@@ -2364,6 +2499,7 @@ func Run() error {
 		return c.SendDanmaku(id, a.me.UID, at, text)
 	}
 	a.web.a = a
+	a.ttWeb.a = a
 	c.SetWeb(&a.web)
 	a.loadSettings(settingsFile())
 	os.RemoveAll(a.dir) // leftovers of a crashed run
@@ -2397,6 +2533,8 @@ func Run() error {
 			}
 			a.web.closed = true
 			a.web.destroy()
+			a.ttWeb.closed = true
+			a.ttWeb.destroy()
 			for _, p := range a.pages {
 				for _, s := range p.list {
 					a.release(s)
@@ -2407,6 +2545,10 @@ func Run() error {
 		if a.mode == modeHongguo {
 			a.ensureHG()
 			a.hgEnsureActiveLoaded()
+		} else if a.platform == platform.TikTok {
+			want := a.platform
+			a.platform = platform.Douyin
+			a.switchPlatform(want)
 		} else {
 			a.startDouyinServices()
 		}

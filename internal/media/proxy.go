@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"golang.org/x/net/http/httpproxy"
+	"golang.org/x/net/proxy"
 )
 
 const (
@@ -68,27 +69,101 @@ type streamProxy struct {
 	err    error
 	client *http.Client
 
-	mu     sync.RWMutex
-	routes map[string]*proxyRoute
+	mu       sync.RWMutex
+	proxyURL string
+	routes   map[string]*proxyRoute
+}
+
+// NewHTTPTransport builds an *http.Transport configured with an optional
+// HTTP(S) or SOCKS5(h) proxy URL. An empty rawProxyURL falls back to the
+// environment proxy settings.
+func NewHTTPTransport(rawProxyURL string) (*http.Transport, error) {
+	dialer := &net.Dialer{
+		Timeout:   15 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	tr := &http.Transport{
+		DialContext:           dialer.DialContext,
+		ResponseHeaderTimeout: 20 * time.Second,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   16,
+		IdleConnTimeout:       60 * time.Second,
+	}
+	trimmed := strings.TrimSpace(rawProxyURL)
+	if trimmed == "" {
+		tr.Proxy = func(r *http.Request) (*url.URL, error) {
+			return httpproxy.FromEnvironment().ProxyFunc()(r.URL)
+		}
+		return tr, nil
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("media: invalid proxy URL %q", rawProxyURL)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		tr.Proxy = http.ProxyURL(parsed)
+		return tr, nil
+	case "socks5", "socks5h":
+		d, err := proxy.FromURL(parsed, dialer)
+		if err != nil {
+			return nil, fmt.Errorf("media: socks5 proxy: %w", err)
+		}
+		if cd, ok := d.(proxy.ContextDialer); ok {
+			tr.DialContext = cd.DialContext
+		} else {
+			tr.DialContext = func(_ context.Context, network, addr string) (net.Conn, error) {
+				return d.Dial(network, addr)
+			}
+		}
+		return tr, nil
+	default:
+		return nil, fmt.Errorf("media: unsupported proxy scheme %q", parsed.Scheme)
+	}
+}
+
+func defaultProxyTransport() *http.Transport {
+	tr, _ := NewHTTPTransport("")
+	return tr
 }
 
 var localProxy = &streamProxy{
 	routes: make(map[string]*proxyRoute),
 	client: &http.Client{
-		Transport: &http.Transport{
-			Proxy: func(r *http.Request) (*url.URL, error) {
-				return httpproxy.FromEnvironment().ProxyFunc()(r.URL)
-			},
-			DialContext: (&net.Dialer{
-				Timeout:   15 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ResponseHeaderTimeout: 20 * time.Second,
-			MaxIdleConns:          32,
-			MaxIdleConnsPerHost:   16,
-			IdleConnTimeout:       60 * time.Second,
-		},
+		Transport: defaultProxyTransport(),
 	},
+}
+
+// SetProxy updates the upstream HTTP/SOCKS5 proxy used by the in-memory media
+// loopback proxy. An empty string restores environment proxy auto-detection.
+func SetProxy(rawProxyURL string) error {
+	trimmed := strings.TrimSpace(rawProxyURL)
+	localProxy.mu.RLock()
+	same := localProxy.proxyURL == trimmed
+	localProxy.mu.RUnlock()
+	if same {
+		return nil
+	}
+	tr, err := NewHTTPTransport(trimmed)
+	if err != nil {
+		return err
+	}
+	localProxy.mu.Lock()
+	old, _ := localProxy.client.Transport.(*http.Transport)
+	localProxy.client.Transport = tr
+	localProxy.proxyURL = trimmed
+	localProxy.mu.Unlock()
+	if old != nil {
+		old.CloseIdleConnections()
+	}
+	return nil
+}
+
+// ProxyURL returns the currently configured custom proxy URL (empty for system/env).
+func ProxyURL() string {
+	localProxy.mu.RLock()
+	defer localProxy.mu.RUnlock()
+	return localProxy.proxyURL
 }
 
 func validateHTTPHeaders(headers map[string]string) (map[string]string, error) {

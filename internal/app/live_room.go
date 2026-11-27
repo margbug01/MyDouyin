@@ -39,6 +39,10 @@ type liveRoomView struct {
 }
 
 func (a *app) syncLiveRoom(p *page) {
+	if a.isTikTok() {
+		a.closeLiveRoom()
+		return
+	}
 	var room *dy.Live
 	if !a.loginOpen && p.plays() && p.idx < len(p.list) {
 		room = p.list[p.idx].v.Live

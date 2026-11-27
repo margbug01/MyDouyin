@@ -16,11 +16,19 @@ import (
 	"unicode/utf8"
 
 	"douyin/internal/dy"
+	"douyin/internal/tiktok"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
+
+var tiktokUnicodeEmojis = []string{
+	"😂", "❤️", "🔥", "😍", "😭", "🤣", "👍", "👏",
+	"✨", "💀", "🙏", "🥰", "😮", "🎉", "💯", "😎",
+	"🤩", "🥺", "😤", "🤔", "👀", "💪", "🙌", "🤯",
+	"😅", "😇", "🫶", "💔", "🎶", "⭐", "🌹", "🐱",
+}
 
 const (
 	commentMaxChars     = 1000
@@ -214,20 +222,24 @@ func (a *app) commentComposer(c *ui.Context, sh *sheet) {
 	if !a.signedIn {
 		wrap.Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "登录后发表评论、表情和图片").FontSize(12).TextColor(pal.muted).Grow(1)
+				hint := onOff(a.isTikTok(), "登录后发表评论和表情", "登录后发表评论、表情和图片")
+				ui.Text(c, hint).FontSize(12).TextColor(pal.muted).Grow(1)
 				if ui.Button(c.Key("comment-login"), "去登录").Clicked() {
-					a.openLogin()
+					a.openActiveLogin()
 				}
 			})
 		})
 		return
 	}
 
-	if wrap.FileDragOver() {
-		wrap.Border(1.5, pal.accent)
-	}
-	if files := wrap.DroppedFiles(); len(files) > 0 && !d.sending {
-		a.attachCommentImagePath(sh, files[0])
+	allowImage := !a.isTikTok()
+	if allowImage {
+		if wrap.FileDragOver() {
+			wrap.Border(1.5, pal.accent)
+		}
+		if files := wrap.DroppedFiles(); len(files) > 0 && !d.sending {
+			a.attachCommentImagePath(sh, files[0])
+		}
 	}
 
 	wrap.Children(func() {
@@ -273,7 +285,7 @@ func (a *app) commentComposer(c *ui.Context, sh *sheet) {
 				FontSize(13).TextColor(pal.text).Placeholder(placeholder).PlaceholderColor(pal.faint).
 				Label("评论内容").
 				OnPaste(func(pasted string) bool {
-					if pasted != "" || d.sending {
+					if !allowImage || pasted != "" || d.sending {
 						return false
 					}
 					raw := readClipboardImage()
@@ -313,22 +325,24 @@ func (a *app) commentComposer(c *ui.Context, sh *sheet) {
 			})
 			if emojiBtn.Clicked() {
 				d.emojiOpen = !d.emojiOpen
-				if d.emojiOpen {
+				if d.emojiOpen && !a.isTikTok() {
 					a.ensureEmojis()
 				}
 			}
 
-			imgBtn := ui.ButtonBase(c.Key("image-btn")).Size(28, 28).Radius(7).Center().FocusRing(false).Label("添加图片").Disabled(d.sending || d.picking)
-			imgColor := onOff(d.image != nil, pal.accent, onOff(imgBtn.Hovered(), pal.text, pal.muted))
-			if d.image != nil || imgBtn.Hovered() {
-				imgBtn.Background(pal.bg.Alpha(0.5))
-			}
-			imgBtn.Children(func() {
-				ui.Icon(c, iconImage).Size(17, 17).TextColor(imgColor)
-			})
-			if imgBtn.Clicked() {
-				d.emojiOpen = false
-				a.pickCommentImage(sh)
+			if allowImage {
+				imgBtn := ui.ButtonBase(c.Key("image-btn")).Size(28, 28).Radius(7).Center().FocusRing(false).Label("添加图片").Disabled(d.sending || d.picking)
+				imgColor := onOff(d.image != nil, pal.accent, onOff(imgBtn.Hovered(), pal.text, pal.muted))
+				if d.image != nil || imgBtn.Hovered() {
+					imgBtn.Background(pal.bg.Alpha(0.5))
+				}
+				imgBtn.Children(func() {
+					ui.Icon(c, iconImage).Size(17, 17).TextColor(imgColor)
+				})
+				if imgBtn.Clicked() {
+					d.emojiOpen = false
+					a.pickCommentImage(sh)
+				}
 			}
 
 			sendBtn := ui.ButtonBase(c.Key("send-btn")).Height(28).PaddingX(11).Radius(7).Center().FocusRing(false).
@@ -348,9 +362,35 @@ func (a *app) commentComposer(c *ui.Context, sh *sheet) {
 
 		if d.emojiOpen {
 			ui.PopoverBase(c.Key("comment-emoji-popover"), emojiBtn, &d.emojiOpen, func(panel ui.Element) {
+				popLabel := onOff(a.isTikTok(), "常用表情", "抖音表情")
 				panel.AttachTo(wrap, ui.AnchorTop, ui.AnchorBottom).Margin(8, 0, 8, 0).
 					Width(336).Height(224).Padding(10).Radius(12).
-					Background(pal.raised).Border(1, pal.hover).Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.16)).Label("抖音表情")
+					Background(pal.raised).Border(1, pal.hover).Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.16)).Label(popLabel)
+				if a.isTikTok() {
+					ui.Scroll(c.Key("emoji-grid-scroll")).Fill().Children(func() {
+						const cols = 8
+						ui.Column(c).Gap(6).Children(func() {
+							for rowStart := 0; rowStart < len(tiktokUnicodeEmojis); rowStart += cols {
+								end := min(rowStart+cols, len(tiktokUnicodeEmojis))
+								ui.Row(c.Key(rowStart)).Gap(4).AlignItems(ui.Center).Children(func() {
+									for _, em := range tiktokUnicodeEmojis[rowStart:end] {
+										eb := ui.ButtonBase(c.Key(em)).Size(34, 34).Radius(7).Center().FocusRing(false).Label(em)
+										if eb.Hovered() {
+											eb.Background(pal.hover)
+										}
+										eb.Children(func() {
+											ui.Text(c, em).FontSize(18).TextColor(pal.strong).SingleLine()
+										})
+										if eb.Clicked() {
+											a.insertCommentEmoji(sh, em)
+										}
+									}
+								})
+							}
+						})
+					})
+					return
+				}
 				list := a.orderedEmojis()
 				if len(list) == 0 {
 					ui.Box(c).Fill().Center().Children(func() {
@@ -552,7 +592,7 @@ func (a *app) sendComment(sh *sheet) {
 		return
 	}
 	if !a.signedIn {
-		a.openLogin()
+		a.openActiveLogin()
 		return
 	}
 	publish := a.publishComment
@@ -638,6 +678,15 @@ func (a *app) sendComment(sh *sheet) {
 			sh.draft.sending = false
 			if err != nil {
 				switch {
+				case errors.Is(err, tiktok.ErrNeedLogin):
+					a.signedIn = false
+					a.openTikTokLogin()
+					sh.draft.err = err.Error()
+				case errors.Is(err, tiktok.ErrVerify):
+					sh.draft.err = "TikTok 需要完成验证，验证后请再点发送"
+					a.verifyTikTok(videoID, func() {
+						sh.draft.err = "验证已完成，请再点发送"
+					})
 				case errors.Is(err, dy.ErrNeedLogin):
 					a.signedIn = false
 					a.openLogin()

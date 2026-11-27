@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"douyin/internal/dy"
+	"douyin/internal/platform"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -36,6 +38,11 @@ type settings struct {
 	HGDirect       *bool   `json:"hgDirect,omitempty"`
 	HGSignerURL    string  `json:"hgSignerURL,omitempty"`
 	HGSignerToken  string  `json:"hgSignerToken,omitempty"`
+	Platform       string  `json:"platform,omitempty"`     // "", "douyin", or "tiktok"
+	ProxyURL       string  `json:"proxyUrl,omitempty"`     // optional http(s):// or socks5:// proxy
+	TikTokRegion   string  `json:"tiktokRegion,omitempty"` // e.g. "US", "JP", "GB"
+	Subtitles      *bool   `json:"subtitles,omitempty"`    // nil or true shows WebVTT subtitles on TikTok
+	SubTranslate   *bool   `json:"subTranslate,omitempty"` // nil or true translates non-Chinese subtitles to Chinese
 }
 
 func (s settings) equal(other settings) bool {
@@ -45,6 +52,16 @@ func (s settings) equal(other settings) bool {
 	}
 	if other.HGDirect != nil {
 		d2 = *other.HGDirect
+	}
+	eqBoolPtr := func(a, b *bool, def bool) bool {
+		va, vb := def, def
+		if a != nil {
+			va = *a
+		}
+		if b != nil {
+			vb = *b
+		}
+		return va == vb
 	}
 	return s.AutoNext == other.AutoNext &&
 		s.Danmaku == other.Danmaku &&
@@ -64,7 +81,12 @@ func (s settings) equal(other settings) bool {
 		s.Mode == other.Mode &&
 		d1 == d2 &&
 		s.HGSignerURL == other.HGSignerURL &&
-		s.HGSignerToken == other.HGSignerToken
+		s.HGSignerToken == other.HGSignerToken &&
+		s.Platform == other.Platform &&
+		s.ProxyURL == other.ProxyURL &&
+		s.TikTokRegion == other.TikTokRegion &&
+		eqBoolPtr(s.Subtitles, other.Subtitles, true) &&
+		eqBoolPtr(s.SubTranslate, other.SubTranslate, true)
 }
 
 // defaultSettings are a first launch's. HGDirect stays nil so unmarshaling
@@ -111,6 +133,15 @@ func (a *app) loadSettings(file string) {
 	a.applyThemeSource()
 	a.setVolume(s.Volume, s.Muted)
 	a.setSpeed(s.PlaybackSpeed)
+	a.platform = platform.Parse(s.Platform)
+	a.subtitlesOff = s.Subtitles != nil && !*s.Subtitles
+	a.subTranslateOff = s.SubTranslate != nil && !*s.SubTranslate
+	a.applyTikTokRegion(s.TikTokRegion)
+	if s.ProxyURL != "" {
+		if err := a.applyProxySetting(s.ProxyURL); err != nil {
+			a.toast = "代理设置无效：" + err.Error()
+		}
+	}
 	a.settingsFile, a.saved = file, a.current()
 }
 
@@ -118,6 +149,23 @@ func (a *app) loadSettings(file string) {
 func (a *app) current() settings {
 	hgDirect := a.hgDirect
 	dm := a.danmakuStyle()
+	plat := ""
+	if a.activePlatform() == platform.TikTok {
+		plat = string(platform.TikTok)
+	}
+	region := a.ttRegion
+	if region == "" || region == "US" {
+		region = ""
+	}
+	var subs, subTr *bool
+	if a.subtitlesOff {
+		f := false
+		subs = &f
+	}
+	if a.subTranslateOff {
+		f := false
+		subTr = &f
+	}
 	return settings{
 		AutoNext:       a.autoNext,
 		Danmaku:        !a.dmOff,
@@ -138,6 +186,11 @@ func (a *app) current() settings {
 		HGDirect:       &hgDirect,
 		HGSignerURL:    strings.TrimSpace(a.hgSignerURL),
 		HGSignerToken:  strings.TrimSpace(a.hgSignerToken),
+		Platform:       plat,
+		ProxyURL:       a.proxyURL,
+		TikTokRegion:   region,
+		Subtitles:      subs,
+		SubTranslate:   subTr,
 	}
 }
 
@@ -321,6 +374,22 @@ func (a *app) settingsBody(c *ui.Context) {
 				}
 			})
 		})
+		if a.caps().Subtitles {
+			subOn := !a.subtitlesOff
+			trOn := !a.subTranslateOff
+			group("字幕", func() {
+				row("显示字幕", "自动加载并显示视频多语言 WebVTT 字幕", func() {
+					if ui.Switch(c.Key("subtitles"), &subOn).Label("显示字幕开关").Changed() {
+						a.subtitlesOff = !subOn
+					}
+				})
+				row("字幕自动译为中文", "外语字幕自动翻译为中文显示", func() {
+					if ui.Switch(c.Key("subTranslate"), &trOn).Label("字幕自动译为中文开关").Changed() {
+						a.subTranslateOff = !trOn
+					}
+				})
+			})
+		}
 	case settingsDanmaku:
 		on := !a.dmOff
 		group("", func() {
@@ -388,16 +457,74 @@ func (a *app) settingsBody(c *ui.Context) {
 		if a.signedIn {
 			who = a.me.Name
 		}
+		acctLabel := onOff(a.isTikTok(), "TikTok 账号", "抖音账号")
 		group("", func() {
-			row("抖音账号", who, func() {
+			row(acctLabel, who, func() {
 				if !a.signedIn {
-					if ui.Button(c.Key("login"), "扫码登录").Clicked() {
+					loginLabel := onOff(a.isTikTok(), "登录 TikTok", "扫码登录")
+					if ui.Button(c.Key("login"), loginLabel).Clicked() {
 						a.settingsOpen = false
-						a.openLogin()
+						if a.isTikTok() {
+							a.openTikTokLogin()
+						} else {
+							a.openLogin()
+						}
 					}
 				} else if ui.Button(c.Key("logout"), "退出登录").Clicked() {
 					a.settingsOpen = false
-					a.logout()
+					if a.isTikTok() && a.tt != nil {
+						_ = a.tt.Logout()
+						clearTikTokWebCookies()
+						a.signedIn = false
+						a.me = dy.User{}
+						a.mine = nil
+						a.mineTab = ""
+						a.ttWeb.destroy()
+						a.toast = "已退出 TikTok"
+					} else {
+						a.logout()
+					}
+				}
+			})
+		})
+		platChoice := a.activePlatform().DisplayName()
+		platChoices := []string{"抖音", "TikTok"}
+		regionChoice := a.ttRegion
+		if regionChoice == "" {
+			regionChoice = "US"
+		}
+		regionChoices := []string{"US", "JP", "GB", "SG", "KR", "TW"}
+		group("平台与网络", func() {
+			row("当前平台", "应用内即时切换抖音与 TikTok", func() {
+				if ui.Select(c.Key("platform"), &platChoice, platChoices).Width(114).Label("当前平台").Changed() {
+					if platChoice == "TikTok" {
+						a.switchPlatform(platform.TikTok)
+					} else {
+						a.switchPlatform(platform.Douyin)
+					}
+				}
+			})
+			row("网络代理", "留空跟随系统，支持 http:// 与 socks5://", func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.TextInput(c.Key("proxyUrl"), &a.proxyDraft).Width(176).Height(28).
+						Placeholder("http://127.0.0.1:7890").Label("网络代理")
+					if ui.Button(c.Key("proxyApply"), "应用").Clicked() {
+						if err := a.applyProxySetting(a.proxyDraft); err != nil {
+							a.toast = "代理格式错误：" + err.Error()
+						} else if a.proxyURL == "" {
+							a.toast = "已恢复系统代理"
+						} else {
+							a.toast = "代理已生效：" + a.proxyURL
+						}
+					}
+				})
+			})
+			row("TikTok 区域", "设置请求语言与地区提示", func() {
+				if ui.Select(c.Key("ttRegion"), &regionChoice, regionChoices).Width(92).Label("TikTok 区域").Changed() {
+					a.applyTikTokRegion(regionChoice)
+					if a.isTikTok() && a.ttFeed != nil {
+						a.refresh(a.ttFeed)
+					}
 				}
 			})
 		})

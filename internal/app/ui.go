@@ -17,6 +17,7 @@ import (
 
 	"douyin/internal/dy"
 	"douyin/internal/media"
+	"douyin/internal/tiktok"
 )
 
 // The window is laid out as Douyin's own, with less in it: a floating dock
@@ -56,9 +57,9 @@ var appFont = func() string {
 }()
 
 var (
-	white      = ui.RGB(255, 255, 255)
-	baseDark   = *ui.DarkTheme()
-	baseLight  = *ui.LightTheme()
+	white     = ui.RGB(255, 255, 255)
+	baseDark  = *ui.DarkTheme()
+	baseLight = *ui.LightTheme()
 )
 
 func (a *app) view(c *ui.Context) {
@@ -134,6 +135,74 @@ func (a *app) view(c *ui.Context) {
 		if a.web.v != nil && a.web.layout && !a.loginOpen { // the login lays it out itself
 			// Laid out for a script, under the app: the rows paint over it.
 			ui.WebView(c.Key("bg-web"), a.web.v).Absolute().Top(0).Left(0).Right(0).Bottom(0).ZIndex(-2)
+		}
+		if a.ttWeb.v != nil && a.ttWeb.layout {
+			title := a.ttWeb.title
+			if title == "" {
+				title = "TikTok"
+			}
+			ui.Column(c.Key("tt-web-overlay")).Absolute().Top(topBarHeight).Left(0).Right(0).Bottom(0).
+				Background(pal.popover).ZIndex(40).Children(func() {
+				ui.Row(c.Key("tt-web-bar")).Height(44).PaddingX(16).Gap(8).AlignItems(ui.Center).
+					Background(pal.raised).Children(func() {
+					ui.Text(c, title).FontSize(13.5).FontWeight(600).TextColor(pal.strong).Grow(1).SingleLine()
+					if a.ttWeb.login {
+						if ui.Button(c.Key("tt-login-browser"), "浏览器通行密钥登录").Clicked() {
+							a.ttWeb.importOpen = true
+							a.ttWeb.importErr = ""
+							if err := mygo.Shell.OpenExternal(tiktokLoginURL); err != nil {
+								a.toast = "打不开浏览器：" + err.Error()
+							} else {
+								a.toast = "已在浏览器打开 TikTok，登录后点「从剪贴板导入」"
+							}
+						}
+						if ui.Button(c.Key("tt-login-import"), "导入 Cookie").Clicked() {
+							a.ttWeb.importOpen = !a.ttWeb.importOpen
+							a.ttWeb.importErr = ""
+						}
+						if ui.Button(c.Key("tt-login-all"), "全部方式").Clicked() {
+							a.ttWeb.importOpen = false
+							_ = a.ttWeb.open(tiktokLoginURL)
+						}
+						if ui.Button(c.Key("tt-login-email"), "密码登录").Clicked() {
+							a.ttWeb.importOpen = false
+							_ = a.ttWeb.open(tiktokLoginEmailURL)
+						}
+						if ui.Button(c.Key("tt-login-qr"), "二维码").Clicked() {
+							a.ttWeb.importOpen = false
+							_ = a.ttWeb.open(tiktokLoginQRURL)
+						}
+					}
+					if ui.Button(c.Key("tt-web-close"), "关闭").Clicked() {
+						a.ttWeb.layout = false
+						a.ttWeb.login = false
+						a.ttWeb.importOpen = false
+						a.ttWeb.title = ""
+					}
+				})
+				if a.ttWeb.login && a.ttWeb.importOpen {
+					ui.Column(c.Key("tt-cookie-import")).Padding(12, 16).Gap(8).Background(pal.popover).Children(func() {
+						ui.Text(c, "浏览器通行密钥登录步骤：1. 在外部浏览器登录 tiktok.com  →  2. 按 F12 打开「网络(Network)」右键任意 tiktok.com 请求选「复制为 cURL」（或用 Cookie-Editor 导出 JSON）  →  3. 点下方「从剪贴板导入」即可").
+							FontSize(12).TextColor(pal.muted)
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+							ui.TextInput(c.Key("tt-cookie-input"), &a.ttWeb.cookieDraft).Grow(1).Height(32).
+								Placeholder("粘贴 Copy as cURL / Cookie-Editor JSON / Cookie 请求头").Label("TikTok Cookie")
+							if ui.Button(c.Key("tt-cookie-paste"), "从剪贴板导入").Disabled(a.ttWeb.importing).Clicked() {
+								clip := mygo.Clipboard.ReadText()
+								a.ttWeb.cookieDraft = clip
+								a.importTikTokCookies(clip)
+							}
+							if ui.Button(c.Key("tt-cookie-apply"), "确认导入").Disabled(a.ttWeb.importing).Clicked() {
+								a.importTikTokCookies(a.ttWeb.cookieDraft)
+							}
+						})
+						if a.ttWeb.importErr != "" {
+							ui.Text(c, a.ttWeb.importErr).FontSize(12).TextColor(pal.accent)
+						}
+					})
+				}
+				ui.WebView(c.Key("tt-web"), a.ttWeb.v).Grow(1)
+			})
 		}
 		a.mainVideo.background(c, pal.bg)
 		if a.theater && p.plays() { // 网页全屏: the video filling the window, its comments beside it once opened
@@ -409,9 +478,13 @@ func (a *app) profileHeader(c *ui.Context, u dy.User, isSelf bool) {
 			})
 			var ids []string
 			if u.Handle != "" {
-				ids = append(ids, "抖音号："+u.Handle)
+				if a.isTikTok() {
+					ids = append(ids, "@"+u.Handle)
+				} else {
+					ids = append(ids, "抖音号："+u.Handle)
+				}
 			}
-			if u.Place != "" {
+			if u.Place != "" && a.caps().Location {
 				ids = append(ids, "IP属地："+u.Place)
 			}
 			if len(ids) > 0 {
@@ -842,7 +915,7 @@ func (a *app) stage(c *ui.Context, p *page) {
 				}
 				ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(10).Children(func() {
 					ui.Icon(c, iconHeadphones).Size(48, 48).TextColor(white)
-					ui.Text(c, "听抖音中").FontSize(15).FontWeight(600).TextColor(white)
+					ui.Text(c, onOff(a.isTikTok(), "听音频中", "听抖音中")).FontSize(15).FontWeight(600).TextColor(white)
 				})
 			} else if s.vp != nil && a.pipOn { // playing in 小窗: a player shows in one place at a time
 				if bmp := a.img.get(s.v.Poster); bmp != nil {
@@ -882,6 +955,18 @@ func (a *app) stage(c *ui.Context, p *page) {
 				}
 				a.loadDanmaku(s, at)
 			}
+		}
+		if s.v.Live == nil {
+			a.ensureSubtitle(s)
+			subAt := at
+			if s.vp == nil {
+				subAt = s.at()
+			}
+			subBottom := float32(44 + 64)
+			if !wantControls {
+				subBottom = 72
+			}
+			a.subtitleOverlay(c, s, subAt, subBottom)
 		}
 		if !a.clear && (s.v.Live == nil || !a.paused) {
 			isLive := s.v.Live != nil && a.liveChat != nil
@@ -1012,6 +1097,9 @@ func (a *app) playbackStatus(c *ui.Context, s *slot) {
 	}
 	ui.Column(c.Key("playback-status")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Center().Gap(12).PassThrough().Children(func() {
 		ui.Text(c, msg).FontSize(14).TextColor(white).PassThrough()
+		if a.isTikTok() && err != nil {
+			ui.Text(c, err.Error()).FontSize(11.5).TextColor(vid.muted).PassThrough()
+		}
 		if ui.Button(c.Key("retry-video"), "重新加载").Clicked() {
 			s.liveFreshAt, s.liveFrom = time.Time{}, 0
 			a.release(s)
@@ -1060,7 +1148,34 @@ func (a *app) caption(c *ui.Context, p *page, s *slot, alpha float32, active boo
 			}
 			ui.Text(c, "· "+when).FontSize(12.5).TextColor(ui.RGBA(255, 255, 255, 0.6))
 		})
-		ui.Text(c, s.v.Desc).FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.88)).MaxLines(2).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.4))
+		descText := s.v.Desc
+		if a.isTikTok() && s.descShowTrans && s.descTrans != "" {
+			descText = s.descTrans
+		}
+		ui.Text(c, descText).FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.88)).MaxLines(2).TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.4))
+		if a.isTikTok() && strings.TrimSpace(s.v.Desc) != "" && !tiktok.IsMostlyChinese(s.v.Desc) {
+			label := "查看翻译"
+			switch {
+			case s.descTranslating:
+				label = "翻译中…"
+			case s.descShowTrans && s.descTrans != "":
+				label = "查看原文"
+			}
+			tb := ui.ButtonBase(c.Key("translate-desc")).AlignSelf(ui.Start).FocusRing(false).Label(label).Disabled(s.descTranslating)
+			if tb.Hovered() {
+				hovered = true
+			}
+			tb.Children(func() {
+				t := ui.Text(c, label).FontSize(12.5).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.78)).
+					TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.4))
+				if tb.Hovered() {
+					t.Underline()
+				}
+			})
+			if tb.Clicked() {
+				a.toggleDescTranslation(s)
+			}
+		}
 		if m := s.v.Mix; m.ID != "" {
 			text := "合集 · " + m.Name
 			if m.Episode > 0 {
@@ -1150,16 +1265,18 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 					shown = time.Duration(float64(of) * float64(a.dragAt))
 				}
 				ui.Text(c, clock(shown)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.85)).Margin(0, 6, 0, 2).SingleLine()
-				if show[barDanmaku] && chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
-					a.dmOff = !a.dmOff
-				}
-				if show[barDanmakuSet] {
-					a.danmakuSettingsButton(c, "dm-set", &a.dmSettingsOpen, func() {
-						a.qualityOpen, a.speedOpen, a.volumeOpen = false, false, false
-					})
-				}
-				if show[barInput] {
-					a.danmakuInput(c, s)
+				if a.caps().Danmaku {
+					if show[barDanmaku] && chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
+						a.dmOff = !a.dmOff
+					}
+					if show[barDanmakuSet] {
+						a.danmakuSettingsButton(c, "dm-set", &a.dmSettingsOpen, func() {
+							a.qualityOpen, a.speedOpen, a.volumeOpen = false, false, false
+						})
+					}
+					if show[barInput] {
+						a.danmakuInput(c, s)
+					}
 				}
 			}
 			ui.Box(c).Grow(1)
@@ -1173,6 +1290,9 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 			}
 			if show[barQuality] && (!live || len(s.v.Qualities) > 0) {
 				a.qualityMenu(c, s)
+			}
+			if !live {
+				a.subtitleMenu(c, s)
 			}
 			if !live && show[barSpeed] {
 				a.speedMenu(c)
@@ -1610,8 +1730,8 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height, alpha float32, activ
 				busy := a.followBusy[s.v.AuthorID]
 				followed := status > 0
 				const badge = float32(22)
-				fb := ui.ButtonBase(c.Key("follow:" + s.v.AuthorID)).Absolute().
-					Left((avatarSize - badge) / 2).Bottom(0).Size(badge, badge).Radius(badge / 2).
+				fb := ui.ButtonBase(c.Key("follow:"+s.v.AuthorID)).Absolute().
+					Left((avatarSize-badge)/2).Bottom(0).Size(badge, badge).Radius(badge / 2).
 					Center().FocusRing(false).Label(onOff(followed, "取消关注作者", "关注作者"))
 				if followed {
 					fb.Background(ui.RGBA(34, 38, 48, 0.94)).Border(1.5, ui.RGBA(255, 255, 255, 0.75)).Children(func() {
@@ -1674,7 +1794,7 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height, alpha float32, activ
 		} else {
 			shares = "分享"
 		}
-		if s.v.Live != nil { // a room's link is all there is to share
+		if s.v.Live != nil || a.isTikTok() { // a room's link is all there is to share
 			if action("share", iconShare, "分享：复制链接", shares, white).Clicked() {
 				a.copyLink(s.v)
 			}
@@ -1689,7 +1809,8 @@ func (a *app) rail(c *ui.Context, p *page, s *slot, height, alpha float32, activ
 		if a.listen {
 			color = vid.accent
 		}
-		if action("listen", iconHeadphones, "听抖音", "听抖音", color).Clicked() {
+		listenLabel := onOff(a.isTikTok(), "听音频", "听抖音")
+		if action("listen", iconHeadphones, listenLabel, listenLabel, color).Clicked() {
 			a.listen = !a.listen
 		}
 		more := action("more", iconMore, "更多", "", white)
@@ -1851,10 +1972,23 @@ func videoURL(v dy.Video) string {
 	return "https://www.douyin.com/video/" + v.ID
 }
 
+func (a *app) videoURL(v dy.Video) string {
+	if a.isTikTok() {
+		if v.Live != nil {
+			if v.Live.WebRID != "" {
+				return "https://www.tiktok.com/@" + v.Live.WebRID + "/live"
+			}
+			return "https://www.tiktok.com/live"
+		}
+		return "https://www.tiktok.com/@/video/" + v.ID
+	}
+	return videoURL(v)
+}
+
 // copyLink puts v's link on the clipboard, as Douyin's share does with no app
 // to share to.
 func (a *app) copyLink(v dy.Video) {
-	if err := copyText(videoURL(v)); err != nil {
+	if err := copyText(a.videoURL(v)); err != nil {
 		a.toast = "复制失败：" + err.Error()
 		return
 	}
@@ -1886,11 +2020,13 @@ func (a *app) commentPanel(c *ui.Context, sh *sheet) {
 			if tab("评论 "+count(sh.total), !sh.related) {
 				sh.related = false
 			}
-			if tab("相关推荐", sh.related) {
-				sh.related = true
-				sh.draft.emojiOpen = false
-				if len(sh.rel) == 0 {
-					a.moreRelated()
+			if !a.isTikTok() {
+				if tab("相关推荐", sh.related) {
+					sh.related = true
+					sh.draft.emojiOpen = false
+					if len(sh.rel) == 0 {
+						a.moreRelated()
+					}
 				}
 			}
 			ui.Box(c).Grow(1)
@@ -2011,7 +2147,7 @@ func (a *app) commentAvatar(c *ui.Context, cm dy.Comment, size float32) {
 		a.avatar(c, pal, cm.Avatar, cm.Author, size)
 		return
 	}
-	b := ui.ButtonBase(c.Key("avatar:" + cm.ID)).Size(size, size).Radius(size / 2).Clip().FocusRing(false).
+	b := ui.ButtonBase(c.Key("avatar:"+cm.ID)).Size(size, size).Radius(size / 2).Clip().FocusRing(false).
 		Cursor(ui.CursorPointer).Label("查看 " + cm.Author + " 主页")
 	b.Children(func() {
 		a.avatar(c, pal, cm.Avatar, cm.Author, size)
@@ -2538,48 +2674,48 @@ func fillIcon(paths string) *ui.SVG {
 const heartPath = `<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>`
 
 var (
-	iconPlay       = fillIcon(`<path d="M7 4.6v14.8c0 .8.9 1.3 1.6.9l12-7.4c.6-.4.6-1.3 0-1.7l-12-7.4C7.9 3.3 7 3.8 7 4.6z"/>`)
-	iconPause      = fillIcon(`<rect x="5.5" y="4" width="4.5" height="16" rx="1.4"/><rect x="14" y="4" width="4.5" height="16" rx="1.4"/>`)
-	iconHeartFill  = fillIcon(heartPath)
-	iconHeart      = strokeIcon(heartPath)
-	iconStar       = fillIcon(`<path d="M12 2.8l2.8 5.7 6.3.9-4.6 4.4 1.1 6.3L12 17.1l-5.6 3 1.1-6.3L2.9 9.4l6.3-.9z"/>`)
-	iconSearch     = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>`)
-	iconGrid       = strokeIcon(`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>`)
-	iconSpark      = strokeIcon(`<path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m6 6 2.5 2.5"/><path d="m15.5 15.5 2.5 2.5"/><path d="m6 18 2.5-2.5"/><path d="m15.5 8.5 2.5-2.5"/>`)
-	iconBack       = strokeIcon(`<path d="m15 18-6-6 6-6"/>`)
-	iconComment    = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
-	iconDownload   = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
-	iconCheck      = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
-	iconCompass    = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>`)
-	iconFollow     = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6 1.3 0 2.5.3 3.5.8"/><path d="m15 17 2 2 4-4"/>`)
-	iconFriends    = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M16 4.2a4 4 0 0 1 0 7.6"/><path d="M19 14.5c1.8.9 3 2.9 3 5.5"/>`)
-	iconSettings   = strokeIcon(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`)
-	iconUser       = strokeIcon(`<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>`)
-	iconLive       = strokeIcon(`<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/>`)
-	iconDrama      = strokeIcon(`<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m10 9 5 3-5 3z"/>`)
-	iconLater      = strokeIcon(`<path d="M4 6h12"/><path d="M4 12h8"/><path d="M4 18h6"/><circle cx="17" cy="16" r="4"/><path d="M17 14.5V16l1 1"/>`)
-	iconLaterOn    = strokeIcon(`<path d="M4 6h12"/><path d="M4 12h8"/><path d="M4 18h6"/><path d="m14 16 2 2 4-4"/>`)
-	iconPip        = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="12" width="7" height="5" rx="1"/>`)
-	iconVolume     = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>`)
-	iconMuted      = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>`)
-	iconFillWindow = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10V8h2"/><path d="M16 14v2h-2"/>`)
-	iconUnfill     = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 8v2H8"/><path d="M14 16v-2h2"/>`)
-	iconExpand     = strokeIcon(`<path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>`)
-	iconShrink     = strokeIcon(`<path d="M9 4v5H4"/><path d="M15 4v5h5"/><path d="M9 20v-5H4"/><path d="M15 20v-5h5"/>`)
-	iconLayers     = strokeIcon(`<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>`)
-	iconShare      = fillIcon(`<path d="M13.5 4.5v3.6C7.2 8.8 3.6 12.7 3 19.5c2.3-3.2 5.4-4.9 10.5-5v3.9L21 11z"/>`)
-	iconHeadphones = strokeIcon(`<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>`)
-	iconMore       = fillIcon(`<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>`)
-	iconLink       = strokeIcon(`<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>`)
-	iconGlobe      = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>`)
-	iconChat       = strokeIcon(`<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`)
-	iconBell       = strokeIcon(`<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>`)
-	iconClose      = strokeIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
-	iconNext       = strokeIcon(`<path d="m9 18 6-6-6-6"/>`)
-	iconZoomIn     = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6"/><path d="M8 11h6"/>`)
-	iconZoomOut    = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/>`)
-	iconCopy       = strokeIcon(`<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`)
-	iconSmile      = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.5 2.2 2.2 3.5 2.2s2.5-.7 3.5-2.2"/><circle cx="9" cy="9.5" r=".8" fill="currentColor"/><circle cx="15" cy="9.5" r=".8" fill="currentColor"/>`)
+	iconPlay        = fillIcon(`<path d="M7 4.6v14.8c0 .8.9 1.3 1.6.9l12-7.4c.6-.4.6-1.3 0-1.7l-12-7.4C7.9 3.3 7 3.8 7 4.6z"/>`)
+	iconPause       = fillIcon(`<rect x="5.5" y="4" width="4.5" height="16" rx="1.4"/><rect x="14" y="4" width="4.5" height="16" rx="1.4"/>`)
+	iconHeartFill   = fillIcon(heartPath)
+	iconHeart       = strokeIcon(heartPath)
+	iconStar        = fillIcon(`<path d="M12 2.8l2.8 5.7 6.3.9-4.6 4.4 1.1 6.3L12 17.1l-5.6 3 1.1-6.3L2.9 9.4l6.3-.9z"/>`)
+	iconSearch      = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>`)
+	iconGrid        = strokeIcon(`<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>`)
+	iconSpark       = strokeIcon(`<path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m6 6 2.5 2.5"/><path d="m15.5 15.5 2.5 2.5"/><path d="m6 18 2.5-2.5"/><path d="m15.5 8.5 2.5-2.5"/>`)
+	iconBack        = strokeIcon(`<path d="m15 18-6-6 6-6"/>`)
+	iconComment     = fillIcon(`<path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.6 1.4 4.9 3.6 6.5L5 21.5l4-2c.9.2 1.9.3 3 .3 5.5 0 10-3.8 10-8.5S17.5 3 12 3z"/>`)
+	iconDownload    = strokeIcon(`<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`)
+	iconCheck       = strokeIcon(`<path d="M20 6 9 17l-5-5"/>`)
+	iconCompass     = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>`)
+	iconFollow      = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6 1.3 0 2.5.3 3.5.8"/><path d="m15 17 2 2 4-4"/>`)
+	iconFriends     = strokeIcon(`<circle cx="9" cy="8" r="4"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M16 4.2a4 4 0 0 1 0 7.6"/><path d="M19 14.5c1.8.9 3 2.9 3 5.5"/>`)
+	iconSettings    = strokeIcon(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`)
+	iconUser        = strokeIcon(`<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>`)
+	iconLive        = strokeIcon(`<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/>`)
+	iconDrama       = strokeIcon(`<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m10 9 5 3-5 3z"/>`)
+	iconLater       = strokeIcon(`<path d="M4 6h12"/><path d="M4 12h8"/><path d="M4 18h6"/><circle cx="17" cy="16" r="4"/><path d="M17 14.5V16l1 1"/>`)
+	iconLaterOn     = strokeIcon(`<path d="M4 6h12"/><path d="M4 12h8"/><path d="M4 18h6"/><path d="m14 16 2 2 4-4"/>`)
+	iconPip         = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="12" width="7" height="5" rx="1"/>`)
+	iconVolume      = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>`)
+	iconMuted       = strokeIcon(`<path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>`)
+	iconFillWindow  = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10V8h2"/><path d="M16 14v2h-2"/>`)
+	iconUnfill      = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 8v2H8"/><path d="M14 16v-2h2"/>`)
+	iconExpand      = strokeIcon(`<path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>`)
+	iconShrink      = strokeIcon(`<path d="M9 4v5H4"/><path d="M15 4v5h5"/><path d="M9 20v-5H4"/><path d="M15 20v-5h5"/>`)
+	iconLayers      = strokeIcon(`<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>`)
+	iconShare       = fillIcon(`<path d="M13.5 4.5v3.6C7.2 8.8 3.6 12.7 3 19.5c2.3-3.2 5.4-4.9 10.5-5v3.9L21 11z"/>`)
+	iconHeadphones  = strokeIcon(`<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>`)
+	iconMore        = fillIcon(`<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>`)
+	iconLink        = strokeIcon(`<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>`)
+	iconGlobe       = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>`)
+	iconChat        = strokeIcon(`<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`)
+	iconBell        = strokeIcon(`<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>`)
+	iconClose       = strokeIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
+	iconNext        = strokeIcon(`<path d="m9 18 6-6-6-6"/>`)
+	iconZoomIn      = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6"/><path d="M8 11h6"/>`)
+	iconZoomOut     = strokeIcon(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/>`)
+	iconCopy        = strokeIcon(`<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`)
+	iconSmile       = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.5 2.2 2.2 3.5 2.2s2.5-.7 3.5-2.2"/><circle cx="9" cy="9.5" r=".8" fill="currentColor"/><circle cx="15" cy="9.5" r=".8" fill="currentColor"/>`)
 	iconImage       = strokeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5-6 6-2-2-5 5"/>`)
 	iconPlus        = strokeIcon(`<path d="M12 5v14"/><path d="M5 12h14"/>`)
 	iconChevronDown = strokeIcon(`<path d="m6 9 6 6 6-6"/>`)
