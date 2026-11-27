@@ -26,6 +26,7 @@ type settings struct {
 	Quality        string  `json:"quality"`               // "" or 智能 for Douyin's pick
 	LiveQuality    string  `json:"liveQuality,omitempty"` // "" or 智能 for live default
 	Volume         float64 `json:"volume"`
+	PlaybackSpeed  float64 `json:"playbackSpeed"`
 	Muted          bool    `json:"muted"`
 	AutoUpdate     bool    `json:"autoUpdate"`
 	Theme          string  `json:"theme,omitempty"` // "", "light", or "dark"
@@ -52,6 +53,7 @@ func (s settings) equal(other settings) bool {
 		s.Quality == other.Quality &&
 		s.LiveQuality == other.LiveQuality &&
 		s.Volume == other.Volume &&
+		s.PlaybackSpeed == other.PlaybackSpeed &&
 		s.Muted == other.Muted &&
 		s.AutoUpdate == other.AutoUpdate &&
 		s.Theme == other.Theme &&
@@ -63,7 +65,7 @@ func (s settings) equal(other settings) bool {
 
 // defaultSettings are a first launch's. HGDirect stays nil so unmarshaling
 // cannot mutate a shared pointer and absent values default to true.
-var defaultSettings = settings{Danmaku: true, Volume: 1, AutoUpdate: true}
+var defaultSettings = settings{Danmaku: true, Volume: 1, PlaybackSpeed: 1, AutoUpdate: true}
 
 // settingsFile is where they are kept; "" without a configuration
 // directory, as in a test.
@@ -102,6 +104,7 @@ func (a *app) loadSettings(file string) {
 	a.hgSignerToken = strings.TrimSpace(s.HGSignerToken)
 	a.applyThemeSource()
 	a.setVolume(s.Volume, s.Muted)
+	a.setSpeed(s.PlaybackSpeed)
 	a.settingsFile, a.saved = file, a.current()
 }
 
@@ -119,6 +122,7 @@ func (a *app) current() settings {
 		Quality:        a.quality,
 		LiveQuality:    a.liveQuality,
 		Volume:         a.volume,
+		PlaybackSpeed:  a.playSpeed(),
 		Muted:          a.muted,
 		AutoUpdate:     a.upd.auto,
 		Theme:          a.orbit.theme,
@@ -281,6 +285,21 @@ func (a *app) settingsBody(c *ui.Context) {
 		}
 		group("", func() {
 			row("连播", "播完自动下一个", func() { ui.Switch(c.Key("autoNext"), &a.autoNext).Label("连播开关") })
+			row("全局倍速", "切换及重启后保留，直播除外", func() {
+				labels := make([]string, len(speeds))
+				for i, speed := range speeds {
+					labels[i] = fmt.Sprintf("%gx", speed)
+				}
+				label := fmt.Sprintf("%gx", a.playSpeed())
+				if ui.Select(c.Key("playbackSpeed"), &label, labels).Width(120).Label("全局倍速选择").Changed() {
+					for i, choice := range labels {
+						if label == choice {
+							a.setSpeed(speeds[i])
+							break
+						}
+					}
+				}
+			})
 			row("清晰度", "智能：按网速自动选择", func() {
 				if ui.Select(c.Key("quality"), &q, qualityChoices).Width(120).Label("清晰度").Changed() {
 					a.setQuality(q)

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +18,7 @@ func TestSettings(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "settings.json")
 	a := withRoots(&app{pages: []*page{stub("推荐", 1)}})
 	a.loadSettings(file)
-	if a.autoNext || a.dmOff || a.volume != 1 || !a.upd.auto {
+	if a.autoNext || a.dmOff || a.volume != 1 || a.speed != 1 || !a.upd.auto {
 		t.Fatalf("defaults: %+v", a.current())
 	}
 	tt := newTester(a)
@@ -24,7 +26,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !a.settingsOpen || !tt.HasText("播完自动下一个") || !tt.HasText("清晰度") {
+	if !a.settingsOpen || !tt.HasText("播完自动下一个") || !tt.HasText("清晰度") || !tt.HasText("全局倍速") {
 		t.Fatalf("dialog: %q", tt.Texts())
 	}
 	// Each page shows alone, chosen at the side.
@@ -43,6 +45,17 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
+	if err := tt.Click("全局倍速选择"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("2x"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.speed != 2 || math.Float64frombits(a.speedBits.Load()) != 2 {
+		t.Fatalf("global playback speed: %v", a.speed)
+	}
 	a.setVolume(0.4, false) // as the bar's volume
 	a.setDanmakuStyle(danmakuStyle{Speed: 0.75, Size: 21, Stroke: dmStrokeThick, Opacity: 0.75})
 	tt.Frame()
@@ -52,11 +65,65 @@ func TestSettings(t *testing.T) {
 	}
 	next := &app{}
 	next.loadSettings(file)
-	if !next.autoNext || next.volume != 0.4 || next.dmOff {
+	if !next.autoNext || next.volume != 0.4 || next.speed != 2 || next.dmOff {
 		t.Fatalf("read back: %+v", next.current())
 	}
 	if got := next.danmakuStyle(); got.Speed != 0.75 || got.Size != 21 || got.Stroke != dmStrokeThick || got.Opacity != 0.75 {
 		t.Fatalf("danmaku style read back: %+v", got)
+	}
+}
+
+// Changing only the bar's playback speed must save it for the next launch,
+// including returning to normal speed after choosing 2x.
+func TestPlaybackSpeedSettings(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "settings.json")
+	a := &app{}
+	a.loadSettings(file)
+	for _, speed := range speeds {
+		a.setSpeed(speed)
+		a.saveSettings()
+		next := &app{}
+		next.loadSettings(file)
+		if next.speed != speed || math.Float64frombits(next.speedBits.Load()) != speed {
+			t.Fatalf("speed %v read back as %v", speed, next.speed)
+		}
+	}
+}
+
+// Existing settings without a speed stay at 1x; invalid values cannot reach
+// the audio/video players, while a saved 2x setting is restored at startup.
+func TestLoadPlaybackSpeed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		json string
+		want float64
+	}{
+		{"legacy", `{}`, 1},
+		{"zero", `{"playbackSpeed":0}`, 1},
+		{"negative", `{"playbackSpeed":-2}`, 1},
+		{"unsupported", `{"playbackSpeed":3}`, 1},
+		{"double", `{"playbackSpeed":2}`, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "settings.json")
+			if err := os.WriteFile(file, []byte(tc.json), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a := &app{}
+			a.loadSettings(file)
+			if a.speed != tc.want || math.Float64frombits(a.speedBits.Load()) != tc.want || a.current().PlaybackSpeed != tc.want {
+				t.Fatalf("speed: got %v, want %v", a.speed, tc.want)
+			}
+		})
+	}
+	for _, speed := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		t.Run(fmt.Sprint(speed), func(t *testing.T) {
+			a := &app{}
+			a.setSpeed(speed)
+			if a.speed != 1 || math.Float64frombits(a.speedBits.Load()) != 1 {
+				t.Fatalf("invalid speed reached players: %v", a.speed)
+			}
+		})
 	}
 }
 

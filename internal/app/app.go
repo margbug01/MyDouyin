@@ -905,6 +905,9 @@ func (a *app) setPip(on bool) {
 
 // setSpeed plays every video at s, and the ones to come.
 func (a *app) setSpeed(s float64) {
+	if !slices.Contains(speeds, s) {
+		s = 1
+	}
 	a.speed = s
 	a.speedBits.Store(math.Float64bits(s))
 	for _, p := range a.pages {
@@ -2362,7 +2365,6 @@ func Run() error {
 	}
 	a.web.a = a
 	c.SetWeb(&a.web)
-	a.setSpeed(1)
 	a.loadSettings(settingsFile())
 	os.RemoveAll(a.dir) // leftovers of a crashed run
 	if os.Getenv("DY_LIVE_WRITE") != "" {
