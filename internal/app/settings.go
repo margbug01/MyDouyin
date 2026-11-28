@@ -20,6 +20,7 @@ import (
 // the login's cookies, and are saved as soon as one changes.
 type settings struct {
 	AutoNext       bool     `json:"autoNext"`
+	SkipLive       bool     `json:"skipLive,omitempty"`
 	Danmaku        bool     `json:"danmaku"`
 	DanmakuSpeed   float64  `json:"danmakuSpeed,omitempty"`
 	DanmakuSize    float32  `json:"danmakuSize,omitempty"`
@@ -65,6 +66,7 @@ func (s settings) equal(other settings) bool {
 		return va == vb
 	}
 	return s.AutoNext == other.AutoNext &&
+		s.SkipLive == other.SkipLive &&
 		s.Danmaku == other.Danmaku &&
 		s.DanmakuSpeed == other.DanmakuSpeed &&
 		s.DanmakuSize == other.DanmakuSize &&
@@ -119,6 +121,7 @@ func (a *app) loadSettings(file string) {
 		hgDirect = *s.HGDirect
 	}
 	a.autoNext, a.dmOff, a.quality, a.liveQuality, a.upd.auto = s.AutoNext, !s.Danmaku, s.Quality, s.LiveQuality, s.AutoUpdate
+	a.setSkipLive(s.SkipLive)
 	a.setDanmakuStyle(danmakuStyle{
 		Speed:   s.DanmakuSpeed,
 		Size:    s.DanmakuSize,
@@ -171,6 +174,7 @@ func (a *app) current() settings {
 	}
 	return settings{
 		AutoNext:       a.autoNext,
+		SkipLive:       a.skipLive,
 		Danmaku:        !a.dmOff,
 		DanmakuSpeed:   dm.Speed,
 		DanmakuSize:    dm.Size,
@@ -362,6 +366,12 @@ func (a *app) settingsBody(c *ui.Context) {
 		}
 		group("", func() {
 			row("连播", "播完自动下一个", func() { ui.Switch(c.Key("autoNext"), &a.autoNext).Label("连播开关") })
+			row("跳过直播", "推荐、关注等视频流自动跳过直播间（「直播」页不受影响）", func() {
+				on := a.skipLive
+				if ui.Switch(c.Key("skipLive"), &on).Label("跳过直播开关").Changed() {
+					a.setSkipLive(on)
+				}
+			})
 			row("全局倍速", "切换及重启后保留，直播除外", func() {
 				labels := make([]string, len(speeds))
 				for i, speed := range speeds {

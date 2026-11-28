@@ -1216,7 +1216,8 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 		return
 	}
 	live := s.v.Live != nil
-	show := barFit(w, live)
+	canSkipLive := live && len(a.pages) > 0 && !a.cur().isLiveOnly()
+	show := barFit(w, live, canSkipLive)
 	var of time.Duration
 	if s.ap != nil {
 		of = s.ap.Duration()
@@ -1289,6 +1290,10 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 					a.autoNext = !a.autoNext
 				}
 			}
+			if canSkipLive && show[barSkipLive] && chip(c.Key("skip-live"), "跳过直播", false).Clicked() {
+				a.setSkipLive(true)
+				a.toast = "已开启跳过直播，可在「设置 → 播放」关闭"
+			}
 			if show[barClear] && toggleChip(c.Key("clear"), "清屏", a.clear).Clicked() {
 				a.clear = !a.clear
 			}
@@ -1334,7 +1339,8 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 type barItem int
 
 const (
-	barSpeed barItem = iota
+	barSkipLive barItem = iota
+	barSpeed
 	barQuality
 	barDanmaku
 	barClear
@@ -1348,21 +1354,25 @@ const (
 
 // barWidth is how much of the bar each takes with the gap before it, as laid
 // out (measured 2026-11-24, the definition's widest, 1080P).
-var barWidth = [barItems]float32{51, 72, 51, 75, 75, 39, 39, 36, 270}
+var barWidth = [barItems]float32{76, 51, 72, 51, 75, 75, 39, 39, 36, 270}
 
 // barFit is which items a bar w wide shows: as many as fit, in barItem's
 // order, so that a narrower video, as with the comments open beside it,
 // drops the least needed first rather than pushing 全屏 out of sight. A
 // live stream's bar has its own few, and none of the rest; before the bar
 // is laid out (w 0) all show.
-func barFit(w float32, live bool) (show [barItems]bool) {
+func barFit(w float32, live, canSkipLive bool) (show [barItems]bool) {
 	base := float32(20 + 32 + 88 + 33 + 32 + 32 + 4*6 + 24) // padding, play, time, volume, the two fills, gaps, the least room between
 	if live {
 		base = 20 + 32 + 180 + 51 + 51 + 33 + 32 + 32 + 6*6 + 24 // play, the live line, its 弹幕 and 互动
 	}
 	room := w - base
 	for it := range barItems {
-		if live && it != barQuality && it != barClear && it != barPip && it != barDanmakuSet {
+		if live {
+			if it != barQuality && it != barClear && it != barPip && it != barDanmakuSet && !(canSkipLive && it == barSkipLive) {
+				continue
+			}
+		} else if it == barSkipLive {
 			continue
 		}
 		if w > 0 && room < barWidth[it] {

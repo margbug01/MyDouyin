@@ -45,7 +45,7 @@ func (a *app) ensureTikTokClient() *tiktok.Client {
 	a.tt = c
 	a.ttFeed = &page{title: "For You", next: c.Feed}
 	a.ttFollow = &page{title: "关注", next: c.FollowFeed(), grid: true, restart: c.FollowFeed}
-	a.ttLive = &page{title: "直播", next: c.LiveRooms(), grid: true, restart: c.LiveRooms, covers: liveCovers}
+	a.ttLive = &page{title: "直播", next: c.LiveRooms(), grid: true, liveOnly: true, restart: c.LiveRooms, covers: liveCovers}
 	return c
 }
 

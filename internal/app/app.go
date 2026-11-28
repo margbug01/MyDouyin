@@ -158,27 +158,32 @@ func (s *slot) at() time.Duration {
 // speeds are the choices of the speed menu, fastest first, as Douyin's.
 var speeds = []float64{2, 1.5, 1.25, 1, 0.75}
 
-const ahead = 2 // fetch another page before reaching the end of the list
+const (
+	ahead               = 2 // fetch another page before reaching the end of the list
+	maxEmptySkipBatches = 4 // consecutive all-live batches before auto-refetch pauses
+)
 
 // page is a list of videos: the picks (精选) or the recommend feed at the
 // bottom, and search results or a user's videos opened over it. A grid page
 // shows covers until one is clicked, then plays as the feed does, until
 // Escape brings the covers back.
 type page struct {
-	title    string
-	next     dy.Pager[dy.Video]
-	list     []*slot
-	grid     bool
-	playing  bool // a grid page playing its idx
-	gridList ui.ListState
-	idx      int
-	fetching bool
-	gen      int  // counts refreshes: a page fetched before one is dropped
-	done     bool // next returned its last page
-	msg      string
-	paused   bool       // playback state while another page is open
-	authorID string     // an author's works, where is_top is meaningful
-	covers   coverShape // the shape of the covers Douyin serves this list, which its cards take
+	title        string
+	next         dy.Pager[dy.Video]
+	list         []*slot
+	grid         bool
+	playing      bool // a grid page playing its idx
+	liveOnly     bool // dedicated 直播 page: never filtered by skipLive
+	gridList     ui.ListState
+	idx          int
+	fetching     bool
+	emptyBatches int  // consecutive upstream batches emptied by skipLive
+	gen          int  // counts refreshes: a page fetched before one is dropped
+	done         bool // next returned its last page
+	msg          string
+	paused       bool       // playback state while another page is open
+	authorID     string     // an author's works, where is_top is meaningful
+	covers       coverShape // the shape of the covers Douyin serves this list, which its cards take
 
 	restart func() dy.Pager[dy.Video] // a root's list from the top, as refresh takes it; nil goes on with next
 
@@ -290,6 +295,7 @@ type app struct {
 	speed          float64       // 1 as recorded
 	speedBits      atomic.Uint64 // speed for the decoders
 	autoNext       bool          // 连播: the next video once one ends, rather than again
+	skipLive       bool          // 跳过直播: skip live rooms in mixed feeds (not 直播 tab)
 	dmOff          bool          // bullet comments hidden
 	dmStyle        danmakuStyle  // bullet-comment speed, font size, stroke, opacity
 	dmMergeOff     bool          // repeats each shown, rather than folded into one as 来了×12
@@ -1371,6 +1377,140 @@ func (a *app) cur() *page { return a.pages[len(a.pages)-1] }
 // plays reports whether p shows a video rather than its covers.
 func (p *page) plays() bool { return !p.grid || p.playing }
 
+// isLiveOnly reports whether p (or its orbit source) is a dedicated live tab.
+func (p *page) isLiveOnly() bool {
+	return p != nil && (p.liveOnly || (p.from != nil && p.from.liveOnly))
+}
+
+// skipsLive reports whether live rooms should be filtered out of p.
+func (a *app) skipsLive(p *page) bool {
+	return a.skipLive && p != nil && !p.isLiveOnly()
+}
+
+// setSkipLive enables or disables automatic skipping of live rooms across mixed
+// video feeds while leaving dedicated live tabs untouched.
+func (a *app) setSkipLive(on bool) {
+	a.skipLive = on
+	if !on {
+		return
+	}
+	var cur *page
+	if len(a.pages) > 0 {
+		cur = a.cur()
+	}
+	curTouched := false
+	orbitTouched := false
+	orbitSrc := a.orbitSourcePage(a.orbit.source)
+	seen := map[*page]bool{}
+	var prune func(p *page)
+	prune = func(p *page) {
+		if p == nil || seen[p] {
+			return
+		}
+		seen[p] = true
+		if p.from != nil {
+			prune(p.from)
+		}
+		if !a.skipsLive(p) {
+			return
+		}
+		oldCurWasLive := p.idx >= 0 && p.idx < len(p.list) && p.list[p.idx].v.Live != nil
+		removedBefore := 0
+		pruned := 0
+		kept := p.list[:0]
+		for i, s := range p.list {
+			if s.v.Live != nil {
+				a.release(s)
+				if i < p.idx {
+					removedBefore++
+				}
+				pruned++
+				continue
+			}
+			kept = append(kept, s)
+		}
+		if pruned == 0 {
+			return
+		}
+		clear(p.list[len(kept):])
+		p.list = kept
+		p.idx -= removedBefore
+		if p.idx < 0 {
+			p.idx = 0
+		}
+		switch {
+		case len(p.list) == 0:
+			p.idx = 0
+			if p.grid && p.done {
+				p.playing = false
+			}
+		case p.idx >= len(p.list):
+			if p.done {
+				p.idx = len(p.list) - 1
+			} else {
+				p.idx = len(p.list)
+			}
+		}
+		if p == orbitSrc {
+			if a.orbit.offset >= len(p.list) {
+				a.orbit.offset = 0
+			}
+			orbitTouched = true
+		}
+		if p == cur {
+			if oldCurWasLive {
+				a.sheet = nil
+				a.paused = false
+				a.slide = nil
+			}
+			curTouched = true
+		}
+	}
+	pruneSnap := func(snap *platformSnapshot) {
+		if snap == nil {
+			return
+		}
+		for _, p := range snap.pages {
+			prune(p)
+		}
+		for _, stack := range snap.stacks {
+			for _, p := range stack {
+				prune(p)
+			}
+		}
+		for _, p := range snap.mine {
+			prune(p)
+		}
+	}
+
+	for _, p := range a.pages {
+		prune(p)
+	}
+	for _, stack := range a.stacks {
+		for _, p := range stack {
+			prune(p)
+		}
+	}
+	for _, p := range []*page{a.feed, a.picks, a.orbitPicks, a.follow, a.friends, a.drama, a.ttFeed, a.ttFollow} {
+		prune(p)
+	}
+	for _, p := range a.tabPages {
+		prune(p)
+	}
+	for _, p := range a.mine {
+		prune(p)
+	}
+	pruneSnap(a.dySnap)
+	pruneSnap(a.ttSnap)
+
+	if curTouched && len(a.pages) > 0 {
+		a.fill()
+		a.syncLiveRoom(a.cur())
+	} else if orbitTouched && cur != nil && a.isHome(cur) {
+		a.ensureOrbitLoaded()
+	}
+}
+
 func (a *app) post(fn func()) {
 	if a.win == nil { // a test's view without a window: its own queue, if it keeps one
 		if a.posted != nil {
@@ -1391,7 +1531,7 @@ func (a *app) more(p *page) {
 	if p.from != nil {
 		p = p.from
 	}
-	if p.fetching || p.done {
+	if p.fetching || p.done || (a.skipsLive(p) && p.emptyBatches >= maxEmptySkipBatches) {
 		return
 	}
 	p.fetching = true
@@ -1416,6 +1556,9 @@ func (a *app) more(p *page) {
 			}
 			added := 0
 			for _, v := range vs {
+				if a.skipsLive(p) && v.Live != nil {
+					continue
+				}
 				if v.ID != "" && existing[v.ID] {
 					continue
 				}
@@ -1428,8 +1571,24 @@ func (a *app) more(p *page) {
 				p.list = append(p.list, &slot{v: v})
 				added++
 			}
+			if added > 0 {
+				p.emptyBatches = 0
+			}
 			a.onOrbitSourceLoaded(p, added)
-			if c := a.cur(); c == p || c.from == p { // a page opened over p while it loaded prepares nothing of p
+			var c *page
+			if len(a.pages) > 0 {
+				c = a.cur()
+			}
+			if added == 0 && !p.done && a.skipsLive(p) && p.emptyBatches < maxEmptySkipBatches {
+				p.emptyBatches++
+				if p.emptyBatches == maxEmptySkipBatches {
+					p.msg = "接连几批都是直播，已先停下。再点一次左侧栏可刷新"
+				}
+				if p.emptyBatches < maxEmptySkipBatches && (c == p || (c != nil && c.from == p) || (c != nil && a.isHome(c) && p == a.orbitSourcePage(a.orbit.source))) {
+					a.more(p)
+				}
+			}
+			if c == p || (c != nil && c.from == p) { // a page opened over p while it loaded prepares nothing of p
 				a.fill()
 			}
 		})
@@ -1445,7 +1604,9 @@ func (a *app) fill() {
 	p := a.cur()
 	if f := p.from; f != nil {
 		if f.gen == p.fromGen {
-			p.list = append(p.list, f.list[len(p.list):]...)
+			if len(p.list) < len(f.list) {
+				p.list = append(p.list, f.list[len(p.list):]...)
+			}
 		} else {
 			p.from, p.done = nil, true
 		}
@@ -1574,6 +1735,7 @@ func (a *app) refresh(p *page) {
 func (a *app) empty(p *page) {
 	p.gen++
 	p.fetching = false
+	p.emptyBatches = 0
 	for _, s := range p.list {
 		a.release(s)
 	}
@@ -2249,7 +2411,10 @@ func (a *app) step(d int) {
 		a.slides++
 		a.slide = &slide{n: a.slides, from: p.list[p.idx].v.Poster, to: p.list[i], dir: d}
 	}
-	p.idx, a.paused = i, false
+	p.idx, p.emptyBatches, a.paused = i, 0, false
+	if p.from != nil {
+		p.from.emptyBatches = 0
+	}
 	if keepSheet {
 		a.followSheet(p.list[i], relatedTab)
 	} else {
@@ -2493,7 +2658,7 @@ func Run() error {
 	a.loadOrbitCache()
 	a.follow = &page{title: "关注", next: c.FollowFeed(), grid: true, restart: c.FollowFeed}
 	a.friends = &page{title: "朋友", next: c.FriendFeed(), grid: true, restart: c.FriendFeed}
-	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true, restart: c.LiveRooms, covers: liveCovers}
+	a.live = &page{title: "直播", next: c.LiveRooms(), grid: true, liveOnly: true, restart: c.LiveRooms, covers: liveCovers}
 	a.drama = picksPage(c, "短剧", 300214) // 精选's 小剧场: Douyin's own 短剧 page comes rendered, with no list to read
 	a.pages = []*page{a.home}
 	a.img = newImages(c.Image, a.post)
