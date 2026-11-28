@@ -297,6 +297,7 @@ type app struct {
 	dmBlockText    string        // the blocked word being written in the settings
 	dmBlockBox     ui.Handle
 	dmBadges       map[dmBadgeKey]*dmBadge // merged comments' count pills, by count and size
+	dmSprites      dmSpriteCache           // cached GPU canvases for flying bullet comments
 	dmSettingsOpen bool                    // the bar's danmaku style popover
 
 	quality     string  // the definition chosen, "" or "智能" for Douyin's pick

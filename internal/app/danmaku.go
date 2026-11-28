@@ -137,7 +137,11 @@ func (a *app) danmakuStyle() danmakuStyle {
 }
 
 func (a *app) setDanmakuStyle(s danmakuStyle) {
-	a.dmStyle = normalizeDanmakuStyle(s)
+	next := normalizeDanmakuStyle(s)
+	if next.Size != a.dmStyle.Size || next.Weight != a.dmStyle.Weight || next.Stroke != a.dmStyle.Stroke {
+		a.dmSprites.clear()
+	}
+	a.dmStyle = next
 }
 
 func (a *app) playSpeed() float64 {
@@ -318,6 +322,11 @@ type dmBadge struct {
 	l             *ui.TextLayout // ×12, the × smaller, on one baseline
 	lw, lh, w, h  float32        // the text's size; the pill's
 	from, to, ink ui.Color
+	cv            *ui.Canvas
+	scale         float32
+	pxW, pxH      int
+	bakedNow      time.Time
+	bakedPass     uint32
 }
 
 type dmBadgeKey struct {
@@ -353,13 +362,38 @@ func (a *app) danmakuBadge(n int) *dmBadge {
 	return b
 }
 
-// paint draws the pill at x, centered on a line of text textH tall.
-func (b *dmBadge) paint(p *ui.Painter, x, textH float32) {
-	r := ui.Rect{X: x + dmBadgeGap, Y: (textH - b.h) / 2, W: b.w, H: b.h}
-	p.Shadow(r, b.h/2, 0, 1, 4, 0, ui.RGBA(0, 0, 0, 0.5))
-	p.FillGradient(r, ui.LinearGradient{Angle: 90, From: b.from, To: b.to}, b.h/2)
-	p.Stroke(r, ui.RGBA(255, 255, 255, 0.28), b.h/2, 1)
-	p.TextLayout(b.l, r.X+(b.w-b.lw)/2, r.Y+(b.h-b.lh)/2, b.ink)
+// paint draws the pill at x, centered on a line of text textH tall, from a
+// cached canvas so its shadow, gradient, border and text render once per scale.
+func (b *dmBadge) paint(p *ui.Painter, x, textH float32, tint ui.Color, now time.Time, pass uint32) {
+	scale := painterScale(p)
+	dipW := float32(math.Ceil(float64(b.w))) + 2*dmBadgePad
+	dipH := float32(math.Ceil(float64(b.h))) + 2*dmBadgePad
+	pxW := max(1, int(math.Ceil(float64(dipW*scale))))
+	pxH := max(1, int(math.Ceil(float64(dipH*scale))))
+	stalePass := b.cv != nil && !now.IsZero() && b.bakedNow.Equal(now) && b.bakedPass < pass
+	if b.cv == nil || b.scale != scale || b.pxW != pxW || b.pxH != pxH || stalePass {
+		if b.cv == nil || b.pxW != pxW || b.pxH != pxH {
+			b.cv = ui.NewCanvas(pxW, pxH)
+		}
+		b.scale, b.pxW, b.pxH = scale, pxW, pxH
+		b.bakedNow, b.bakedPass = now, pass
+		b.cv.Draw(p, func(cp *ui.Painter) {
+			paintScaled(cp, scale, func() {
+				r := ui.Rect{X: dmBadgePad, Y: dmBadgePad, W: b.w, H: b.h}
+				cp.Shadow(r, b.h/2, 0, 1, 4, 0, ui.RGBA(0, 0, 0, 0.5))
+				cp.FillGradient(r, ui.LinearGradient{Angle: 90, From: b.from, To: b.to}, b.h/2)
+				cp.Stroke(r, ui.RGBA(255, 255, 255, 0.28), b.h/2, 1)
+				cp.TextLayout(b.l, r.X+(b.w-b.lw)/2, r.Y+(b.h-b.lh)/2, b.ink)
+			})
+		})
+	}
+	dst := ui.Rect{
+		X: x + dmBadgeGap - dmBadgePad,
+		Y: (textH-b.h)/2 - dmBadgePad,
+		W: float32(b.pxW) / scale,
+		H: float32(b.pxH) / scale,
+	}
+	p.ImageRegion(b.cv.Bitmap(), ui.Rect{W: float32(b.pxW), H: float32(b.pxH)}, dst, ui.ImageOptions{Tint: tint})
 }
 
 // danmakuWidth is how wide a comment standing for n is, its count's pill with it.
@@ -702,6 +736,12 @@ func (f *dmField) fliesClear(a *app, out []dmFlying, d dy.Danmaku, h *dmHeld, at
 	return true
 }
 
+const (
+	dmSpritePad  = 6  // DIPs around text for outline, drop shadow, and glyph overhang
+	dmBadgePad   = 8  // DIPs around a count pill for its drop shadow
+	dmMaxSprites = 96 // upper bound on retained bullet-comment GPU canvases
+)
+
 // dmShaped is a bullet comment's text shaped once to paint in every frame
 // that it flies, and the pictures of its emoji, in the order of its objects.
 type dmShaped struct {
@@ -709,9 +749,179 @@ type dmShaped struct {
 	outline  *ui.TextLayout // non-nil when stroke mode draws an outline pass
 	offsets  [][2]float32
 	outColor ui.Color
-	w        float32
+	w, h     float32
 	pics     []string
 	stroke   string
+}
+
+// dmSprite caches one bullet comment's pre-composited outline, shadow, text,
+// and emoji in a GPU canvas so each flying frame blits one textured quad.
+type dmSprite struct {
+	sh          *dmShaped
+	cv          *ui.Canvas
+	scale       float32
+	pxW, pxH    int
+	picsReady   []bool
+	picsMissing int
+	used        uint64
+	bakedNow    time.Time
+	bakedPass   uint32
+}
+
+type dmSpriteCache struct {
+	m         map[*dmShaped]*dmSprite
+	scale     float32
+	seq       uint64
+	frameNow  time.Time
+	framePass uint32
+}
+
+func (c *dmSpriteCache) clear() {
+	c.m = nil
+}
+
+func (a *app) clearDanmakuCanvases() {
+	a.dmSprites.clear()
+	for _, b := range a.dmBadges {
+		b.cv = nil
+	}
+}
+
+func (a *app) beginDanmakuFrame(now time.Time) {
+	c := &a.dmSprites
+	switch {
+	case c.frameNow.IsZero():
+		c.frameNow = now
+		c.framePass = 0
+	case now.Equal(c.frameNow):
+		// Same-frame recovery repaint (e.g. after MyGo's glyph atlas MakeRoom):
+		// canvases baked in an earlier pass of this frame hold stale atlas UVs
+		// and have not been presented yet, so they must re-bake before present.
+		c.framePass++
+	default:
+		// After an idle gap near Metal's 2s trim window, GPU canvas textures may
+		// have been dropped while the glyph atlas moved on; drop cached canvases
+		// so they re-bake cleanly against the current atlas.
+		if now.Sub(c.frameNow) >= 1500*time.Millisecond {
+			a.clearDanmakuCanvases()
+		}
+		c.frameNow = now
+		c.framePass = 0
+	}
+}
+
+func painterScale(p *ui.Painter) float32 {
+	if s := p.Scale(); s > 0 {
+		return s
+	}
+	return 1
+}
+
+func paintScaled(cp *ui.Painter, scale float32, fn func()) {
+	if scale != 1 {
+		cp.Transform(ui.Scaling(scale, scale), 0, 0, fn)
+		return
+	}
+	fn()
+}
+
+func (a *app) danmakuSprite(p *ui.Painter, sh *dmShaped) *dmSprite {
+	scale := painterScale(p)
+	c := &a.dmSprites
+	if c.scale != scale {
+		c.m = nil
+		c.scale = scale
+	}
+	c.seq++
+	sp := c.m[sh]
+	stalePass := sp != nil && !c.frameNow.IsZero() && sp.bakedNow.Equal(c.frameNow) && sp.bakedPass < c.framePass
+	needBake := sp == nil || sp.sh != sh || sp.scale != scale || stalePass
+	if !needBake && sp.picsMissing > 0 {
+		for i, u := range sh.pics {
+			if i < len(sp.picsReady) && !sp.picsReady[i] && a.img.getSized(u, emojiEdge) != nil {
+				needBake = true
+				break
+			}
+		}
+	}
+	if !needBake {
+		sp.used = c.seq
+		return sp
+	}
+	dipW := float32(math.Ceil(float64(sh.w))) + 2*dmSpritePad
+	dipH := float32(math.Ceil(float64(sh.h))) + 2*dmSpritePad
+	pxW := max(1, int(math.Ceil(float64(dipW*scale))))
+	pxH := max(1, int(math.Ceil(float64(dipH*scale))))
+	var cv *ui.Canvas
+	if stalePass && sp.cv != nil && sp.pxW == pxW && sp.pxH == pxH {
+		cv = sp.cv
+	} else {
+		cv = ui.NewCanvas(pxW, pxH)
+	}
+	var ready []bool
+	missing := 0
+	if len(sh.pics) > 0 {
+		ready = make([]bool, len(sh.pics))
+	}
+	cv.Draw(p, func(cp *ui.Painter) {
+		paintScaled(cp, scale, func() {
+			cp.Transform(ui.Translation(dmSpritePad, dmSpritePad), 0, 0, func() {
+				if sh.outline != nil {
+					for _, off := range sh.offsets {
+						cp.TextLayout(sh.outline, off[0], off[1], sh.outColor)
+					}
+				}
+				cp.TextLayout(sh.l, 0, 0, white)
+				for i, o := range sh.l.Objects() {
+					if i < len(sh.pics) {
+						if bmp := a.img.getSized(sh.pics[i], emojiEdge); bmp != nil {
+							cp.Image(bmp, ui.Rect{X: o.Rect.X, Y: o.Rect.Y, W: o.Rect.W, H: o.Rect.H}, ui.Contain)
+							ready[i] = true
+						} else {
+							missing++
+						}
+					}
+				}
+			})
+		})
+	})
+	sp = &dmSprite{
+		sh:          sh,
+		cv:          cv,
+		scale:       scale,
+		pxW:         pxW,
+		pxH:         pxH,
+		picsReady:   ready,
+		picsMissing: missing,
+		used:        c.seq,
+		bakedNow:    c.frameNow,
+		bakedPass:   c.framePass,
+	}
+	if c.m == nil {
+		c.m = make(map[*dmShaped]*dmSprite, 32)
+	}
+	if len(c.m) >= dmMaxSprites {
+		c.evict()
+	}
+	c.m[sh] = sp
+	return sp
+}
+
+func (c *dmSpriteCache) evict() {
+	if len(c.m) == 0 {
+		return
+	}
+	used := make([]uint64, 0, len(c.m))
+	for _, sp := range c.m {
+		used = append(used, sp.used)
+	}
+	slices.Sort(used)
+	cutoff := used[len(used)/2]
+	for k, sp := range c.m {
+		if sp.used <= cutoff {
+			delete(c.m, k)
+		}
+	}
 }
 
 var (
@@ -734,11 +944,11 @@ var (
 // Text and outline are always shaped at full opacity; st.Opacity is applied as
 // a composited group in danmakuLayer so semi-transparent white never grays out
 // over its own black outline.
-func (a *app) danmakuText(text string) dmShaped {
+func (a *app) danmakuText(text string) *dmShaped {
 	st := a.danmakuStyle()
 	key := emojiKey{text: text, size: st.Size, weight: st.Weight}
 	if e, ok := a.emojiCache[key]; ok && e.dm != nil && e.dm.stroke == st.Stroke {
-		return *e.dm
+		return e.dm
 	}
 	a.emojiSpans(text, st.Size, st.Weight)
 	e := a.emojiCache[key]
@@ -784,21 +994,22 @@ func (a *app) danmakuText(text string) dmShaped {
 		pics:     make([]string, len(e.refs)),
 		stroke:   st.Stroke,
 	}
-	sh.w, _ = l.Size()
+	sh.w, sh.h = l.Size()
 	for i, r := range e.refs {
 		sh.pics[i] = r.url
 	}
 	e.dm = sh
 	a.emojiCache[key] = e
-	return *sh
+	return sh
 }
 
 // danmakuLayer paints over the video the bullet comments fly gives for the
 // layer's size and, while they move, where the pointer is over it, the one it
 // holds still on a dark pill. They move in repaint-only frames at the
-// display's native refresh rate, without building the view, using GPU
-// subpixel translation so glyphs and their outlines glide smoothly without
-// pixel-snap jitter.
+// display's native refresh rate: each comment is pre-composited into its own
+// cached GPU canvas (outline, shadow, text, emoji), so a frame blits one
+// textured quad per comment with GPU subpixel translation and direct opacity
+// tinting, keeping partial GPU dirty rects intact even below 100% opacity.
 //
 // fly gets late, how long ago the frame began while they move: the layer
 // paints up to a frame's length after that (9 ms measured at 144 Hz), so a
@@ -806,11 +1017,17 @@ func (a *app) danmakuText(text string) dmShaped {
 // frame's own time and they move evenly, not by how late their layer painted.
 func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h float32, late time.Duration, pt dmPointer) ([]dmFlying, time.Duration)) {
 	if a.dmOff {
+		a.clearDanmakuCanvases()
 		return
 	}
 	st := a.danmakuStyle()
+	var tint ui.Color
+	if st.Opacity < 0.999 {
+		tint = ui.RGBA(255, 255, 255, st.Opacity)
+	}
 	var canvas ui.Element
 	draw := func(p *ui.Painter, r ui.Rect) {
+		a.beginDanmakuFrame(p.Now())
 		var late time.Duration
 		var pt dmPointer
 		if moving {
@@ -828,29 +1045,23 @@ func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h
 			if !moving {
 				x = float32(math.Round(float64(x)))
 			}
+			sp := a.danmakuSprite(p, sh)
+			dst := ui.Rect{
+				X: -dmSpritePad,
+				Y: -dmSpritePad,
+				W: float32(sp.pxW) / sp.scale,
+				H: float32(sp.pxH) / sp.scale,
+			}
+			src := ui.Rect{W: float32(sp.pxW), H: float32(sp.pxH)}
 			p.Transform(ui.Translation(x, y), 0, 0, func() {
 				if f.held {
-					_, th := sh.l.Size()
-					hl := ui.Rect{X: -7, Y: -3, W: a.danmakuWidth(f.d.Text, f.n) + 14, H: th + 6}
-					p.Fill(hl, ui.RGBA(0, 0, 0, 0.8), hl.H/2) // dark enough that those flying on under it do not show through
-					p.Stroke(hl, ui.RGBA(255, 255, 255, 0.6), hl.H/2, 1)
+					hl := ui.Rect{X: -7, Y: -3, W: a.danmakuWidth(f.d.Text, f.n) + 14, H: sh.h + 6}
+					p.Fill(hl, ui.RGBA(0, 0, 0, 0.8*st.Opacity), hl.H/2) // dark enough that those flying on under it do not show through
+					p.Stroke(hl, ui.RGBA(255, 255, 255, 0.6*st.Opacity), hl.H/2, 1)
 				}
-				if sh.outline != nil {
-					for _, off := range sh.offsets {
-						p.TextLayout(sh.outline, off[0], off[1], sh.outColor)
-					}
-				}
-				p.TextLayout(sh.l, 0, 0, white)
-				for i, o := range sh.l.Objects() {
-					if i < len(sh.pics) {
-						if bmp := a.img.getSized(sh.pics[i], emojiEdge); bmp != nil {
-							p.Image(bmp, ui.Rect{X: o.Rect.X, Y: o.Rect.Y, W: o.Rect.W, H: o.Rect.H}, ui.Contain)
-						}
-					}
-				}
+				p.ImageRegion(sp.cv.Bitmap(), src, dst, ui.ImageOptions{Tint: tint})
 				if f.n > 1 {
-					_, h := sh.l.Size()
-					a.danmakuBadge(f.n).paint(p, sh.w, h)
+					a.danmakuBadge(f.n).paint(p, sh.w, sh.h, tint, a.dmSprites.frameNow, a.dmSprites.framePass)
 				}
 			})
 		}
@@ -861,12 +1072,6 @@ func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h
 		case next >= 0:
 			p.After(next)
 		}
-	}
-	if st.Opacity < 0.999 {
-		ui.Box(c.Key(key)).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Opacity(st.Opacity).Children(func() {
-			canvas = ui.Box(c.Key(key + ":canvas")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(draw)
-		})
-		return
 	}
 	canvas = ui.Box(c.Key(key)).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(draw)
 }
