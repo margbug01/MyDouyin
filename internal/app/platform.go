@@ -64,9 +64,11 @@ func regionDefaultLang(region string) string {
 	}
 }
 
+// applyProxySetting sets the proxy of TikTok's requests and nothing else's;
+// "" has TikTok find the system's (tiktok/proxy.go).
 func (a *app) applyProxySetting(raw string) error {
 	trimmed := strings.TrimSpace(raw)
-	if err := media.SetProxy(trimmed); err != nil {
+	if _, err := tiktok.ParseProxy(trimmed); err != nil {
 		return err
 	}
 	if a.tt != nil {
@@ -94,12 +96,22 @@ func (a *app) applyTikTokRegion(region string) {
 	}
 }
 
-// activeVideoHeaders returns the CDN request headers for the current platform.
-func (a *app) activeVideoHeaders(v dy.Video) map[string]string {
+// videoOptions is how the player fetches v: TikTok's with its headers and
+// through its proxy, Douyin's as before.
+func (a *app) videoOptions(v dy.Video) media.StreamOptions {
 	if a.isTikTok() && a.tt != nil {
-		return a.tt.MediaHeaders(v)
+		return media.StreamOptions{Headers: a.tt.MediaHeaders(v), Client: a.tt.MediaClient()}
 	}
-	return videoHeaders
+	return media.StreamOptions{Headers: videoHeaders}
+}
+
+// liveOptions is videoOptions for a live room's stream.
+func (a *app) liveOptions() media.StreamOptions {
+	opts := media.StreamOptions{Headers: liveHeaders}
+	if a.isTikTok() && a.tt != nil {
+		opts.Client = a.tt.MediaClient()
+	}
+	return opts
 }
 
 // fetchImage routes cover/avatar downloads to the matching platform client so

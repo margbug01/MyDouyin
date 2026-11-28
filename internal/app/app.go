@@ -1965,9 +1965,9 @@ func (a *app) openLiveCandidate(ctx context.Context, url string, native bool) (p
 	var pl players
 	var err error
 	if native {
-		pl.live, err = media.OpenNative(ctx, url, liveHeaders, false)
+		pl.live, err = media.OpenNativeWithOptions(ctx, url, a.liveOptions(), false)
 	} else {
-		pl.live, err = media.OpenLiveHeaders(ctx, url, liveHeaders)
+		pl.live, err = media.OpenLiveWithOptions(ctx, url, a.liveOptions())
 	}
 	if err != nil {
 		return players{}, err
@@ -2043,7 +2043,7 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 		}
 		return players{}, lastErr
 	}
-	url, headers := videoQuality(v, quality).URL, a.activeVideoHeaders(v)
+	url, opts := videoQuality(v, quality).URL, a.videoOptions(v)
 	useNative := native && !a.isTikTok()
 	switch {
 	case useNative:
@@ -2051,14 +2051,14 @@ func (a *app) build(ctx context.Context, v dy.Video, quality string, resume time
 			pl.live, _ = preload.Open()
 		}
 		if pl.live == nil {
-			pl.live, err = media.OpenNative(ctx, url, headers, true)
+			pl.live, err = media.OpenNative(ctx, url, opts.Headers, true)
 		}
 	default:
 		if preload != nil {
 			pl.live, _ = preload.OpenContext(ctx, false)
 		}
 		if pl.live == nil {
-			pl.live, err = media.OpenVideo(ctx, url, headers)
+			pl.live, err = media.OpenVideoWithOptions(ctx, url, opts)
 		}
 	}
 	if err != nil {

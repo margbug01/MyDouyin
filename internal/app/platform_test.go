@@ -10,7 +10,6 @@ import (
 
 	"douyin/internal/dy"
 	"douyin/internal/hg"
-	"douyin/internal/media"
 	"douyin/internal/tiktok"
 
 	"github.com/egoist/mygo/ui"
@@ -19,7 +18,6 @@ import (
 // MyTikTok is the brand menu's third mode: its state is swapped in on entry
 // and Douyin's put back on leaving, MyHongguo included.
 func TestMyTikTokModeIsolatesState(t *testing.T) {
-	t.Cleanup(func() { _ = media.SetProxy("") })
 	t.Setenv("HOME", t.TempDir()) // tiktok.New reads TikTok/cookies.json under it
 
 	home := &page{title: "引力场", grid: true}
@@ -53,9 +51,8 @@ func TestMyTikTokModeIsolatesState(t *testing.T) {
 	if a.signedIn || a.me.Name != "" {
 		t.Fatalf("TikTok session should be isolated from Douyin, got signedIn=%v me=%+v", a.signedIn, a.me)
 	}
-	hdrs := a.activeVideoHeaders(dy.Video{ID: "1"})
-	if !strings.Contains(hdrs["Referer"], "tiktok.com") {
-		t.Fatalf("expected TikTok Referer header, got %+v", hdrs)
+	if opts := a.videoOptions(dy.Video{ID: "1"}); !strings.Contains(opts.Headers["Referer"], "tiktok.com") || opts.Client != a.tt.MediaClient() {
+		t.Fatalf("TikTok's streams should go with its headers through its proxy, got %+v", opts)
 	}
 
 	// MyHongguo from MyTikTok puts Douyin's state back live, where Douyin's
@@ -70,6 +67,9 @@ func TestMyTikTokModeIsolatesState(t *testing.T) {
 	if a.mode != modeDouyin || a.cur() != home || !a.signedIn || a.me.Name != "DouyinUser" {
 		t.Fatalf("Douyin snapshot not restored: mode=%v cur=%v signedIn=%v me=%+v", a.mode, a.cur(), a.signedIn, a.me)
 	}
+	if opts := a.videoOptions(dy.Video{ID: "1"}); opts.Client != nil || a.liveOptions().Client != nil {
+		t.Fatal("Douyin's streams must not take TikTok's proxy")
+	}
 	tt.Key(ui.Cmd, ui.Key3)
 	tt.Frame()
 	if a.mode != modeTikTok || a.cur() != a.ttFeed || a.signedIn {
@@ -78,7 +78,6 @@ func TestMyTikTokModeIsolatesState(t *testing.T) {
 }
 
 func TestSettingsPersistPlatformProxyAndRegion(t *testing.T) {
-	t.Cleanup(func() { _ = media.SetProxy("") })
 
 	file := filepath.Join(t.TempDir(), "settings.json")
 	a := &app{settingsFile: file, mode: modeTikTok}
@@ -102,7 +101,6 @@ func TestSettingsPersistPlatformProxyAndRegion(t *testing.T) {
 }
 
 func TestTikTokPhase2CapabilitiesAndUI(t *testing.T) {
-	t.Cleanup(func() { _ = media.SetProxy("") })
 	t.Setenv("HOME", t.TempDir()) // tiktok.New reads TikTok/cookies.json under it
 
 	v := dy.Video{ID: "741234567890", Desc: "hello tiktok", Author: "Alice", AuthorID: "MS4w_alice"}
@@ -184,7 +182,6 @@ func TestAllowTikTokPopupOAuthHosts(t *testing.T) {
 }
 
 func TestTikTokPhase3SubtitlesAndLive(t *testing.T) {
-	t.Cleanup(func() { _ = media.SetProxy("") })
 	t.Setenv("HOME", t.TempDir()) // tiktok.New reads TikTok/cookies.json under it
 
 	v := dy.Video{
@@ -269,7 +266,6 @@ func TestTikTokPhase3SubtitlesAndLive(t *testing.T) {
 }
 
 func TestTikTokAutoLoginRestoresSession(t *testing.T) {
-	t.Cleanup(func() { _ = media.SetProxy("") })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/passport/web/account/info/" {

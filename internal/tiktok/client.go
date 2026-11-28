@@ -1,8 +1,8 @@
 // Package tiktok talks to TikTok's web API. Read and write API calls route
 // through the lightweight same-origin TikTok WebView (dy.Web) so TikTok's own
 // security SDK supplies X-Bogus / X-Gnarly / msToken and browser TLS identity,
-// while media and cover downloads flow through a configurable HTTP/SOCKS5
-// proxy carrying the session's tt_chain_token cookie.
+// while media and cover downloads flow through TikTok's proxy (proxy.go)
+// carrying the session's tt_chain_token cookie.
 package tiktok
 
 import (
@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"douyin/internal/dy"
-	"douyin/internal/media"
 	ttsign "douyin/internal/sign/tiktok"
 )
 
@@ -116,11 +115,11 @@ func (c *Client) HasSession() bool {
 
 // Client talks to TikTok's web API and media CDN.
 type Client struct {
-	httpMu            sync.RWMutex
 	http              *http.Client
-	proxyURL          string
-	baseURL           string // defaults to BaseURL; overridable in tests
-	translateURL      string // custom single-endpoint override in tests
+	media             *http.Client            // the same, untimed, for the player's streams
+	proxy             atomic.Pointer[url.URL] // set in the settings (SetProxy); nil finds one
+	baseURL           string                  // defaults to BaseURL; overridable in tests
+	translateURL      string                  // custom single-endpoint override in tests
 	translateMu       sync.Mutex
 	translateCache    map[string]string
 	translateCooldown map[string]time.Time
@@ -137,14 +136,10 @@ type Client struct {
 
 // New creates a TikTok client, loading saved cookies if present.
 func New() (*Client, error) {
-	tr, err := media.NewHTTPTransport("")
-	if err != nil {
-		return nil, err
-	}
-	c := &Client{
-		http:    &http.Client{Timeout: 45 * time.Second, Transport: tr},
-		baseURL: BaseURL,
-	}
+	c := &Client{baseURL: BaseURL}
+	tr := newTransport(c.proxyFor)
+	c.http = &http.Client{Timeout: 45 * time.Second, Transport: tr}
+	c.media = &http.Client{Transport: tr}
 	c.region.Store("US")
 	c.lang.Store("en")
 	if err := c.ReloadCookies(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, os.ErrPermission) {
@@ -195,35 +190,11 @@ func (c *Client) currentRegion() (string, string) {
 	return r, l
 }
 
-// SetProxy updates the HTTP/SOCKS5 proxy used for TikTok API fallback and CDN requests.
-func (c *Client) SetProxy(rawURL string) error {
-	trimmed := strings.TrimSpace(rawURL)
-	c.httpMu.RLock()
-	same := c.proxyURL == trimmed
-	c.httpMu.RUnlock()
-	if same {
-		return nil
-	}
-	tr, err := media.NewHTTPTransport(trimmed)
-	if err != nil {
-		return err
-	}
-	c.httpMu.Lock()
-	old, _ := c.http.Transport.(*http.Transport)
-	c.http.Transport = tr
-	c.proxyURL = trimmed
-	c.httpMu.Unlock()
-	if old != nil {
-		old.CloseIdleConnections()
-	}
-	return nil
-}
+func (c *Client) httpClient() *http.Client { return c.http }
 
-func (c *Client) httpClient() *http.Client {
-	c.httpMu.RLock()
-	defer c.httpMu.RUnlock()
-	return c.http
-}
+// MediaClient fetches the player's TikTok streams (media.StreamOptions.Client)
+// through TikTok's proxy, with no time limit on a stream's body.
+func (c *Client) MediaClient() *http.Client { return c.media }
 
 func cookieFile() (string, error) {
 	dir, err := os.UserConfigDir()

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 
 	"douyin/internal/media"
@@ -45,6 +46,6 @@ func (a *app) preloadNextVideo(p *page) {
 	}
 	a.preload.close()
 	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
-		a.preload = nextVideo{slot: next, url: url, asset: media.PreloadVideo(url, a.activeVideoHeaders(next.v))}
+		a.preload = nextVideo{slot: next, url: url, asset: media.PreloadStream(context.Background(), url, a.videoOptions(next.v))}
 	}
 }

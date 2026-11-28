@@ -16,7 +16,7 @@ func TestLive(t *testing.T) {
 	if url == "" {
 		t.Skip("DY_TEST_HLS not set")
 	}
-	l, err := OpenLiveHeaders(t.Context(), url, nil)
+	l, err := OpenLiveWithOptions(t.Context(), url, StreamOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

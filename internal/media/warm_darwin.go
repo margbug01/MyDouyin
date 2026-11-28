@@ -9,13 +9,14 @@ import (
 )
 
 // WarmVideo holds an asset whose metadata is loading without a player or decoder,
-// or a pre-registered CENC loopback proxy route whose moov + initial bytes are
-// cached in RAM. Its owner either transfers it to Open/OpenContext or cancels it with Close.
+// or a pre-registered loopback proxy route (a CENC stream, or one with its own
+// Client) whose moov + initial bytes are cached in RAM. Its owner either
+// transfers it to Open/OpenContext or cancels it with Close.
 type WarmVideo struct {
 	asset objc.ID
 
 	mu       sync.Mutex
-	cenc     bool
+	looped   bool // a loopback route rather than an asset
 	done     chan struct{}
 	cancel   context.CancelFunc
 	proxyURL string
@@ -43,15 +44,15 @@ func PreloadStream(ctx context.Context, source string, opts StreamOptions) *Warm
 	if source == "" {
 		return nil
 	}
-	if len(opts.DecryptKey) == 0 {
+	if len(opts.DecryptKey) == 0 && opts.Client == nil {
 		return PreloadVideo(source, opts.Headers)
 	}
-	if len(opts.DecryptKey) != 16 {
+	if len(opts.DecryptKey) != 0 && len(opts.DecryptKey) != 16 {
 		return nil
 	}
 	wctx, cancel := context.WithCancel(ctx)
 	w := &WarmVideo{
-		cenc:   true,
+		looped: true,
 		done:   make(chan struct{}),
 		cancel: cancel,
 	}
@@ -65,7 +66,7 @@ func PreloadStream(ctx context.Context, source string, opts StreamOptions) *Warm
 	keyCopy := append([]byte(nil), opts.DecryptKey...)
 	go func() {
 		defer close(w.done)
-		pu, rel, rerr := localProxy.registerOptions(wctx, source, StreamOptions{Headers: hdrCopy, DecryptKey: keyCopy}, true)
+		pu, rel, rerr := localProxy.registerOptions(wctx, source, StreamOptions{Headers: hdrCopy, DecryptKey: keyCopy, Client: opts.Client}, true)
 		w.mu.Lock()
 		if w.closed {
 			w.mu.Unlock()
@@ -88,7 +89,7 @@ func (w *WarmVideo) OpenContext(ctx context.Context, native bool) (*Live, error)
 	if w == nil {
 		return nil, errors.New("media: nil warm video")
 	}
-	if w.cenc {
+	if w.looped {
 		select {
 		case <-w.done:
 		case <-ctx.Done():
@@ -139,7 +140,7 @@ func (w *WarmVideo) Close() {
 	if w == nil {
 		return
 	}
-	if w.cenc {
+	if w.looped {
 		w.mu.Lock()
 		if w.closed {
 			w.mu.Unlock()

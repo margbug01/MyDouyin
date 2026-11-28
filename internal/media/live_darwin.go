@@ -63,11 +63,11 @@ var ErrNoSystemPlayer = errors.New("media: the system has no media framework tha
 // but for a stream to decrypt, which waits for the loopback proxy's first
 // answer as long as ctx lets it.
 
-// OpenLiveHeaders starts the live stream at url with custom HTTP headers,
-// playing silent: a player asks for its first picture as it is made, which
-// a paused stream never sends.
-func OpenLiveHeaders(ctx context.Context, url string, headers map[string]string) (*Live, error) {
-	return openStream(url, headers, false, true)
+// OpenLiveWithOptions starts the live stream at url, playing silent: a
+// player asks for its first picture as it is made, which a paused stream
+// never sends.
+func OpenLiveWithOptions(ctx context.Context, url string, opts StreamOptions) (*Live, error) {
+	return openStreamOptions(ctx, url, opts, false, true)
 }
 
 // OpenVideo streams an MP4 using AVPlayer's range loading and audio clock.
@@ -95,7 +95,7 @@ func OpenNativeWithOptions(ctx context.Context, url string, opts StreamOptions, 
 }
 
 func openStreamOptions(ctx context.Context, url string, opts StreamOptions, vod, pixels bool) (*Live, error) {
-	if len(opts.DecryptKey) == 0 {
+	if len(opts.DecryptKey) == 0 && opts.Client == nil { // AVFoundation fetches it itself
 		return openStream(url, opts.Headers, vod, pixels)
 	}
 	proxyURL, release, err := localProxy.registerOptions(ctx, url, opts, vod)

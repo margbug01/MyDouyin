@@ -89,7 +89,7 @@ func PreloadStream(ctx context.Context, source string, opts StreamOptions) *Warm
 	}
 	go func() {
 		defer close(w.done)
-		pu, rel, rerr := localProxy.registerOptions(wctx, norm, StreamOptions{Headers: hdrCopy, DecryptKey: keyCopy}, true)
+		pu, rel, rerr := localProxy.registerOptions(wctx, norm, StreamOptions{Headers: hdrCopy, DecryptKey: keyCopy, Client: opts.Client}, true)
 		w.mu.Lock()
 		if w.closed {
 			w.mu.Unlock()
@@ -198,8 +198,8 @@ type Live struct {
 
 // The Open functions wait for a stream's first answer through the loopback
 // proxy, as long as ctx lets them.
-func OpenLiveHeaders(ctx context.Context, source string, headers map[string]string) (*Live, error) {
-	return openStreamOptions(ctx, source, StreamOptions{Headers: headers}, false)
+func OpenLiveWithOptions(ctx context.Context, source string, opts StreamOptions) (*Live, error) {
+	return openStreamOptions(ctx, source, opts, false)
 }
 func OpenNative(ctx context.Context, source string, headers map[string]string, vod bool) (*Live, error) {
 	return openStreamOptions(ctx, source, StreamOptions{Headers: headers}, vod)

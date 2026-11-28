@@ -236,3 +236,46 @@ func TestStreamProxyCachesVODHeadAndStreamsTail(t *testing.T) {
 		t.Fatalf("expected exactly 1 extra upstream request for tail, got hits=%d", hits.Load())
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// A stream with its own Client (TikTok's, through TikTok's proxy) is fetched
+// through it alone; one without goes as before, never through it.
+func TestStreamProxyRouteClient(t *testing.T) {
+	payload := strings.Repeat("x", vodHeadCacheSize+4096) // past the head cache: the tail goes upstream
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "clip.mp4", time.Now(), strings.NewReader(payload))
+	}))
+	defer srv.Close()
+	var own atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		own.Add(1)
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+	read := func(opts StreamOptions) {
+		t.Helper()
+		pu, release, err := localProxy.registerOptions(context.Background(), srv.URL+"/clip.mp4", opts, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		resp, err := http.Get(pu)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if n, _ := io.Copy(io.Discard, resp.Body); n != int64(len(payload)) {
+			t.Fatalf("read %d bytes through the loopback, want %d", n, len(payload))
+		}
+	}
+	read(StreamOptions{})
+	if own.Load() != 0 {
+		t.Fatalf("a stream without a Client went through another stream's: %d requests", own.Load())
+	}
+	read(StreamOptions{Client: client})
+	if own.Load() != 2 { // the preflight head, then the tail
+		t.Fatalf("a stream with a Client made %d requests through it, want 2", own.Load())
+	}
+}

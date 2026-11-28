@@ -37,7 +37,7 @@ type settings struct {
 	HGDirect       *bool   `json:"hgDirect,omitempty"`
 	HGSignerURL    string  `json:"hgSignerURL,omitempty"`
 	HGSignerToken  string  `json:"hgSignerToken,omitempty"`
-	ProxyURL       string  `json:"proxyUrl,omitempty"`     // optional http(s):// or socks5:// proxy
+	ProxyURL       string  `json:"proxyUrl,omitempty"`     // TikTok's proxy, http(s):// or socks5://; "" finds the system's
 	TikTokRegion   string  `json:"tiktokRegion,omitempty"` // e.g. "US", "JP", "GB"
 	Subtitles      *bool   `json:"subtitles,omitempty"`    // nil or true shows WebVTT subtitles on TikTok
 	SubTranslate   *bool   `json:"subTranslate,omitempty"` // nil or true translates non-Chinese subtitles to Chinese
@@ -478,23 +478,26 @@ func (a *app) settingsBody(c *ui.Context) {
 				}
 			})
 		})
+		if !a.isTikTok() { // the rest is TikTok's alone
+			break
+		}
 		regionChoice := a.ttRegion
 		if regionChoice == "" {
 			regionChoice = "US"
 		}
 		regionChoices := []string{"US", "JP", "GB", "SG", "KR", "TW"}
-		group("网络与地区", func() {
-			row("网络代理", "留空跟随系统，支持 http:// 与 socks5://", func() {
+		group("TikTok 网络", func() {
+			row("代理", "只给 TikTok 用；留空自动用系统代理，支持 http:// 与 socks5://", func() {
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 					ui.TextInput(c.Key("proxyUrl"), &a.proxyDraft).Width(176).Height(28).
-						Placeholder("http://127.0.0.1:7890").Label("网络代理")
+						Placeholder("自动（系统代理）").Label("TikTok 代理")
 					if ui.Button(c.Key("proxyApply"), "应用").Clicked() {
 						if err := a.applyProxySetting(a.proxyDraft); err != nil {
-							a.toast = "代理格式错误：" + err.Error()
+							a.toast = err.Error()
 						} else if a.proxyURL == "" {
-							a.toast = "已恢复系统代理"
+							a.toast = "TikTok 改回自动用系统代理"
 						} else {
-							a.toast = "代理已生效：" + a.proxyURL
+							a.toast = "TikTok 代理已生效：" + a.proxyURL
 						}
 					}
 				})
