@@ -1441,9 +1441,12 @@ func (a *app) hgStage(c *ui.Context, h *hgApp, hp *hgPlayer) {
 		a.hgTick(hp, at, dur)
 
 		if !a.clear {
-			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w, h float32, late time.Duration) ([]dmFlying, time.Duration) {
+			a.danmakuLayer(c, "hg-danmaku-layer", !hp.paused, func(w, h float32, late time.Duration, pt dmPointer) ([]dmFlying, time.Duration) {
+				if overBar || hp.hud.overlayHovered { // the bar and the controls over the comments take the pointer
+					pt = dmPointer{}
+				}
 				at := hp.at() - time.Duration(float64(late)*a.playSpeed())
-				flying, next := flyDanmakuArea(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, at, w, h)
+				flying, next := flyDanmakuArea(a, &hp.dm, hp.danmaku, func(d hg.Danmaku) dy.Danmaku { return dy.Danmaku{At: d.At, Text: d.Text} }, at, w, h, pt)
 				if next > 0 {
 					next = time.Duration(float64(next) / a.playSpeed())
 				}

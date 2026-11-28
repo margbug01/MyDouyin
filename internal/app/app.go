@@ -991,6 +991,9 @@ func (s *slot) pruneDanmaku(at, flightDur time.Duration) {
 	gone := at - flightDur - s.dm.linger
 	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= gone }); i > 0 {
 		for _, d := range s.danmaku[:i] {
+			if s.dm.held[d] != nil { // flies behind its time: the layer lets go of it once gone
+				continue
+			}
 			delete(s.dm.lane, d)
 			delete(s.dm.group, d)
 		}

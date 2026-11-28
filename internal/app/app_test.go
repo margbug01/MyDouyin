@@ -676,8 +676,8 @@ func TestDanmakuLayerPaintsWithoutBuildingTheView(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		builds++
 		ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).Children(func() {
-			a.danmakuLayer(c, "dm", moving, func(w, h float32, _ time.Duration) ([]dmFlying, time.Duration) {
-				return flyDanmakuArea(a, &s.dm, s.danmaku, sameDanmaku, at, w, h)
+			a.danmakuLayer(c, "dm", moving, func(w, h float32, _ time.Duration, pt dmPointer) ([]dmFlying, time.Duration) {
+				return flyDanmakuArea(a, &s.dm, s.danmaku, sameDanmaku, at, w, h, pt)
 			})
 		})
 	}, 800, 200)
@@ -2235,8 +2235,8 @@ func TestDanmakuPlaybackSpeedCompensationAndStyleControls(t *testing.T) {
 		a.setDanmakuStyle(st)
 		pt := ui.NewTester(func(c *ui.Context) {
 			ui.Box(c).Fill().Background(bg).Children(func() {
-				a.danmakuLayer(c, "dm-stroke", false, func(w, h float32, _ time.Duration) ([]dmFlying, time.Duration) {
-					return flyDanmakuArea(a, &dmField{}, dm, sameDanmaku, 2*time.Second, w, h)
+				a.danmakuLayer(c, "dm-stroke", false, func(w, h float32, _ time.Duration, over dmPointer) ([]dmFlying, time.Duration) {
+					return flyDanmakuArea(a, &dmField{}, dm, sameDanmaku, 2*time.Second, w, h, over)
 				})
 			})
 		}, 400, 120)

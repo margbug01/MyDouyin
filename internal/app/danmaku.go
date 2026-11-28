@@ -1,6 +1,8 @@
 package app
 
 import (
+	"cmp"
+	"maps"
 	"math"
 	"slices"
 	"sort"
@@ -257,8 +259,33 @@ type dmField struct {
 	merge  bool          // repeats merging when these lanes were computed
 	block  []string      // blocked words when these lanes were computed
 	group  map[dy.Danmaku]*dmGroup
-	repeat map[string]*dmGroup // by dmFoldKey: the latest shown, which repeats fold into
-	linger time.Duration       // how long past its flight a merged comment's pill can be on screen
+	repeat map[string]*dmGroup    // by dmFoldKey: the latest shown, which repeats fold into
+	linger time.Duration          // how long past its flight a merged comment's pill can be on screen
+	held   map[dy.Danmaku]*dmHeld // those the pointer held still, until they have flown on and gone
+}
+
+// dmPointer is where the pointer is over the comments' layer, when over it.
+type dmPointer struct {
+	x, y float32
+	over bool
+}
+
+// dmHeld is a comment the pointer held still: how long it stood, which it
+// flies behind its time by, while it stands now since when, and whether it
+// went once let go, flying on having run into those behind it in its lane.
+type dmHeld struct {
+	by    time.Duration
+	since time.Duration
+	still bool
+	gone  bool
+}
+
+// age is how far into its flight d, held as h, is at at.
+func (h *dmHeld) age(d dy.Danmaku, at time.Duration) time.Duration {
+	if h.still {
+		at = h.since
+	}
+	return at - d.At - h.by
 }
 
 func (f *dmField) hide(d dy.Danmaku) {
@@ -479,38 +506,35 @@ func (f *dmField) placeIn(d dy.Danmaku, tw, w float32, flightDur time.Duration, 
 	return lane
 }
 
-// dmFlying is a bullet comment where it is at a moment, in the layer, and how
-// many identical ones it stands for.
+// dmFlying is a bullet comment where it is at a moment, in the layer, how
+// many identical ones it stands for, and whether the pointer holds it still.
 type dmFlying struct {
 	d    dy.Danmaku
 	x, y float32
 	n    int
+	held bool
 }
 
 // flyDanmaku returns the VOD comments of list, in time order, flying at at over
 // a video w wide, using the playback-speed-compensated flight duration.
 func flyDanmaku[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, at time.Duration, w float32) (out []dmFlying, next time.Duration) {
-	return flyDanmakuIn(a, f, list, key, at, w, 0, a.dmVideoFlight())
+	return flyDanmakuIn(a, f, list, key, at, w, 0, a.dmVideoFlight(), dmPointer{})
 }
 
 // flyDanmakuArea returns the VOD comments flying at at over a video w×h,
 // sizing the number of lanes to the user's configured display area.
-func flyDanmakuArea[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, at time.Duration, w, h float32) (out []dmFlying, next time.Duration) {
-	return flyDanmakuIn(a, f, list, key, at, w, h, a.dmVideoFlight())
-}
-
-// flyDanmakuWith returns the comments of list flying at at over a video w wide
-// for flightDur.
-func flyDanmakuWith[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, at time.Duration, w float32, flightDur time.Duration) (out []dmFlying, next time.Duration) {
-	return flyDanmakuIn(a, f, list, key, at, w, 0, flightDur)
+func flyDanmakuArea[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, at time.Duration, w, h float32, pt dmPointer) (out []dmFlying, next time.Duration) {
+	return flyDanmakuIn(a, f, list, key, at, w, h, a.dmVideoFlight(), pt)
 }
 
 // flyDanmakuIn returns the comments of list flying at at over a video w×h,
 // each from its time on, crossing in flightDur at the speed it set off with
 // until all of it, its count's pill too, has gone, in the lane of f it took as
-// it set off. next is how long until the next one sets off, -1 when none is to
-// come.
-func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, at time.Duration, w, h float32, flightDur time.Duration) (out []dmFlying, next time.Duration) {
+// it set off. The one under pt stands still while the pointer stays on it;
+// let go, it flies on from there, or goes when it would run into those behind
+// it (holdUnder). Those held come last, over the rest. next is how long until
+// the next one sets off, -1 when none is to come.
+func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, at time.Duration, w, h float32, flightDur time.Duration, pt dmPointer) (out []dmFlying, next time.Duration) {
 	next = -1
 	if w <= 0 {
 		return nil, next
@@ -522,19 +546,33 @@ func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, a
 	lanes := a.dmLaneCount(h)
 	merge := !a.dmMergeOff
 	if f.flight != flightDur || f.size != st.Size || f.lanes != lanes || f.merge != merge || !slices.Equal(f.block, a.dmBlock) {
-		f.lane, f.group, f.repeat = nil, nil, nil
+		f.lane, f.group, f.repeat, f.held = nil, nil, nil, nil
 		f.tail = [dmLanesMax]laneTail{}
 		f.flight, f.size, f.lanes, f.merge, f.block = flightDur, st.Size, lanes, merge, a.dmBlock
 	}
 	laneH := a.dmLaneHeight()
+	fly := func(d dy.Danmaku, l int, age time.Duration) {
+		tw := a.danmakuText(d.Text).w
+		x, room := w-float32(age)/float32(flightDur)*(w+tw), tw
+		if g := f.group[d]; g != nil {
+			room = g.w
+		}
+		if x+room > 0 {
+			out = append(out, dmFlying{d: d, x: x, y: float32(dmTop + l*laneH), n: 1})
+		}
+	}
 	// list is time-ordered: jump straight to the first comment still in flight.
-	start := sort.Search(len(list), func(i int) bool { return key(list[i]).At > at-flightDur-f.linger })
+	from := at - flightDur - f.linger
+	start := sort.Search(len(list), func(i int) bool { return key(list[i]).At > from })
 	for i := start; i < len(list); i++ {
 		d := key(list[i])
 		age := at - d.At
 		if age < 0 {
 			next = -age
 			break
+		}
+		if f.held[d] != nil { // flies behind its time, below
+			continue
 		}
 		l, ok := f.lane[d]
 		if !ok {
@@ -543,25 +581,125 @@ func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, a
 			}
 			l = a.dmSetOff(f, d, w, flightDur, lanes)
 		}
-		if l < 0 {
-			continue
+		if l >= 0 {
+			fly(d, l, age)
 		}
-		tw := a.danmakuText(d.Text).w
-		x, room := w-float32(age)/float32(flightDur)*(w+tw), tw
-		if g := f.group[d]; g != nil {
-			room = g.w
+	}
+	if len(f.held) > 0 {
+		for _, d := range slices.SortedFunc(maps.Keys(f.held), func(x, y dy.Danmaku) int {
+			return cmp.Or(cmp.Compare(x.At, y.At), strings.Compare(x.Text, y.Text))
+		}) {
+			h := f.held[d]
+			if age := h.age(d, at); age >= 0 && age < flightDur+f.linger {
+				if !h.gone {
+					fly(d, f.lane[d], age)
+				}
+				continue
+			}
+			// crossed, or a seek went back before it: on its own time again
+			delete(f.held, d)
+			if d.At <= from {
+				delete(f.lane, d)
+				delete(f.group, d)
+			}
 		}
-		if x+room <= 0 {
-			continue
-		}
-		out = append(out, dmFlying{d, x, float32(dmTop + l*laneH), 1})
 	}
 	for i := range out { // counted now, with the repeats that set off after it this frame
 		if g := f.group[out[i].d]; g != nil {
 			out[i].n = g.n
 		}
 	}
-	return out, next
+	return f.holdUnder(a, out, pt, at, w, flightDur, laneH), next
+}
+
+// holdUnder holds still the comment of out under pt, keeping the one held
+// already while the pointer stays on it, and marks it. One held before lets
+// go: it flies on from where it stood, behind its time by how long it stood,
+// when it stays clear there of those behind it in its lane (fliesClear), and
+// else goes, taken out of out.
+func (f *dmField) holdUnder(a *app, out []dmFlying, pt dmPointer, at time.Duration, w float32, flightDur time.Duration, laneH int) []dmFlying {
+	still := func(d dy.Danmaku) bool { h := f.held[d]; return h != nil && h.still }
+	hit := -1
+	if pt.over {
+		for i, fl := range out {
+			if pt.x >= fl.x && pt.x < fl.x+a.danmakuWidth(fl.d.Text, fl.n) && pt.y >= fl.y && pt.y < fl.y+float32(laneH) && (hit < 0 || !still(out[hit].d)) {
+				hit = i
+			}
+		}
+	}
+	gone := false
+	for d, h := range f.held {
+		if !h.still || hit >= 0 && d == out[hit].d {
+			continue
+		}
+		was := d.At + h.by
+		h.by += max(0, at-h.since)
+		h.still = false
+		if !f.fliesClear(a, out, d, h, at, w, flightDur) {
+			h.gone, gone = true, true
+			if k := dmFoldKey(d.Text); f.repeat[k] != nil && f.repeat[k].d == d { // repeats set off by themselves
+				delete(f.repeat, k)
+			}
+			continue
+		}
+		if l := f.lane[d]; l >= 0 && f.tail[l].used && f.tail[l].at == was { // the next to set off in its lane keeps clear of where it is
+			f.tail[l].at = d.At + h.by
+		}
+	}
+	if hit >= 0 {
+		d := out[hit].d
+		h := f.held[d]
+		if h == nil {
+			if f.held == nil {
+				f.held = map[dy.Danmaku]*dmHeld{}
+			}
+			h = &dmHeld{}
+			f.held[d] = h
+		}
+		if !h.still {
+			h.still, h.since = true, at
+		}
+		out[hit].held = true
+	}
+	if gone {
+		out = slices.DeleteFunc(out, func(fl dmFlying) bool { h := f.held[fl.d]; return h != nil && h.gone })
+	}
+	return out
+}
+
+// fliesClear reports whether d of out, let go at at and flying on behind its
+// time by h.by, stays clear of the others of out in its lane: those behind it,
+// which set off keeping clear of where its time had it, and those that flew
+// past it as it stood.
+func (f *dmField) fliesClear(a *app, out []dmFlying, d dy.Danmaku, h *dmHeld, at time.Duration, w float32, flightDur time.Duration) bool {
+	i := slices.IndexFunc(out, func(fl dmFlying) bool { return fl.d == d })
+	if i < 0 {
+		return false
+	}
+	tw := a.danmakuText(d.Text).w
+	room := tw
+	if g := f.group[d]; g != nil {
+		room = g.w
+	}
+	me := laneTail{at: d.At + h.by, w: tw, used: true}
+	for _, o := range out {
+		if o.y != out[i].y || o.d == d {
+			continue
+		}
+		them := laneTail{at: o.d.At, w: a.danmakuText(o.d.Text).w, used: true}
+		if b := f.held[o.d]; b != nil {
+			them.at += b.by
+		}
+		// one behind keeps clear of d; d keeps clear of one ahead, as one that flew past it
+		clear := me.keepsClear(room, at, them.at, them.w, w, flightDur)
+		if o.x <= out[i].x {
+			clear = them.keepsClear(a.danmakuWidth(o.d.Text, o.n), at, me.at, tw, w, flightDur)
+		}
+		if !clear {
+			return false
+		}
+	}
+	return true
 }
 
 // dmShaped is a bullet comment's text shaped once to paint in every frame
@@ -656,25 +794,30 @@ func (a *app) danmakuText(text string) dmShaped {
 }
 
 // danmakuLayer paints over the video the bullet comments fly gives for the
-// layer's size. They move in repaint-only frames at the display's native
-// refresh rate, without building the view, using GPU subpixel translation so
-// glyphs and their outlines glide smoothly without pixel-snap jitter.
+// layer's size and, while they move, where the pointer is over it, the one it
+// holds still on a dark pill. They move in repaint-only frames at the
+// display's native refresh rate, without building the view, using GPU
+// subpixel translation so glyphs and their outlines glide smoothly without
+// pixel-snap jitter.
 //
 // fly gets late, how long ago the frame began while they move: the layer
 // paints up to a frame's length after that (9 ms measured at 144 Hz), so a
 // clock read in fly, set back by late, places each frame's comments at the
 // frame's own time and they move evenly, not by how late their layer painted.
-func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h float32, late time.Duration) ([]dmFlying, time.Duration)) {
+func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h float32, late time.Duration, pt dmPointer) ([]dmFlying, time.Duration)) {
 	if a.dmOff {
 		return
 	}
 	st := a.danmakuStyle()
+	var canvas ui.Element
 	draw := func(p *ui.Painter, r ui.Rect) {
 		var late time.Duration
+		var pt dmPointer
 		if moving {
 			late = time.Since(p.Now())
+			pt.x, pt.y, pt.over = canvas.PointerPosition()
 		}
-		flying, next := fly(r.W, r.H, late)
+		flying, next := fly(r.W, r.H, late, pt)
 		for _, f := range flying {
 			sh := a.danmakuText(f.d.Text)
 			if f.x+a.danmakuWidth(f.d.Text, f.n) <= 0 || f.x >= r.W {
@@ -686,6 +829,12 @@ func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h
 				x = float32(math.Round(float64(x)))
 			}
 			p.Transform(ui.Translation(x, y), 0, 0, func() {
+				if f.held {
+					_, th := sh.l.Size()
+					hl := ui.Rect{X: -7, Y: -3, W: a.danmakuWidth(f.d.Text, f.n) + 14, H: th + 6}
+					p.Fill(hl, ui.RGBA(0, 0, 0, 0.8), hl.H/2) // dark enough that those flying on under it do not show through
+					p.Stroke(hl, ui.RGBA(255, 255, 255, 0.6), hl.H/2, 1)
+				}
 				if sh.outline != nil {
 					for _, off := range sh.offsets {
 						p.TextLayout(sh.outline, off[0], off[1], sh.outColor)
@@ -715,11 +864,11 @@ func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h
 	}
 	if st.Opacity < 0.999 {
 		ui.Box(c.Key(key)).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Opacity(st.Opacity).Children(func() {
-			ui.Box(c.Key(key + ":canvas")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(draw)
+			canvas = ui.Box(c.Key(key + ":canvas")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(draw)
 		})
 		return
 	}
-	ui.Box(c.Key(key)).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(draw)
+	canvas = ui.Box(c.Key(key)).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(draw)
 }
 
 // danmakuSettingsButton draws the compact gear trigger beside the 弹幕 chip

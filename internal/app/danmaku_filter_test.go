@@ -84,7 +84,7 @@ func TestDanmakuMergeOnlyRemoves(t *testing.T) {
 		if n := a.dmLaneCount(100); n != 2 {
 			t.Fatalf("%d lanes", n)
 		}
-		flying, _ := flyDanmakuArea(a, &dmField{}, list, sameDanmaku, time.Second, 1280, 100)
+		flying, _ := flyDanmakuArea(a, &dmField{}, list, sameDanmaku, time.Second, 1280, 100, dmPointer{})
 		var out []string
 		for _, fl := range flying {
 			out = append(out, fmt.Sprintf("%s×%d", fl.d.Text, fl.n))

@@ -981,11 +981,14 @@ func (a *app) stage(c *ui.Context, p *page) {
 				started := a.liveChat.started
 				clock = func(late time.Duration) time.Duration { return time.Since(started) - late }
 			}
-			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w, h float32, late time.Duration) ([]dmFlying, time.Duration) {
-				if isLive {
-					return flyDanmakuIn(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(late), w, h, a.dmRealFlight())
+			a.danmakuLayer(c, "danmaku-layer", !a.paused, func(w, h float32, late time.Duration, pt dmPointer) ([]dmFlying, time.Duration) {
+				if overBar || a.stageHUD.overlayHovered { // the bar, the rail and the caption over the comments take the pointer
+					pt = dmPointer{}
 				}
-				flying, next := flyDanmakuArea(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(late), w, h)
+				if isLive {
+					return flyDanmakuIn(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(late), w, h, a.dmRealFlight(), pt)
+				}
+				flying, next := flyDanmakuArea(a, &s.dm, s.danmaku, func(d dy.Danmaku) dy.Danmaku { return d }, clock(late), w, h, pt)
 				if next > 0 {
 					next = time.Duration(float64(next) / a.playSpeed())
 				}
