@@ -488,10 +488,14 @@ const vis = e => {
   return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility === "visible";
 };`
 
+// captchaStateJS counts a captcha the page holds even without a box: a page
+// not laid out (verify's held read) may give it none, and taking that for no
+// captcha would throw the held one away. The second verification has no
+// hidden state of its own, so only a shown one counts.
 const captchaStateJS = visibleJS + `
-const captchas = [...document.querySelectorAll("` + captchaSelector + `")];
-if (captchas.some(vis) || [...document.querySelectorAll("` + secondVerifySelector + `")].some(vis)) return "shown";
-return captchas.some(e => getComputedStyle(e).visibility === "hidden") ? "hidden" : "none";`
+const el = document.querySelector("` + captchaSelector + `");
+if (el) return getComputedStyle(el).visibility === "hidden" ? "hidden" : "shown";
+return [...document.querySelectorAll("` + secondVerifySelector + `")].some(vis) ? "shown" : "none";`
 
 func (w *web) captchaState(ctx context.Context) captchaState {
 	b, err := w.Eval(ctx, captchaStateJS)
