@@ -2,9 +2,12 @@ package app
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"douyin/internal/dy"
 	"github.com/egoist/mygo/ui"
@@ -202,15 +205,131 @@ type laneTail struct {
 	used bool
 }
 
+// dmGroup is a shown bullet comment and the identical ones folded into it
+// while it flies: how many it stands for, and how wide it was as it set off,
+// which it keeps moving by as its count grows.
+type dmGroup struct {
+	d dy.Danmaku
+	n int
+	w float32
+}
+
 // dmField is where the bullet comments over a video fly: the lane each took
 // as it set off, kept as it flies.
 type dmField struct {
-	lane   map[dy.Danmaku]int // -1: no room, not shown
+	lane   map[dy.Danmaku]int // -1: blocked, folded into a repeat, or no room: not shown
 	tail   [dmLanesMax]laneTail
 	own    dy.Danmaku    // the user's last sent: shown even when the lanes are full
 	flight time.Duration // flight duration used when these lanes were computed
 	size   float32       // font size used when these lanes were computed
 	lanes  int           // active lane count used when these lanes were computed
+	merge  bool          // repeats merging when these lanes were computed
+	block  []string      // blocked words when these lanes were computed
+	group  map[dy.Danmaku]*dmGroup
+	repeat map[string]*dmGroup // by dmFoldKey: the latest shown, which repeats fold into
+}
+
+func (f *dmField) hide(d dy.Danmaku) {
+	if f.lane == nil {
+		f.lane = map[dy.Danmaku]int{}
+	}
+	f.lane[d] = -1
+}
+
+// dmFoldKey is what two bullet comments share when they say the same: their
+// letters, digits and emoji, any case, so 来了, 来了！ and 来 了~ are one.
+func dmFoldKey(text string) string {
+	k := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || unicode.Is(unicode.So, r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, text)
+	if k == "" { // ？？？ is said by itself
+		return text
+	}
+	return k
+}
+
+// dmLabel is what a comment standing for n shows: 来了×12.
+func dmLabel(text string, n int) string {
+	if n < 2 {
+		return text
+	}
+	return text + "×" + strconv.Itoa(n)
+}
+
+// dmBlocked reports whether text has one of the user's blocked words.
+func (a *app) dmBlocked(text string) bool {
+	if len(a.dmBlock) == 0 {
+		return false
+	}
+	text = strings.ToLower(text)
+	for _, w := range a.dmBlock {
+		if strings.Contains(text, strings.ToLower(w)) {
+			return true
+		}
+	}
+	return false
+}
+
+// setDanmakuBlock keeps words, trimmed, once each, as the blocked words. It
+// always makes a new slice: a dmField compares the one it was laid out with.
+func (a *app) setDanmakuBlock(words []string) {
+	var out []string
+	for _, w := range words {
+		w = strings.TrimSpace(w)
+		if w != "" && !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, w) }) {
+			out = append(out, w)
+		}
+	}
+	a.dmBlock = out
+}
+
+// dmSetOff decides where d flies as it sets off, rest being the comments after
+// it: -1 when it is not shown, for a blocked word, for folding into an
+// identical one still flying, or for the lanes being full. When merging, d
+// counts at once the identical ones of rest that set off while it flies; one
+// that comes later (a live room's, or a page loaded later) folds into it then.
+func dmSetOff[D any](a *app, f *dmField, d dy.Danmaku, rest []D, key func(D) dy.Danmaku, w float32, flightDur time.Duration, lanes int) int {
+	own := d == f.own
+	if !own && a.dmBlocked(d.Text) {
+		f.hide(d)
+		return -1
+	}
+	if !f.merge || own {
+		return f.placeIn(d, a.danmakuText(d.Text).w, w, flightDur, lanes)
+	}
+	k := dmFoldKey(d.Text)
+	if g := f.repeat[k]; g != nil && d.At-g.d.At < flightDur {
+		g.n++
+		f.hide(d)
+		return -1
+	}
+	var folded []dy.Danmaku
+	for _, it := range rest {
+		e := key(it)
+		if e.At-d.At >= flightDur {
+			break
+		}
+		if _, seen := f.lane[e]; !seen && e != d && e != f.own && dmFoldKey(e.Text) == k && !a.dmBlocked(e.Text) {
+			folded = append(folded, e)
+		}
+	}
+	g := &dmGroup{d: d, n: 1 + len(folded)}
+	g.w = a.danmakuText(dmLabel(d.Text, g.n)).w
+	l := f.placeIn(d, g.w, w, flightDur, lanes)
+	if l < 0 { // no room: the next identical one tries for itself
+		return -1
+	}
+	for _, e := range folded {
+		f.hide(e)
+	}
+	if f.group == nil {
+		f.group, f.repeat = map[dy.Danmaku]*dmGroup{}, map[string]*dmGroup{}
+	}
+	f.group[d], f.repeat[k] = g, g
+	return l
 }
 
 // place assigns d a lane using the default flight duration.
@@ -303,16 +422,17 @@ func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, a
 	}
 	st := a.danmakuStyle()
 	lanes := a.dmLaneCount(h)
-	if f.flight != flightDur || f.size != st.Size || f.lanes != lanes {
-		f.lane = nil
+	merge := !a.dmMergeOff
+	if f.flight != flightDur || f.size != st.Size || f.lanes != lanes || f.merge != merge || !slices.Equal(f.block, a.dmBlock) {
+		f.lane, f.group, f.repeat = nil, nil, nil
 		f.tail = [dmLanesMax]laneTail{}
-		f.flight, f.size, f.lanes = flightDur, st.Size, lanes
+		f.flight, f.size, f.lanes, f.merge, f.block = flightDur, st.Size, lanes, merge, a.dmBlock
 	}
 	laneH := a.dmLaneHeight()
 	// list is time-ordered: jump straight to the first comment still in flight.
 	start := sort.Search(len(list), func(i int) bool { return key(list[i]).At > at-flightDur })
-	for _, it := range list[start:] {
-		d := key(it)
+	for i := start; i < len(list); i++ {
+		d := key(list[i])
 		age := at - d.At
 		if age < 0 {
 			next = -age
@@ -322,14 +442,23 @@ func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, a
 		if ok && l < 0 {
 			continue
 		}
-		tw := a.danmakuText(d.Text).w
 		if !ok {
-			l = f.placeIn(d, tw, w, flightDur, lanes)
-			if l < 0 {
+			if l = dmSetOff(a, f, d, list[i+1:], key, w, flightDur, lanes); l < 0 {
 				continue
 			}
 		}
+		var tw float32
+		if g := f.group[d]; g != nil {
+			tw = g.w
+		} else {
+			tw = a.danmakuText(d.Text).w
+		}
 		out = append(out, dmFlying{d, w - float32(age)/float32(flightDur)*(w+tw), float32(dmTop + l*laneH)})
+	}
+	for i := range out { // counted now, with the repeats that set off after it this frame
+		if g := f.group[out[i].d]; g != nil {
+			out[i].d.Text = dmLabel(g.d.Text, g.n)
+		}
 	}
 	return out, next
 }
@@ -524,18 +653,7 @@ func (a *app) danmakuSettingsButton(c *ui.Context, key string, open *bool, onOpe
 				ui.Row(c).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "字号").FontSize(11.5).FontWeight(600).TextColor(vid.muted).Grow(1)
 					bold := st.Weight >= dmWeightBold
-					tb := ui.ButtonBase(c.Key(key+"-bold")).Height(20).PaddingX(8).Radius(5).Center().FocusRing(false).Label("字重：粗体")
-					if bold {
-						tb.Background(vid.accent.Alpha(0.22)).Border(1, vid.accent.Alpha(0.55))
-					} else if tb.Hovered() {
-						tb.Background(vid.press)
-					} else {
-						tb.Background(ui.RGBA(255, 255, 255, 0.08))
-					}
-					tb.Children(func() {
-						ui.Text(c, "粗体").FontSize(11).FontWeight(onOff(bold, 700, 500)).TextColor(onOff(bold, white, vid.muted)).SingleLine()
-					})
-					if tb.Clicked() {
+					if dmToggle(c, key+"-bold", "粗体", "字重：粗体", bold).Clicked() {
 						if bold {
 							st.Weight = dmWeightNormal
 						} else {
@@ -562,7 +680,37 @@ func (a *app) danmakuSettingsButton(c *ui.Context, key string, open *bool, onOpe
 				a.setDanmakuStyle(st)
 			})
 			ui.Text(c, "倍速播放时自动保持弹幕阅读速度").FontSize(11).TextColor(vid.faint)
+			ui.Row(c.Key(key+"-filter")).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "过滤").FontSize(11.5).FontWeight(600).TextColor(vid.muted).Grow(1)
+				if dmToggle(c, key+"-merge", "合并重复", "合并重复弹幕", !a.dmMergeOff).Clicked() {
+					a.dmMergeOff = !a.dmMergeOff
+				}
+				block := "屏蔽词"
+				if n := len(a.dmBlock); n > 0 {
+					block += " " + strconv.Itoa(n)
+				}
+				if dmToggle(c, key+"-block", block, "管理屏蔽词", len(a.dmBlock) > 0).Clicked() {
+					*open = false
+					a.openSettings(settingsDanmaku)
+				}
+			})
 		})
+	})
+}
+
+// dmToggle is a small pill of the danmaku popover, lit while on.
+func dmToggle(c *ui.Context, key, text, label string, on bool) ui.Element {
+	b := ui.ButtonBase(c.Key(key)).Height(20).PaddingX(8).Radius(5).Center().FocusRing(false).Label(label)
+	switch {
+	case on:
+		b.Background(vid.accent.Alpha(0.22)).Border(1, vid.accent.Alpha(0.55))
+	case b.Hovered():
+		b.Background(vid.press)
+	default:
+		b.Background(ui.RGBA(255, 255, 255, 0.08))
+	}
+	return b.Children(func() {
+		ui.Text(c, text).FontSize(11).FontWeight(onOff(on, 700, 500)).TextColor(onOff(on, white, vid.muted)).SingleLine()
 	})
 }
 

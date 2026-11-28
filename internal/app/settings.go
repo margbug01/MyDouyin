@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"douyin/internal/dy"
@@ -18,29 +19,31 @@ import (
 // (连播, the bullet comments, the definition, the volume). They live beside
 // the login's cookies, and are saved as soon as one changes.
 type settings struct {
-	AutoNext       bool    `json:"autoNext"`
-	Danmaku        bool    `json:"danmaku"`
-	DanmakuSpeed   float64 `json:"danmakuSpeed,omitempty"`
-	DanmakuSize    float32 `json:"danmakuSize,omitempty"`
-	DanmakuWeight  int     `json:"danmakuWeight,omitempty"`
-	DanmakuStroke  string  `json:"danmakuStroke,omitempty"`
-	DanmakuOpacity float32 `json:"danmakuOpacity,omitempty"`
-	DanmakuArea    float32 `json:"danmakuArea,omitempty"`
-	Quality        string  `json:"quality"`               // "" or 智能 for Douyin's pick
-	LiveQuality    string  `json:"liveQuality,omitempty"` // "" or 智能 for live default
-	Volume         float64 `json:"volume"`
-	PlaybackSpeed  float64 `json:"playbackSpeed"`
-	Muted          bool    `json:"muted"`
-	AutoUpdate     bool    `json:"autoUpdate"`
-	Theme          string  `json:"theme,omitempty"` // "", "light", or "dark"
-	Mode           string  `json:"mode,omitempty"`
-	HGDirect       *bool   `json:"hgDirect,omitempty"`
-	HGSignerURL    string  `json:"hgSignerURL,omitempty"`
-	HGSignerToken  string  `json:"hgSignerToken,omitempty"`
-	ProxyURL       string  `json:"proxyUrl,omitempty"`     // TikTok's proxy, http(s):// or socks5://; "" finds the system's
-	TikTokRegion   string  `json:"tiktokRegion,omitempty"` // e.g. "US", "JP", "GB"
-	Subtitles      *bool   `json:"subtitles,omitempty"`    // nil or true shows WebVTT subtitles on TikTok
-	SubTranslate   *bool   `json:"subTranslate,omitempty"` // nil or true translates non-Chinese subtitles to Chinese
+	AutoNext       bool     `json:"autoNext"`
+	Danmaku        bool     `json:"danmaku"`
+	DanmakuSpeed   float64  `json:"danmakuSpeed,omitempty"`
+	DanmakuSize    float32  `json:"danmakuSize,omitempty"`
+	DanmakuWeight  int      `json:"danmakuWeight,omitempty"`
+	DanmakuStroke  string   `json:"danmakuStroke,omitempty"`
+	DanmakuOpacity float32  `json:"danmakuOpacity,omitempty"`
+	DanmakuArea    float32  `json:"danmakuArea,omitempty"`
+	DanmakuMerge   *bool    `json:"danmakuMerge,omitempty"` // nil or true folds repeats into one, as 来了×12
+	DanmakuBlock   []string `json:"danmakuBlock,omitempty"` // words whose bullet comments are not shown
+	Quality        string   `json:"quality"`                // "" or 智能 for Douyin's pick
+	LiveQuality    string   `json:"liveQuality,omitempty"`  // "" or 智能 for live default
+	Volume         float64  `json:"volume"`
+	PlaybackSpeed  float64  `json:"playbackSpeed"`
+	Muted          bool     `json:"muted"`
+	AutoUpdate     bool     `json:"autoUpdate"`
+	Theme          string   `json:"theme,omitempty"` // "", "light", or "dark"
+	Mode           string   `json:"mode,omitempty"`
+	HGDirect       *bool    `json:"hgDirect,omitempty"`
+	HGSignerURL    string   `json:"hgSignerURL,omitempty"`
+	HGSignerToken  string   `json:"hgSignerToken,omitempty"`
+	ProxyURL       string   `json:"proxyUrl,omitempty"`     // TikTok's proxy, http(s):// or socks5://; "" finds the system's
+	TikTokRegion   string   `json:"tiktokRegion,omitempty"` // e.g. "US", "JP", "GB"
+	Subtitles      *bool    `json:"subtitles,omitempty"`    // nil or true shows WebVTT subtitles on TikTok
+	SubTranslate   *bool    `json:"subTranslate,omitempty"` // nil or true translates non-Chinese subtitles to Chinese
 }
 
 func (s settings) equal(other settings) bool {
@@ -69,6 +72,8 @@ func (s settings) equal(other settings) bool {
 		s.DanmakuStroke == other.DanmakuStroke &&
 		s.DanmakuOpacity == other.DanmakuOpacity &&
 		s.DanmakuArea == other.DanmakuArea &&
+		eqBoolPtr(s.DanmakuMerge, other.DanmakuMerge, true) &&
+		slices.Equal(s.DanmakuBlock, other.DanmakuBlock) &&
 		s.Quality == other.Quality &&
 		s.LiveQuality == other.LiveQuality &&
 		s.Volume == other.Volume &&
@@ -122,6 +127,8 @@ func (a *app) loadSettings(file string) {
 		Opacity: s.DanmakuOpacity,
 		Area:    s.DanmakuArea,
 	})
+	a.dmMergeOff = s.DanmakuMerge != nil && !*s.DanmakuMerge
+	a.setDanmakuBlock(s.DanmakuBlock)
 	a.orbit.theme = s.Theme
 	a.mode = parseAppMode(s.Mode)
 	a.hgDirect = hgDirect
@@ -149,7 +156,11 @@ func (a *app) current() settings {
 	if region == "" || region == "US" {
 		region = ""
 	}
-	var subs, subTr *bool
+	var subs, subTr, dmMerge *bool
+	if a.dmMergeOff {
+		f := false
+		dmMerge = &f
+	}
 	if a.subtitlesOff {
 		f := false
 		subs = &f
@@ -167,6 +178,8 @@ func (a *app) current() settings {
 		DanmakuStroke:  dm.Stroke,
 		DanmakuOpacity: dm.Opacity,
 		DanmakuArea:    dm.Area,
+		DanmakuMerge:   dmMerge,
+		DanmakuBlock:   a.dmBlock,
 		Quality:        a.quality,
 		LiveQuality:    a.liveQuality,
 		Volume:         a.volume,
@@ -221,6 +234,11 @@ const (
 )
 
 var settingsPageNames = [...]string{"播放", "弹幕", "红果短剧", "账号", "更新"}
+
+// openSettings opens the settings on page p rather than the mode's own.
+func (a *app) openSettings(p settingsPage) {
+	a.settingsOpen, a.settingsWasOpen, a.settingsPage = true, true, p
+}
 
 // settingsDialog is the settings, over the window while open: its pages
 // listed down the side, the one chosen beside them in cards of rows. It
@@ -387,6 +405,41 @@ func (a *app) settingsBody(c *ui.Context) {
 			row("显示弹幕", "", func() {
 				if ui.Switch(c.Key("danmaku"), &on).Label("显示弹幕开关").Changed() {
 					a.dmOff = !on
+				}
+			})
+		})
+		merge := !a.dmMergeOff
+		group("过滤", func() {
+			row("合并重复弹幕", "同一句在飞过屏幕期间只出一条，显示成「来了×12」", func() {
+				if ui.Switch(c.Key("dmMerge"), &merge).Label("合并重复弹幕开关").Changed() {
+					a.dmMergeOff = !merge
+				}
+			})
+			row("屏蔽词", "弹幕里有这些词就不显示，只存在这台电脑上", func() {
+				ui.Row(c.Key("dmBlock-wrap")).Width(230).Height(32).PaddingX(10).Radius(8).AlignItems(ui.Center).
+					Background(pal.searchTint).Border(1, onOff(c.Focused(a.dmBlockBox), pal.focusBorder, pal.searchBorder)).Children(func() {
+					in := ui.TextInputBase(c.Key("dmBlock"), &a.dmBlockText).Bind(&a.dmBlockBox).Grow(1).Placeholder("输入词，回车添加").FontSize(12.5).Label("添加屏蔽词")
+					if in.Submitted() && strings.TrimSpace(a.dmBlockText) != "" {
+						a.setDanmakuBlock(append(slices.Clone(a.dmBlock), a.dmBlockText))
+						a.dmBlockText = ""
+					}
+				})
+			})
+			if len(a.dmBlock) == 0 {
+				return
+			}
+			ui.Row(c.Key("dmBlock-list")).Wrap().Gap(6).Padding(0, 16, 14, 16).Children(func() {
+				for i, w := range a.dmBlock {
+					b := ui.ButtonBase(c.Key("dmBlock:"+w)).Row().Height(26).PaddingX(10).Gap(5).Radius(13).AlignItems(ui.Center).
+						FocusRing(false).Label("移除屏蔽词 "+w).Border(1, pal.hairline)
+					b.Background(onOff(b.Hovered() || b.FocusVisible(), pal.press, pal.pillBg))
+					b.Children(func() {
+						ui.Text(c, w).FontSize(12.5).TextColor(pal.text).SingleLine()
+						ui.Icon(c, iconClose).Size(10, 10).TextColor(pal.muted)
+					})
+					if b.Clicked() {
+						a.setDanmakuBlock(slices.Delete(slices.Clone(a.dmBlock), i, i+1))
+					}
 				}
 			})
 		})

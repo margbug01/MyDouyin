@@ -94,7 +94,7 @@ func (a *app) view(c *ui.Context) {
 
 	liveInputFocused := a.mode != modeHongguo && a.liveChat != nil && c.Focused(a.liveChat.input)
 	commentInputFocused := a.mode != modeHongguo && a.sheet != nil && !a.sheet.related && (c.Focused(a.sheet.draft.input) || a.sheet.draft.emojiOpen)
-	settingsInputFocused := c.Focused(a.hgSignerURLBox) || c.Focused(a.hgSignerTokenBox)
+	settingsInputFocused := c.Focused(a.hgSignerURLBox) || c.Focused(a.hgSignerTokenBox) || c.Focused(a.dmBlockBox)
 	hgSearchFocused := a.mode == modeHongguo && a.hg != nil && c.Focused(a.hg.searchBox)
 	modalOpen := a.settingsOpen || a.upd.dialogOpen || a.loginOpen || a.group.open || a.picViewer.open || giftOpen
 	textFocused := liveInputFocused || commentInputFocused || settingsInputFocused || hgSearchFocused || c.Focused(a.searchBox) || c.Focused(a.shareBox) || c.Focused(a.dmBox)
