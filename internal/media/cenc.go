@@ -355,7 +355,7 @@ func (p *cencPlan) fetchRange(ctx context.Context, start, end int64) ([]byte, in
 		req.Header.Set(k, v)
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	resp, err := p.client.Do(req)
+	resp, err := fetch(p.client, req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1954,7 +1954,7 @@ func (p *cencPlan) serve(ctx context.Context, w http.ResponseWriter, r *http.Req
 			upReq.Header.Set(k, v)
 		}
 		upReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", tailStart, end))
-		resp, err := p.client.Do(upReq)
+		resp, err := fetch(p.client, upReq)
 		if err != nil {
 			return
 		}
@@ -1995,7 +1995,7 @@ func (p *cencPlan) serve(ctx context.Context, w http.ResponseWriter, r *http.Req
 		upReq.Header.Set(k, v)
 	}
 	upReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	resp, err := p.client.Do(upReq)
+	resp, err := fetch(p.client, upReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

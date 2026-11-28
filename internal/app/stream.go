@@ -177,16 +177,24 @@ func (p *streamPlayer) update() {
 }
 
 // watch fails an engine's player that has played where it shows with no
-// picture for noPictureFor: none yet, or a stream stuck buffering. MyGo
+// picture for noPictureFor: none yet, a stream stuck buffering, or a video
+// with sound that stands still. MyGo
 // learns both only as it draws the player, so watch runs as video does.
 func (p *streamPlayer) watch(now time.Time) {
-	p.watchState(now, p.engine.Ready(), p.engine.Buffering(), p.engine.Position())
+	e := p.engine
+	// MyGo holds a muted video still while it is out of sight or the
+	// desktop asks for less motion, so only one with sound must move on.
+	p.watchState(now, e.Ready(), e.Buffering(), e.Playing() && !e.Muted(), e.Position())
 }
 
-func (p *streamPlayer) watchState(now time.Time, ready, buffering bool, pos time.Duration) {
+// watchState takes whether the video must be moving on: Media Foundation
+// reports no buffering while it waits on a stream that stopped sending,
+// so a video that must move on and does not is not playing, whatever the
+// engine reports.
+func (p *streamPlayer) watchState(now time.Time, ready, buffering, mustAdvance bool, pos time.Duration) {
 	advancing := p.hasPos && pos != p.lastPos
 	p.lastPos, p.hasPos = pos, true
-	playing := ready && (!buffering || advancing)
+	playing := ready && (advancing || !buffering && !mustAdvance)
 	if p.paused || now.Sub(p.lastUpdate) > time.Second || playing {
 		p.waitFrom = now
 		if errors.Is(p.err, errNoPicture) && playing {

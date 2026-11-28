@@ -88,7 +88,7 @@ func TestStreamWatchDoesNotFailWhileAdvancingAndClearsRecoveredTimeout(t *testin
 	for i := 0; i <= 50; i++ {
 		now := t0.Add(time.Duration(i) * 500 * time.Millisecond)
 		pos := time.Duration(i) * 500 * time.Millisecond
-		p.watchState(now, true, true, pos)
+		p.watchState(now, true, true, true, pos)
 		if p.Err() != nil {
 			t.Fatalf("step %d (%v): false error while position advanced: %v", i, now.Sub(t0), p.Err())
 		}
@@ -98,7 +98,7 @@ func TestStreamWatchDoesNotFailWhileAdvancingAndClearsRecoveredTimeout(t *testin
 	stallStart := t0.Add(26 * time.Second)
 	for i := 0; i <= 45; i++ {
 		now := stallStart.Add(time.Duration(i) * 500 * time.Millisecond)
-		p.watchState(now, true, true, 25*time.Second)
+		p.watchState(now, true, true, true, 25*time.Second)
 	}
 	if p.Err() != errNoPicture {
 		t.Fatalf("expected errNoPicture after genuine stall, got %v", p.Err())
@@ -106,8 +106,25 @@ func TestStreamWatchDoesNotFailWhileAdvancingAndClearsRecoveredTimeout(t *testin
 
 	// Once playback resumes (not buffering, or position advances), the transient
 	// timeout error must clear so the error overlay does not stay over playing video.
-	p.watchState(stallStart.Add(23*time.Second), true, false, 26*time.Second)
+	p.watchState(stallStart.Add(23*time.Second), true, false, true, 26*time.Second)
 	if p.Err() != nil {
 		t.Fatalf("expected errNoPicture to clear once playback resumed, got %v", p.Err())
+	}
+}
+
+// Media Foundation waiting on a stream that stopped sending reports no
+// buffering (measured on Windows 11, 2026-11-28): a video with sound whose
+// position stands still fails all the same, while a muted one, which MyGo
+// may hold still, does not.
+func TestStreamWatchFailsAStillVideoWithSoundThatReportsNoBuffering(t *testing.T) {
+	t0 := time.Date(2026, 11, 28, 15, 0, 0, 0, time.UTC)
+	for _, mustAdvance := range []bool{true, false} {
+		p := &streamPlayer{}
+		for i := 0; i <= 50; i++ {
+			p.watchState(t0.Add(time.Duration(i)*500*time.Millisecond), true, false, mustAdvance, 37*time.Second)
+		}
+		if got := p.Err() == errNoPicture; got != mustAdvance {
+			t.Errorf("mustAdvance=%v: still for 25 s gave %v", mustAdvance, p.Err())
+		}
 	}
 }

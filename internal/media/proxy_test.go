@@ -1,10 +1,14 @@
 package media
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -60,6 +64,70 @@ func TestStreamProxyHeadersRangeAndCancel(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 after release, got %d", resp2.StatusCode)
+	}
+}
+
+// A stream whose server goes quiet without closing (as Media Foundation
+// then waits for good, measured on Windows 11, 2026-11-28) ends, so the
+// player asks again from where it got to and gets the rest.
+func TestStreamProxyEndsAStalledStreamSoThePlayerAsksAgain(t *testing.T) {
+	old := upstreamIdle
+	upstreamIdle = 200 * time.Millisecond
+	t.Cleanup(func() { upstreamIdle = old })
+
+	payload := bytes.Repeat([]byte("0123456789abcdef"), 64<<10) // 1 MiB
+	const stallAt = 600 << 10
+	var stalled atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, end := 0, len(payload)-1
+		if rg, ok := strings.CutPrefix(r.Header.Get("Range"), "bytes="); ok {
+			a, b, _ := strings.Cut(rg, "-")
+			start, _ = strconv.Atoi(a)
+			if b != "" {
+				end, _ = strconv.Atoi(b)
+			}
+			end = min(end, len(payload)-1)
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(payload)))
+			w.Header().Set("Content-Length", strconv.Itoa(end-start+1))
+			w.WriteHeader(http.StatusPartialContent)
+		}
+		if start < stallAt && end >= stallAt && stalled.CompareAndSwap(false, true) {
+			w.Write(payload[start:stallAt])
+			w.(http.Flusher).Flush()
+			<-r.Context().Done() // quiet, the connection open
+			return
+		}
+		w.Write(payload[start : end+1])
+	}))
+	defer srv.Close()
+
+	pu, release, err := localProxy.register(context.Background(), srv.URL+"/ep.mp4", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	var got []byte
+	for asks := 0; len(got) < len(payload); asks++ {
+		if asks == 3 {
+			t.Fatalf("got %d of %d bytes in 3 asks", len(got), len(payload))
+		}
+		req, _ := http.NewRequest(http.MethodGet, pu, nil)
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", len(got)))
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if os.IsTimeout(err) {
+			t.Fatalf("the proxy held a stalled stream open (%d bytes in)", len(got)+len(b))
+		}
+		got = append(got, b...)
+	}
+	if !stalled.Load() || !bytes.Equal(got, payload) {
+		t.Fatalf("stalled=%v, bytes equal=%v", stalled.Load(), bytes.Equal(got, payload))
 	}
 }
 

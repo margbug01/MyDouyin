@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/http/httpproxy"
@@ -94,6 +95,64 @@ var localProxy = &streamProxy{
 			IdleConnTimeout:       60 * time.Second,
 		},
 	},
+}
+
+// upstreamIdle is how long a read of a stream's body waits for its next
+// bytes. A connection that goes quiet without closing would hold the
+// player's read for good: Media Foundation then neither plays on nor
+// reports buffering, and its seeks wait behind that read. Past it the
+// request fails, the player sees its connection close, and asks again from
+// where it got to.
+var upstreamIdle = 15 * time.Second
+
+var errUpstreamIdle = errors.New("media: the stream stopped sending")
+
+// fetch sends req through client; a read of the response's body fails
+// once it waited upstreamIdle for bytes.
+func fetch(client *http.Client, req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancel(req.Context())
+	resp, err := client.Do(req.WithContext(ctx))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	b := &idleBody{body: resp.Body, cancel: cancel}
+	b.timer = time.AfterFunc(upstreamIdle, b.expire)
+	b.timer.Stop()
+	resp.Body = b
+	return resp, nil
+}
+
+type idleBody struct {
+	body    io.ReadCloser
+	cancel  context.CancelFunc
+	timer   *time.Timer
+	expired atomic.Bool
+}
+
+func (b *idleBody) expire() {
+	b.expired.Store(true)
+	b.cancel()
+}
+
+// Read times only its wait for the stream, not the time between reads,
+// which is the player's: Media Foundation stops reading while its buffer is
+// full.
+func (b *idleBody) Read(p []byte) (int, error) {
+	b.timer.Reset(upstreamIdle)
+	n, err := b.body.Read(p)
+	b.timer.Stop()
+	if err != nil && b.expired.Load() {
+		err = errUpstreamIdle
+	}
+	return n, err
+}
+
+func (b *idleBody) Close() error {
+	b.timer.Stop()
+	err := b.body.Close()
+	b.cancel()
+	return err
 }
 
 func validateHTTPHeaders(headers map[string]string) (map[string]string, error) {
@@ -259,7 +318,7 @@ func (p *streamProxy) registerOptions(ctx context.Context, source string, opts S
 				req.Header.Set("Range", "bytes=0-0")
 			}
 		}
-		resp, err := client.Do(req)
+		resp, err := fetch(client, req)
 		if err != nil {
 			routeCancel()
 			return "", nil, err
@@ -431,7 +490,7 @@ func (p *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := route.client.Do(upReq)
+	resp, err := fetch(route.client, upReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -544,7 +603,7 @@ func (p *streamProxy) serveCachedHead(w http.ResponseWriter, r *http.Request, ro
 		upReq.Header.Set(k, v)
 	}
 	upReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", headLen, end))
-	resp, err := route.client.Do(upReq)
+	resp, err := fetch(route.client, upReq)
 	if err != nil {
 		return true
 	}

@@ -2562,6 +2562,10 @@ func Run() error {
 			a.startDouyinServices()
 		}
 		a.watchUpdates()
+		if f := settingsFile(); f != "" {
+			stalls := filepath.Join(filepath.Dir(f), "main-thread-stall.txt")
+			go watchMainThread(context.Background(), func(fn func()) { go mygo.RunOnMain(fn) }, stalls, mainStallAfter)
+		}
 		mygo.Theme.OnUpdated(func() { a.post(func() {}) })
 		if dir := os.Getenv("DY_SHOT"); dir != "" {
 			go a.selfCheck(dir)
