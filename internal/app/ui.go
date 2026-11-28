@@ -71,11 +71,11 @@ func (a *app) view(c *ui.Context) {
 		a.win.SetBackgroundColor(pal.bgHex)
 	}
 	var p *page
-	if a.mode == modeDouyin {
+	if a.mode != modeHongguo {
 		p = a.cur()
 		a.syncLiveRoom(p)
 	}
-	giftOpen := a.mode == modeDouyin && a.liveChat != nil && a.liveChat.gifts.open
+	giftOpen := a.mode != modeHongguo && a.liveChat != nil && a.liveChat.gifts.open
 	a.mainVideo.begin(a.win)
 	defer a.mainVideo.end()
 	if a.mode == modeHongguo {
@@ -92,8 +92,8 @@ func (a *app) view(c *ui.Context) {
 	defer a.img.sweep()
 	defer a.saveSettings()
 
-	liveInputFocused := a.mode == modeDouyin && a.liveChat != nil && c.Focused(a.liveChat.input)
-	commentInputFocused := a.mode == modeDouyin && a.sheet != nil && !a.sheet.related && (c.Focused(a.sheet.draft.input) || a.sheet.draft.emojiOpen)
+	liveInputFocused := a.mode != modeHongguo && a.liveChat != nil && c.Focused(a.liveChat.input)
+	commentInputFocused := a.mode != modeHongguo && a.sheet != nil && !a.sheet.related && (c.Focused(a.sheet.draft.input) || a.sheet.draft.emojiOpen)
 	settingsInputFocused := c.Focused(a.hgSignerURLBox) || c.Focused(a.hgSignerTokenBox)
 	hgSearchFocused := a.mode == modeHongguo && a.hg != nil && c.Focused(a.hg.searchBox)
 	modalOpen := a.settingsOpen || a.upd.dialogOpen || a.loginOpen || a.group.open || a.picViewer.open || giftOpen
@@ -101,8 +101,9 @@ func (a *app) view(c *ui.Context) {
 	if !modalOpen && !textFocused {
 		c.OnShortcut(ui.Cmd, ui.Key1, func() { a.switchMode(modeDouyin) })
 		c.OnShortcut(ui.Cmd, ui.Key2, func() { a.switchMode(modeHongguo) })
+		c.OnShortcut(ui.Cmd, ui.Key3, func() { a.switchMode(modeTikTok) })
 	}
-	if a.mode == modeDouyin && !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused {
+	if a.mode != modeHongguo && !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused {
 		c.OnShortcut(0, ui.KeyDown, func() { a.step(1) })
 		c.OnShortcut(0, ui.KeyUp, func() { a.step(-1) })
 	}
@@ -112,7 +113,7 @@ func (a *app) view(c *ui.Context) {
 	}
 	c.OnShortcut(0, ui.KeyEscape, a.escape)
 	root := ui.Box(c).Fill()
-	if a.mode == modeDouyin && !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused && !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
+	if a.mode != modeHongguo && !giftOpen && !a.picViewer.open && !a.upd.dialogOpen && !liveInputFocused && !commentInputFocused && !c.Focused(a.searchBox) && !c.Focused(a.shareBox) && !c.Focused(a.dmBox) {
 		// Space pauses wherever the focus is, as in MySpotify: on the box
 		// around everything it comes before a button the pointer focused,
 		// which would take it as a click; on the window, as nothing has
@@ -258,7 +259,7 @@ func (a *app) view(c *ui.Context) {
 			})
 		})
 	})
-	if a.mode == modeDouyin && c.Focused(a.searchBox) && !a.isHome(p) {
+	if a.mode != modeHongguo && c.Focused(a.searchBox) && !a.isHome(p) {
 		a.searchList(c)
 	}
 	if a.mode == modeHongguo && a.hg != nil && c.Focused(a.hg.searchBox) && !a.isHGOrbit() {
@@ -267,7 +268,7 @@ func (a *app) view(c *ui.Context) {
 	a.brandMenu(c, a.brandMenuLeft())
 	a.settingsDialog(c)
 	a.updateDialog(c)
-	if a.mode == modeDouyin {
+	if a.mode != modeHongguo {
 		a.commentGroupDialog(c)
 		a.picViewerDialog(c)
 		if a.liveChat != nil && a.liveChat.gifts.open && p.idx < len(p.list) {
@@ -279,7 +280,7 @@ func (a *app) view(c *ui.Context) {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
-	if a.mode == modeDouyin && a.pip != nil { // 小窗 follows what this window plays
+	if a.mode != modeHongguo && a.pip != nil { // 小窗 follows what this window plays
 		a.pip.Invalidate()
 	}
 }
@@ -484,7 +485,7 @@ func (a *app) profileHeader(c *ui.Context, u dy.User, isSelf bool) {
 					ids = append(ids, "抖音号："+u.Handle)
 				}
 			}
-			if u.Place != "" && a.caps().Location {
+			if u.Place != "" && !a.isTikTok() {
 				ids = append(ids, "IP属地："+u.Place)
 			}
 			if len(ids) > 0 {
@@ -1265,7 +1266,7 @@ func (a *app) controls(c *ui.Context, s *slot, at time.Duration, w, alpha float3
 					shown = time.Duration(float64(of) * float64(a.dragAt))
 				}
 				ui.Text(c, clock(shown)+" / "+clock(of)).FontSize(12).FontWeight(500).TextColor(ui.RGBA(255, 255, 255, 0.85)).Margin(0, 6, 0, 2).SingleLine()
-				if a.caps().Danmaku {
+				if !a.isTikTok() {
 					if show[barDanmaku] && chip(c.Key("danmaku"), "弹幕", !a.dmOff).Clicked() {
 						a.dmOff = !a.dmOff
 					}

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"douyin/internal/dy"
-	"douyin/internal/platform"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -494,7 +493,7 @@ func (a *app) topRight(c *ui.Context) {
 		if iconButton(c.Key("theme"), themeIcon, 16, pal.muted, themeLabel).Clicked() {
 			a.toggleOrbitTheme()
 		}
-		if a.mode == modeDouyin {
+		if a.mode != modeHongguo {
 			if !a.isTikTok() {
 				if iconButton(c.Key("dm"), iconChat, 16, onOff(a.dms != nil, pal.strong, pal.muted), onOff(a.dms != nil, "收起私信", "私信")).Clicked() {
 					if a.dms != nil {
@@ -563,12 +562,11 @@ func (a *app) topRight(c *ui.Context) {
 // again it is refreshed, 引力场 bringing the next ring of covers.
 func (a *app) dock(c *ui.Context, h float32) {
 	type dockItem struct {
-		key     string
-		icon    *ui.SVG
-		label   string
-		page    *page
-		div     bool
-		onClick func()
+		key   string
+		icon  *ui.SVG
+		label string
+		page  *page
+		div   bool
 	}
 	var items []dockItem
 	if a.isTikTok() {
@@ -581,10 +579,6 @@ func (a *app) dock(c *ui.Context, h float32) {
 		if a.ttLive != nil {
 			items = append(items, dockItem{key: "tt-live", icon: iconLive, label: "直播", page: a.ttLive})
 		}
-		items = append(items,
-			dockItem{key: "div-plat", div: true},
-			dockItem{key: "switch-dy", icon: iconOrbit, label: "切回抖音", onClick: func() { a.switchPlatform(platform.Douyin) }},
-		)
 	} else {
 		items = []dockItem{{key: "home", icon: iconOrbit, label: "引力场", page: a.home}}
 		if a.picks != nil {
@@ -611,10 +605,6 @@ func (a *app) dock(c *ui.Context, h float32) {
 		if a.drama != nil {
 			items = append(items, dockItem{key: "drama", icon: iconDrama, label: "短剧", page: a.drama})
 		}
-		items = append(items,
-			dockItem{key: "div-plat", div: true},
-			dockItem{key: "switch-tt", icon: iconCompass, label: "TikTok", onClick: func() { a.switchPlatform(platform.TikTok) }},
-		)
 	}
 
 	const dockItemH = float32(42)
@@ -664,15 +654,11 @@ func (a *app) dock(c *ui.Context, h float32) {
 						AnimatePose(ui.Pose{X: (1 - labelAlpha) * -6}, ui.Snappy)
 				}
 			})
-			if b.Clicked() {
-				if it.onClick != nil {
-					it.onClick()
-				} else if it.page != nil {
-					if it.page == a.home && a.isHome(a.cur()) {
-						a.cycleOrbit()
-					} else {
-						a.root(it.page)
-					}
+			if b.Clicked() && it.page != nil {
+				if it.page == a.home && a.isHome(a.cur()) {
+					a.cycleOrbit()
+				} else {
+					a.root(it.page)
 				}
 			}
 		}

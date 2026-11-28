@@ -23,7 +23,6 @@ import (
 
 	"douyin/internal/dy"
 	"douyin/internal/media"
-	"douyin/internal/platform"
 	ttsign "douyin/internal/sign/tiktok"
 )
 
@@ -153,9 +152,6 @@ func New() (*Client, error) {
 	}
 	return c, nil
 }
-
-// Platform identifies this client as TikTok.
-func (c *Client) Platform() platform.ID { return platform.TikTok }
 
 // SetBaseURLForTest overrides the API base URL in tests.
 func (c *Client) SetBaseURLForTest(raw string) { c.baseURL = raw }
@@ -1345,5 +1341,3 @@ func (c *Client) FetchSubtitle(rawURL string) ([]SubtitleCue, error) {
 	}
 	return ParseWebVTT(string(b)), nil
 }
-
-var _ platform.Client = (*Client)(nil)

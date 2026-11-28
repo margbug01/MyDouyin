@@ -15,28 +15,40 @@ import (
 // appMode selects which top-level product surface is active in the window.
 type appMode uint8
 
+// modeTikTok shows TikTok on MyDouyin's short-video surface: the same pages
+// and player, with TikTok's state swapped in (swapVideoState).
 const (
 	modeDouyin appMode = iota
 	modeHongguo
+	modeTikTok
 )
 
 func (m appMode) String() string {
-	if m == modeHongguo {
+	switch m {
+	case modeHongguo:
 		return "hongguo"
+	case modeTikTok:
+		return "tiktok"
 	}
 	return "douyin"
 }
 
 func parseAppMode(s string) appMode {
-	if strings.EqualFold(strings.TrimSpace(s), "hongguo") {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "hongguo":
 		return modeHongguo
+	case "tiktok":
+		return modeTikTok
 	}
 	return modeDouyin
 }
 
 func (a *app) windowTitle() string {
-	if a.mode == modeHongguo {
+	switch a.mode {
+	case modeHongguo:
 		return "MyHongguo"
+	case modeTikTok:
+		return "MyTikTok"
 	}
 	return "MyDouyin"
 }
@@ -195,14 +207,20 @@ func (a *app) hgClose() {
 	a.hg = nil
 }
 
-// switchMode transitions cleanly between MyDouyin and MyHongguo, releasing
-// active media from the outgoing mode and lazily initializing the target mode.
+// switchMode transitions cleanly between MyDouyin, MyHongguo and MyTikTok,
+// releasing active media from the outgoing mode and lazily initializing the
+// target mode.
 func (a *app) switchMode(next appMode) {
 	a.brandMenuOpen = false
 	if next == a.mode {
 		return
 	}
+	if next == modeTikTok && a.ensureTikTokClient() == nil {
+		return
+	}
 	a.sheet, a.notes, a.dms = nil, nil, nil
+	a.sugSeq++
+	a.ttWeb.layout = false
 	a.shareOpen, a.moreOpen, a.qualityOpen, a.speedOpen, a.volumeOpen, a.dmSettingsOpen = false, false, false, false, false, false
 	a.orbit.hotOpen = false
 	a.group.open = false
@@ -214,7 +232,7 @@ func (a *app) switchMode(next appMode) {
 		a.setFullScreen(false)
 	}
 
-	if a.mode == modeDouyin {
+	if a.mode != modeHongguo {
 		if len(a.pages) > 0 {
 			a.cur().paused = a.paused
 		}
@@ -235,22 +253,27 @@ func (a *app) switchMode(next appMode) {
 		a.hgSuspend()
 	}
 
+	if (a.mode == modeTikTok) != (next == modeTikTok) {
+		a.swapVideoState(next == modeTikTok)
+	}
 	a.mode = next
-	if next == modeHongguo {
+	if a.win != nil {
+		a.win.SetTitle(a.windowTitle())
+	}
+	switch next {
+	case modeHongguo:
 		a.ensureHG()
 		a.hgEnsureActiveLoaded()
-		if a.win != nil {
-			a.win.SetTitle("MyHongguo")
+	case modeTikTok:
+		if a.win != nil && (!a.signedIn || a.me.ID == "") {
+			a.startTikTokLogin()
 		}
-	} else {
-		if a.win != nil {
-			a.win.SetTitle("MyDouyin")
-		}
+	default:
 		a.startDouyinServices()
-		if len(a.pages) > 0 {
-			a.paused = a.cur().paused
-			a.fill()
-		}
+	}
+	if next != modeHongguo && len(a.pages) > 0 {
+		a.paused = a.cur().paused
+		a.fill()
 	}
 	a.saveSettings()
 	a.redraw()
@@ -329,6 +352,13 @@ func (a *app) brandMenu(c *ui.Context, x float32) {
 			title:    "MyHongguo",
 			subtitle: "免费短剧 · 漫剧 · 榜单",
 			hint:     onOff(runtime.GOOS == "darwin", "⌘2", "Ctrl+2"),
+		},
+		{
+			mode:     modeTikTok,
+			icon:     logo,
+			title:    "MyTikTok",
+			subtitle: "For You · 字幕翻译 · 直播",
+			hint:     onOff(runtime.GOOS == "darwin", "⌘3", "Ctrl+3"),
 		},
 	}
 

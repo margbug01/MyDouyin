@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"douyin/internal/dy"
-	"douyin/internal/platform"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -38,7 +37,6 @@ type settings struct {
 	HGDirect       *bool   `json:"hgDirect,omitempty"`
 	HGSignerURL    string  `json:"hgSignerURL,omitempty"`
 	HGSignerToken  string  `json:"hgSignerToken,omitempty"`
-	Platform       string  `json:"platform,omitempty"`     // "", "douyin", or "tiktok"
 	ProxyURL       string  `json:"proxyUrl,omitempty"`     // optional http(s):// or socks5:// proxy
 	TikTokRegion   string  `json:"tiktokRegion,omitempty"` // e.g. "US", "JP", "GB"
 	Subtitles      *bool   `json:"subtitles,omitempty"`    // nil or true shows WebVTT subtitles on TikTok
@@ -82,7 +80,6 @@ func (s settings) equal(other settings) bool {
 		d1 == d2 &&
 		s.HGSignerURL == other.HGSignerURL &&
 		s.HGSignerToken == other.HGSignerToken &&
-		s.Platform == other.Platform &&
 		s.ProxyURL == other.ProxyURL &&
 		s.TikTokRegion == other.TikTokRegion &&
 		eqBoolPtr(s.Subtitles, other.Subtitles, true) &&
@@ -133,7 +130,6 @@ func (a *app) loadSettings(file string) {
 	a.applyThemeSource()
 	a.setVolume(s.Volume, s.Muted)
 	a.setSpeed(s.PlaybackSpeed)
-	a.platform = platform.Parse(s.Platform)
 	a.subtitlesOff = s.Subtitles != nil && !*s.Subtitles
 	a.subTranslateOff = s.SubTranslate != nil && !*s.SubTranslate
 	a.applyTikTokRegion(s.TikTokRegion)
@@ -149,10 +145,6 @@ func (a *app) loadSettings(file string) {
 func (a *app) current() settings {
 	hgDirect := a.hgDirect
 	dm := a.danmakuStyle()
-	plat := ""
-	if a.activePlatform() == platform.TikTok {
-		plat = string(platform.TikTok)
-	}
 	region := a.ttRegion
 	if region == "" || region == "US" {
 		region = ""
@@ -186,7 +178,6 @@ func (a *app) current() settings {
 		HGDirect:       &hgDirect,
 		HGSignerURL:    strings.TrimSpace(a.hgSignerURL),
 		HGSignerToken:  strings.TrimSpace(a.hgSignerToken),
-		Platform:       plat,
 		ProxyURL:       a.proxyURL,
 		TikTokRegion:   region,
 		Subtitles:      subs,
@@ -374,7 +365,7 @@ func (a *app) settingsBody(c *ui.Context) {
 				}
 			})
 		})
-		if a.caps().Subtitles {
+		if a.isTikTok() {
 			subOn := !a.subtitlesOff
 			trOn := !a.subTranslateOff
 			group("字幕", func() {
@@ -487,23 +478,12 @@ func (a *app) settingsBody(c *ui.Context) {
 				}
 			})
 		})
-		platChoice := a.activePlatform().DisplayName()
-		platChoices := []string{"抖音", "TikTok"}
 		regionChoice := a.ttRegion
 		if regionChoice == "" {
 			regionChoice = "US"
 		}
 		regionChoices := []string{"US", "JP", "GB", "SG", "KR", "TW"}
-		group("平台与网络", func() {
-			row("当前平台", "应用内即时切换抖音与 TikTok", func() {
-				if ui.Select(c.Key("platform"), &platChoice, platChoices).Width(114).Label("当前平台").Changed() {
-					if platChoice == "TikTok" {
-						a.switchPlatform(platform.TikTok)
-					} else {
-						a.switchPlatform(platform.Douyin)
-					}
-				}
-			})
+		group("网络与地区", func() {
 			row("网络代理", "留空跟随系统，支持 http:// 与 socks5://", func() {
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 					ui.TextInput(c.Key("proxyUrl"), &a.proxyDraft).Width(176).Height(28).

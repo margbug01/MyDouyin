@@ -9,35 +9,43 @@ import (
 	"time"
 
 	"douyin/internal/dy"
+	"douyin/internal/hg"
 	"douyin/internal/media"
-	"douyin/internal/platform"
 	"douyin/internal/tiktok"
+
+	"github.com/egoist/mygo/ui"
 )
 
-func TestSwitchPlatformIsolatesPagesAndCapabilities(t *testing.T) {
+// MyTikTok is the brand menu's third mode: its state is swapped in on entry
+// and Douyin's put back on leaving, MyHongguo included.
+func TestMyTikTokModeIsolatesState(t *testing.T) {
 	t.Cleanup(func() { _ = media.SetProxy("") })
+	t.Setenv("HOME", t.TempDir()) // tiktok.New reads TikTok/cookies.json under it
 
 	home := &page{title: "引力场", grid: true}
-	a := &app{
-		home:  home,
-		pages: []*page{home},
-		me:    dy.User{Name: "DouyinUser"},
-	}
+	a := withRoots(&app{
+		home:     home,
+		pages:    []*page{home},
+		me:       dy.User{Name: "DouyinUser"},
+		hgDirect: true,
+		newHGService: func(hg.Config) (hg.Service, error) {
+			return &fakeHGService{}, nil
+		},
+	})
 	a.signedIn = true
+	tt := newTester(a)
+	tt.Frame()
 
-	if a.isTikTok() {
-		t.Fatal("default platform should be Douyin")
+	if err := tt.Click("切换模式"); err != nil {
+		t.Fatal(err)
 	}
-	if !a.caps().Danmaku || !a.caps().Location {
-		t.Fatal("Douyin capabilities should enable Danmaku and Location")
+	tt.Frame()
+	if err := tt.Click("切换到 MyTikTok"); err != nil {
+		t.Fatal(err)
 	}
-
-	a.switchPlatform(platform.TikTok)
-	if !a.isTikTok() {
-		t.Fatal("expected active platform to be TikTok")
-	}
-	if a.caps().Danmaku || a.caps().Location {
-		t.Fatal("TikTok capabilities should disable Danmaku and Location")
+	tt.Frame()
+	if a.mode != modeTikTok || !a.isTikTok() || a.windowTitle() != "MyTikTok" {
+		t.Fatalf("brand menu did not enter MyTikTok: mode=%v title=%q", a.mode, a.windowTitle())
 	}
 	if a.cur() != a.ttFeed {
 		t.Fatalf("expected current page to be ttFeed, got %v", a.cur())
@@ -50,13 +58,22 @@ func TestSwitchPlatformIsolatesPagesAndCapabilities(t *testing.T) {
 		t.Fatalf("expected TikTok Referer header, got %+v", hdrs)
 	}
 
-	// Switching back restores Douyin pages and login snapshot.
-	a.switchPlatform(platform.Douyin)
-	if a.isTikTok() {
-		t.Fatal("expected platform back to Douyin")
+	// MyHongguo from MyTikTok puts Douyin's state back live, where Douyin's
+	// answers arriving meanwhile are written.
+	tt.Key(ui.Cmd, ui.Key2)
+	tt.Frame()
+	if a.mode != modeHongguo || a.isTikTok() || !a.signedIn || a.me.Name != "DouyinUser" {
+		t.Fatalf("Douyin state not live in MyHongguo: mode=%v signedIn=%v me=%+v", a.mode, a.signedIn, a.me)
 	}
-	if a.cur() != home || !a.signedIn || a.me.Name != "DouyinUser" {
-		t.Fatalf("Douyin snapshot not restored: cur=%v signedIn=%v me=%+v", a.cur(), a.signedIn, a.me)
+	tt.Key(ui.Cmd, ui.Key1)
+	tt.Frame()
+	if a.mode != modeDouyin || a.cur() != home || !a.signedIn || a.me.Name != "DouyinUser" {
+		t.Fatalf("Douyin snapshot not restored: mode=%v cur=%v signedIn=%v me=%+v", a.mode, a.cur(), a.signedIn, a.me)
+	}
+	tt.Key(ui.Cmd, ui.Key3)
+	tt.Frame()
+	if a.mode != modeTikTok || a.cur() != a.ttFeed || a.signedIn {
+		t.Fatalf("Cmd+3 did not bring TikTok's state back: mode=%v cur=%v signedIn=%v", a.mode, a.cur(), a.signedIn)
 	}
 }
 
@@ -64,8 +81,7 @@ func TestSettingsPersistPlatformProxyAndRegion(t *testing.T) {
 	t.Cleanup(func() { _ = media.SetProxy("") })
 
 	file := filepath.Join(t.TempDir(), "settings.json")
-	a := &app{settingsFile: file}
-	a.platform = platform.TikTok
+	a := &app{settingsFile: file, mode: modeTikTok}
 	if err := a.applyProxySetting("socks5://127.0.0.1:1080"); err != nil {
 		t.Fatalf("applyProxySetting: %v", err)
 	}
@@ -74,8 +90,8 @@ func TestSettingsPersistPlatformProxyAndRegion(t *testing.T) {
 
 	b := &app{}
 	b.loadSettings(file)
-	if b.activePlatform() != platform.TikTok {
-		t.Fatalf("reloaded platform = %q, want tiktok", b.activePlatform())
+	if b.mode != modeTikTok {
+		t.Fatalf("reloaded mode = %v, want MyTikTok", b.mode)
 	}
 	if b.proxyURL != "socks5://127.0.0.1:1080" {
 		t.Fatalf("reloaded proxyURL = %q", b.proxyURL)
@@ -87,6 +103,7 @@ func TestSettingsPersistPlatformProxyAndRegion(t *testing.T) {
 
 func TestTikTokPhase2CapabilitiesAndUI(t *testing.T) {
 	t.Cleanup(func() { _ = media.SetProxy("") })
+	t.Setenv("HOME", t.TempDir()) // tiktok.New reads TikTok/cookies.json under it
 
 	v := dy.Video{ID: "741234567890", Desc: "hello tiktok", Author: "Alice", AuthorID: "MS4w_alice"}
 	p := &page{title: "For You", list: []*slot{{v: v}}, done: true}
@@ -99,7 +116,7 @@ func TestTikTokPhase2CapabilitiesAndUI(t *testing.T) {
 		t.Fatalf("Douyin videoURL = %q", got)
 	}
 
-	a.switchPlatform(platform.TikTok)
+	a.switchMode(modeTikTok)
 	a.pages = []*page{p}
 	if got := a.videoURL(v); got != "https://www.tiktok.com/@/video/741234567890" {
 		t.Fatalf("TikTok videoURL = %q", got)
@@ -137,7 +154,7 @@ func TestTikTokPhase2CapabilitiesAndUI(t *testing.T) {
 	}
 
 	// Switching back to Douyin restores Douyin's mine snapshot.
-	a.switchPlatform(platform.Douyin)
+	a.switchMode(modeDouyin)
 	if a.mine == nil || a.mine["观看历史"] == nil || a.mineTab != "作品" {
 		t.Fatalf("Douyin mine snapshot not restored: mine=%+v tab=%q", a.mine, a.mineTab)
 	}
@@ -168,6 +185,7 @@ func TestAllowTikTokPopupOAuthHosts(t *testing.T) {
 
 func TestTikTokPhase3SubtitlesAndLive(t *testing.T) {
 	t.Cleanup(func() { _ = media.SetProxy("") })
+	t.Setenv("HOME", t.TempDir()) // tiktok.New reads TikTok/cookies.json under it
 
 	v := dy.Video{
 		ID:       "741999111222",
@@ -193,15 +211,12 @@ func TestTikTokPhase3SubtitlesAndLive(t *testing.T) {
 	}
 	p := &page{title: "For You", list: []*slot{s}, done: true}
 	a := withRoots(&app{pages: []*page{p}, posted: make(chan func(), 8)})
-	a.switchPlatform(platform.TikTok)
+	a.switchMode(modeTikTok)
 	a.pages = []*page{p}
 	a.translateText = func(text, target string) (string, error) {
 		return "你我之间的绝对规则。", nil
 	}
 
-	if !a.caps().Live || !a.caps().Subtitles {
-		t.Fatalf("TikTok Phase 3 capabilities should enable Live and Subtitles: %+v", a.caps())
-	}
 	if a.ttLive == nil {
 		t.Fatal("expected ttLive page to be initialized")
 	}
@@ -265,7 +280,9 @@ func TestTikTokAutoLoginRestoresSession(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Use an isolated config dir so SaveCookies/ReloadCookies never touch user cookies.
+	// Use an isolated config dir so SaveCookies/ReloadCookies never touch user
+	// cookies: HOME is macOS's, APPDATA Windows', XDG_CONFIG_HOME Linux's.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("APPDATA", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
@@ -281,7 +298,7 @@ func TestTikTokAutoLoginRestoresSession(t *testing.T) {
 	p := &page{title: "For You", done: true}
 	a := withRoots(&app{pages: []*page{p}, posted: make(chan func(), 8)})
 	a.tt = ttClient
-	a.platform = platform.TikTok
+	a.mode = modeTikTok
 
 	a.startTikTokLogin()
 	if !a.signedIn {

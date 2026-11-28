@@ -35,7 +35,7 @@ func isChineseSubtitleLang(lang string) bool {
 // ensureSubtitle loads the selected WebVTT subtitle track for s over pure Go HTTP,
 // and translates non-Chinese cues into Chinese when auto-translation is enabled.
 func (a *app) ensureSubtitle(s *slot) {
-	if !a.caps().Subtitles || a.subtitlesOff || s == nil || s.v.Live != nil || len(s.v.Subtitles) == 0 {
+	if !a.isTikTok() || a.subtitlesOff || s == nil || s.v.Live != nil || len(s.v.Subtitles) == 0 {
 		return
 	}
 	if s.subTrack < 0 || s.subTrack >= len(s.v.Subtitles) || (s.subLoadedURL == "" && !s.subPicked) {
@@ -193,7 +193,7 @@ func (a *app) toggleDescTranslation(s *slot) {
 // subtitleOverlay renders the active WebVTT cue above the bottom caption/controls safe zone.
 func (a *app) subtitleOverlay(c *ui.Context, s *slot, at time.Duration, bottomInset float32) {
 	cues := a.activeSubtitleCues(s)
-	if !a.caps().Subtitles || a.subtitlesOff || a.clear || a.listen || s == nil || s.v.Live != nil || len(cues) == 0 {
+	if !a.isTikTok() || a.subtitlesOff || a.clear || a.listen || s == nil || s.v.Live != nil || len(cues) == 0 {
 		return
 	}
 	text := tiktok.ActiveSubtitle(cues, at)
@@ -211,7 +211,7 @@ func (a *app) subtitleOverlay(c *ui.Context, s *slot, at time.Duration, bottomIn
 
 // subtitleMenu renders the player-bar caption toggle, auto-translate toggle & language picker.
 func (a *app) subtitleMenu(c *ui.Context, s *slot) {
-	if !a.caps().Subtitles || s == nil || s.v.Live != nil || len(s.v.Subtitles) == 0 {
+	if !a.isTikTok() || s == nil || s.v.Live != nil || len(s.v.Subtitles) == 0 {
 		return
 	}
 	label := "字幕"

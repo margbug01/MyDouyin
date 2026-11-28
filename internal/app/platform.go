@@ -7,7 +7,6 @@ import (
 
 	"douyin/internal/dy"
 	"douyin/internal/media"
-	"douyin/internal/platform"
 	"douyin/internal/tiktok"
 )
 
@@ -20,19 +19,10 @@ type platformSnapshot struct {
 	mineTab  string
 }
 
-func (a *app) activePlatform() platform.ID {
-	if a.platform == "" {
-		return platform.Douyin
-	}
-	return a.platform
-}
-
+// isTikTok tells whether TikTok's state is the live one: only in MyTikTok.
+// Elsewhere Douyin's is, which MyHongguo leaves untouched under it.
 func (a *app) isTikTok() bool {
-	return a.activePlatform() == platform.TikTok
-}
-
-func (a *app) caps() platform.Capabilities {
-	return a.activePlatform().Capabilities()
+	return a.mode == modeTikTok
 }
 
 func (a *app) ensureTikTokClient() *tiktok.Client {
@@ -256,31 +246,12 @@ func (a *app) loadTikTokAccount() {
 	}()
 }
 
-// switchPlatform toggles the live application state between Douyin and TikTok,
-// isolating page stacks, playback decoders, and account metadata per platform.
-func (a *app) switchPlatform(target platform.ID) {
-	target = platform.Parse(string(target))
-	if target == a.activePlatform() {
-		return
-	}
-	// Release active playback and preload before switching platform state.
-	a.sugSeq++
-	a.preload.close()
-	a.shareOpen, a.shareQuery = false, ""
-	if a.held != nil {
-		a.release(a.held)
-		a.held = nil
-	}
-	for _, p := range a.pages {
-		for _, s := range p.list {
-			a.release(s)
-		}
-	}
-	a.sheet, a.notes, a.dms = nil, nil, nil
-	a.paused = false
-	a.ttWeb.layout = false
-
-	// Save outgoing platform snapshot.
+// swapVideoState trades the short-video surface's state (pages, account, and
+// where writes go) between Douyin's and TikTok's, as switchMode enters or
+// leaves MyTikTok, whose media it has released already. Leaving MyTikTok for
+// MyHongguo brings Douyin's back too, so that Douyin's answers arriving there
+// land in the live state, as isTikTok tells them.
+func (a *app) swapVideoState(toTikTok bool) {
 	snap := &platformSnapshot{
 		pages:    a.pages,
 		stacks:   a.stacks,
@@ -289,19 +260,9 @@ func (a *app) switchPlatform(target platform.ID) {
 		mine:     a.mine,
 		mineTab:  a.mineTab,
 	}
-	if a.isTikTok() {
-		a.ttSnap = snap
-	} else {
+	if toTikTok {
 		a.dySnap = snap
-	}
-
-	a.platform = target
-	if target == platform.TikTok {
-		tt := a.ensureTikTokClient()
-		if tt == nil {
-			a.platform = platform.Douyin
-			return
-		}
+		tt := a.tt
 		a.setLiked = tt.SetLiked
 		a.setSaved = tt.SetSaved
 		a.setFollowed = tt.SetFollowed
@@ -327,14 +288,8 @@ func (a *app) switchPlatform(target platform.ID) {
 			a.mine = nil
 			a.mineTab = ""
 		}
-		if a.win != nil {
-			a.win.SetTitle("MyDouyin · TikTok")
-			if !a.signedIn || a.me.ID == "" {
-				a.startTikTokLogin()
-			}
-		}
-		a.toast = "已切换到 TikTok"
 	} else {
+		a.ttSnap = snap
 		if a.c != nil {
 			a.setLiked = a.c.SetLiked
 			a.setSaved = a.c.SetSaved
@@ -362,11 +317,5 @@ func (a *app) switchPlatform(target platform.ID) {
 			a.pages = []*page{a.home}
 			a.stacks = map[*page][]*page{}
 		}
-		if a.win != nil {
-			a.win.SetTitle("MyDouyin")
-			a.startDouyinServices()
-		}
-		a.toast = "已切回抖音"
 	}
-	a.fill()
 }

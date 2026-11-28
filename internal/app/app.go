@@ -25,7 +25,6 @@ import (
 	"douyin/internal/dy"
 	"douyin/internal/hg"
 	"douyin/internal/media"
-	"douyin/internal/platform"
 	"douyin/internal/tiktok"
 )
 
@@ -373,8 +372,7 @@ type app struct {
 	brandMenuOpen bool
 	hg            *hgApp
 
-	// Multi-platform state (platform.go, tt_web.go).
-	platform             platform.ID
+	// MyTikTok's state (platform.go, tt_web.go).
 	tt                   *tiktok.Client
 	ttWeb                ttWeb
 	proxyURL             string
@@ -1314,7 +1312,7 @@ func (a *app) escape() {
 		a.hgPop()
 		return
 	}
-	if a.mode != modeDouyin {
+	if a.mode == modeHongguo {
 		return
 	}
 	if a.dmSettingsOpen {
@@ -1425,7 +1423,7 @@ func (a *app) more(p *page) {
 // fill only opens the visible video. The next item can preload its track data
 // without creating another decoder.
 func (a *app) fill() {
-	if a.mode != modeDouyin {
+	if a.mode == modeHongguo {
 		return
 	}
 	p := a.cur()
@@ -2142,7 +2140,7 @@ func (a *app) release(s *slot) {
 // sync plays the current video and holds the others; 精选's covers play
 // their first video, silent.
 func (a *app) sync() {
-	if a.mode != modeDouyin {
+	if a.mode == modeHongguo {
 		return
 	}
 	p := a.cur()
@@ -2165,7 +2163,7 @@ func (a *app) sync() {
 func (a *app) syncAwake() {
 	on, display := false, false
 	switch {
-	case a.mode == modeDouyin:
+	case a.mode != modeHongguo:
 		if p := a.cur(); p.plays() && p.idx < len(p.list) {
 			vp := p.list[p.idx].vp
 			on, display = vp != nil && vp.Playing(), !a.listen
@@ -2542,14 +2540,14 @@ func Run() error {
 			}
 			a.setPip(false)
 		})
-		if a.mode == modeHongguo {
+		switch a.mode {
+		case modeHongguo:
 			a.ensureHG()
 			a.hgEnsureActiveLoaded()
-		} else if a.platform == platform.TikTok {
-			want := a.platform
-			a.platform = platform.Douyin
-			a.switchPlatform(want)
-		} else {
+		case modeTikTok: // from Douyin's state, which it puts aside
+			a.mode = modeDouyin
+			a.switchMode(modeTikTok)
+		default:
 			a.startDouyinServices()
 		}
 		a.watchUpdates()
