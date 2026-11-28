@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"douyin/internal/dy"
+	"douyin/internal/platform"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -494,30 +495,32 @@ func (a *app) topRight(c *ui.Context) {
 			a.toggleOrbitTheme()
 		}
 		if a.mode == modeDouyin {
-			if iconButton(c.Key("dm"), iconChat, 16, onOff(a.dms != nil, pal.strong, pal.muted), onOff(a.dms != nil, "收起私信", "私信")).Clicked() {
-				if a.dms != nil {
-					a.dms = nil
-				} else {
-					a.openDMs()
-				}
-			}
-			ui.Box(c.Key("bell-wrap")).Children(func() {
-				if iconButton(c.Key("bell"), iconBell, 16, onOff(a.notes != nil, pal.strong, pal.muted), onOff(a.notes != nil, "收起通知", "通知")).Clicked() {
-					if a.notes != nil {
-						a.notes = nil
+			if !a.isTikTok() {
+				if iconButton(c.Key("dm"), iconChat, 16, onOff(a.dms != nil, pal.strong, pal.muted), onOff(a.dms != nil, "收起私信", "私信")).Clicked() {
+					if a.dms != nil {
+						a.dms = nil
 					} else {
-						a.openNotes()
+						a.openDMs()
 					}
 				}
-				if a.unread > 0 {
-					ui.Box(c).Absolute().Top(3).Right(2).MinWidth(15).Height(15).PaddingX(4).Radius(8).
-						Background(pal.accent).Center().
-						HitTest(func(float32, float32, ui.Rect) bool { return false }). // the bell under it takes the click
-						Children(func() {
-							ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(9.5).FontWeight(700).TextColor(white)
-						})
-				}
-			})
+				ui.Box(c.Key("bell-wrap")).Children(func() {
+					if iconButton(c.Key("bell"), iconBell, 16, onOff(a.notes != nil, pal.strong, pal.muted), onOff(a.notes != nil, "收起通知", "通知")).Clicked() {
+						if a.notes != nil {
+							a.notes = nil
+						} else {
+							a.openNotes()
+						}
+					}
+					if a.unread > 0 {
+						ui.Box(c).Absolute().Top(3).Right(2).MinWidth(15).Height(15).PaddingX(4).Radius(8).
+							Background(pal.accent).Center().
+							HitTest(func(float32, float32, ui.Rect) bool { return false }). // the bell under it takes the click
+							Children(func() {
+								ui.Text(c, fmt.Sprint(min(a.unread, 99))).FontSize(9.5).FontWeight(700).TextColor(white)
+							})
+					}
+				})
+			}
 			switch {
 			case a.signedIn || a.me.Name != "":
 				mine := a.mine[a.mineTab]
@@ -531,7 +534,7 @@ func (a *app) topRight(c *ui.Context) {
 				if b.Clicked() && mine != nil {
 					a.showMine(a.mineTab)
 				}
-			case a.c != nil:
+			case a.c != nil || a.isTikTok():
 				b := ui.ButtonBase(c.Key("login")).Height(32).PaddingX(12).Gap(6).Radius(16).
 					AlignItems(ui.Center).FocusRing(false).Label("登录")
 				b.Background(onOff(b.Hovered(), pal.pillHoverBg, pal.pillBg)).Border(1, pal.pillBorder).Children(func() {
@@ -539,7 +542,7 @@ func (a *app) topRight(c *ui.Context) {
 					ui.Text(c, "登录").FontSize(12.5).FontWeight(500).TextColor(pal.text)
 				})
 				if b.Clicked() {
-					a.openLogin()
+					a.openActiveLogin()
 				}
 			}
 		}
@@ -560,36 +563,58 @@ func (a *app) topRight(c *ui.Context) {
 // again it is refreshed, 引力场 bringing the next ring of covers.
 func (a *app) dock(c *ui.Context, h float32) {
 	type dockItem struct {
-		key   string
-		icon  *ui.SVG
-		label string
-		page  *page
-		div   bool
+		key     string
+		icon    *ui.SVG
+		label   string
+		page    *page
+		div     bool
+		onClick func()
 	}
-	items := []dockItem{{key: "home", icon: iconOrbit, label: "引力场", page: a.home}}
-	if a.picks != nil {
-		items = append(items, dockItem{key: "picks", icon: iconCompass, label: "精选", page: a.picks})
-	}
-	if a.feed != nil {
-		items = append(items, dockItem{key: "feed", icon: iconSpark, label: "推荐", page: a.feed})
-	}
-	if a.follow != nil || a.friends != nil {
-		items = append(items, dockItem{key: "div0", div: true})
-	}
-	if a.follow != nil {
-		items = append(items, dockItem{key: "follow", icon: iconFollow, label: "关注", page: a.follow})
-	}
-	if a.friends != nil {
-		items = append(items, dockItem{key: "friends", icon: iconFriends, label: "朋友", page: a.friends})
-	}
-	if a.live != nil || a.drama != nil {
-		items = append(items, dockItem{key: "div1", div: true})
-	}
-	if a.live != nil {
-		items = append(items, dockItem{key: "live", icon: iconLive, label: "直播", page: a.live})
-	}
-	if a.drama != nil {
-		items = append(items, dockItem{key: "drama", icon: iconDrama, label: "短剧", page: a.drama})
+	var items []dockItem
+	if a.isTikTok() {
+		if a.ttFeed != nil {
+			items = append(items, dockItem{key: "tt-feed", icon: iconSpark, label: "For You", page: a.ttFeed})
+		}
+		if a.ttFollow != nil {
+			items = append(items, dockItem{key: "tt-follow", icon: iconFollow, label: "关注", page: a.ttFollow})
+		}
+		if a.ttLive != nil {
+			items = append(items, dockItem{key: "tt-live", icon: iconLive, label: "直播", page: a.ttLive})
+		}
+		items = append(items,
+			dockItem{key: "div-plat", div: true},
+			dockItem{key: "switch-dy", icon: iconOrbit, label: "切回抖音", onClick: func() { a.switchPlatform(platform.Douyin) }},
+		)
+	} else {
+		items = []dockItem{{key: "home", icon: iconOrbit, label: "引力场", page: a.home}}
+		if a.picks != nil {
+			items = append(items, dockItem{key: "picks", icon: iconCompass, label: "精选", page: a.picks})
+		}
+		if a.feed != nil {
+			items = append(items, dockItem{key: "feed", icon: iconSpark, label: "推荐", page: a.feed})
+		}
+		if a.follow != nil || a.friends != nil {
+			items = append(items, dockItem{key: "div0", div: true})
+		}
+		if a.follow != nil {
+			items = append(items, dockItem{key: "follow", icon: iconFollow, label: "关注", page: a.follow})
+		}
+		if a.friends != nil {
+			items = append(items, dockItem{key: "friends", icon: iconFriends, label: "朋友", page: a.friends})
+		}
+		if a.live != nil || a.drama != nil {
+			items = append(items, dockItem{key: "div1", div: true})
+		}
+		if a.live != nil {
+			items = append(items, dockItem{key: "live", icon: iconLive, label: "直播", page: a.live})
+		}
+		if a.drama != nil {
+			items = append(items, dockItem{key: "drama", icon: iconDrama, label: "短剧", page: a.drama})
+		}
+		items = append(items,
+			dockItem{key: "div-plat", div: true},
+			dockItem{key: "switch-tt", icon: iconCompass, label: "TikTok", onClick: func() { a.switchPlatform(platform.TikTok) }},
+		)
 	}
 
 	const dockItemH = float32(42)
@@ -639,11 +664,15 @@ func (a *app) dock(c *ui.Context, h float32) {
 						AnimatePose(ui.Pose{X: (1 - labelAlpha) * -6}, ui.Snappy)
 				}
 			})
-			if b.Clicked() && it.page != nil {
-				if it.page == a.home && a.isHome(a.cur()) {
-					a.cycleOrbit()
-				} else {
-					a.root(it.page)
+			if b.Clicked() {
+				if it.onClick != nil {
+					it.onClick()
+				} else if it.page != nil {
+					if it.page == a.home && a.isHome(a.cur()) {
+						a.cycleOrbit()
+					} else {
+						a.root(it.page)
+					}
 				}
 			}
 		}

@@ -30,14 +30,14 @@ const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const baseQuery = "device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=130.0.0.0&browser_online=true&engine_name=Blink&engine_version=130.0.0.0&os_name=Windows&os_version=10&cpu_core_num=8&device_memory=8&platform=PC"
 
 type Client struct {
-	http    *http.Client
-	signer  *sign.Signer
-	login          atomic.Pointer[login] // the cookies, which the app's page renews as it writes
-	cookieSaveMu   sync.Mutex
-	savedCookies   []byte // last JSON written to cookies.json, to skip unchanged writes
-	web            Web    // the app's Douyin page, which writes go through (write.go)
-	imSeq   atomic.Int32          // the IM requests' sequence
-	refresh atomic.Int32          // the feed's page, which two lists of it share
+	http         *http.Client
+	signer       *sign.Signer
+	login        atomic.Pointer[login] // the cookies, which the app's page renews as it writes
+	cookieSaveMu sync.Mutex
+	savedCookies []byte       // last JSON written to cookies.json, to skip unchanged writes
+	web          Web          // the app's Douyin page, which writes go through (write.go)
+	imSeq        atomic.Int32 // the IM requests' sequence
+	refresh      atomic.Int32 // the feed's page, which two lists of it share
 	// replyPageUntil holds a UnixNano deadline while Replies routes through
 	// pageGet after Douyin held direct Go requests back for verification.
 	replyPageUntil atomic.Int64
@@ -92,7 +92,18 @@ type Video struct {
 
 	Liked, Saved bool // whether the user logged in has liked it and saved it (收藏)
 
-	Qualities []Quality // the definitions to choose from, finest first; PlayURL is Douyin's 智能 pick
+	Qualities []Quality       // the definitions to choose from, finest first; PlayURL is Douyin's 智能 pick
+	Subtitles []SubtitleTrack // optional WebVTT caption tracks (e.g. TikTok subtitleInfos)
+}
+
+// SubtitleTrack describes one WebVTT caption track attached to a video.
+type SubtitleTrack struct {
+	ID       string // optional TikTok claSubtitleID used for native subtitle translation
+	Lang     string // normalized BCP-47 / TikTok language code, e.g. "zh-Hant", "en", "ja"
+	Label    string // human-readable display label, e.g. "中文 (繁體)", "English"
+	URL      string
+	Format   string // e.g. "webvtt"
+	Original bool   // true when this track is the video's original spoken-language caption
 }
 
 // Quality is a definition a video comes in: 4K, 2K, 1080P, 720P or 540P
@@ -1013,14 +1024,14 @@ func (c *Client) Profile(secUID string) (User, error) {
 
 // profile is an account as the profile and the user search give it.
 type profile struct {
-	SecUID    string `json:"sec_uid"`
-	Nickname  string
-	Signature string
-	Avatar    addr `json:"avatar_thumb"`
-	Following int  `json:"following_count"`
-	Followers int  `json:"follower_count"`
-	Liked     int  `json:"total_favorited"`
-	UID       string
+	SecUID       string `json:"sec_uid"`
+	Nickname     string
+	Signature    string
+	Avatar       addr `json:"avatar_thumb"`
+	Following    int  `json:"following_count"`
+	Followers    int  `json:"follower_count"`
+	Liked        int  `json:"total_favorited"`
+	UID          string
 	UniqueID     string `json:"unique_id"`
 	ShortID      string `json:"short_id"`
 	Place        string `json:"ip_location"`

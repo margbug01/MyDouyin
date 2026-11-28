@@ -405,6 +405,19 @@ func (a *app) startLogin() {
 			err = a.c.Logout() // cookies.json from elsewhere: no login of this device
 		}
 		a.post(func() {
+			if a.isTikTok() {
+				if a.dySnap == nil {
+					a.dySnap = &platformSnapshot{}
+				}
+				switch action {
+				case startupLoginSignedIn:
+					a.dySnap.signedIn = true
+					a.loadAccount()
+				case startupLoginLoggedOut:
+					a.dySnap.signedIn = false
+				}
+				return
+			}
 			if err != nil {
 				a.toast = "登录状态没读到：" + err.Error()
 			}
