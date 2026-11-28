@@ -478,10 +478,20 @@ const (
 	captchaUnknown captchaState = "" // the page did not answer
 )
 
-const captchaStateJS = `
-const el = document.querySelector("iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper, .captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper");
-if (!el) return "none";
-return getComputedStyle(el).visibility === "hidden" ? "hidden" : "shown";`
+const captchaFrameSelector = "iframe[src*='/verifycenter/captcha/']"
+const captchaSelector = captchaFrameSelector + ", #vc_captcha_wrapper, .captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper"
+const secondVerifySelector = "#uc-second-verify *, .second-verify-mask, [class*='second_verify_mask'], [class*='face_auth_mask'], .vc-second-valid-container, .vc-second-valid-mask"
+const visibleJS = `
+const vis = e => {
+  if (!e) return false;
+  const r = e.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility === "visible";
+};`
+
+const captchaStateJS = visibleJS + `
+const captchas = [...document.querySelectorAll("` + captchaSelector + `")];
+if (captchas.some(vis) || [...document.querySelectorAll("` + secondVerifySelector + `")].some(vis)) return "shown";
+return captchas.some(e => getComputedStyle(e).visibility === "hidden") ? "hidden" : "none";`
 
 func (w *web) captchaState(ctx context.Context) captchaState {
 	b, err := w.Eval(ctx, captchaStateJS)
@@ -494,35 +504,44 @@ func (w *web) captchaState(ctx context.Context) captchaState {
 
 // loginJS reads the login the page shows: its code, the text about it, and
 // whether Douyin asks to verify more than the scan. A code that expired is
-// renewed, as its 刷新 does.
-const loginJS = `
-if (window.__mdSignPage) return { src: "", scanned: false, expired: false, verify: false, signedIn: false };
-const vis = e => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-const img = [...document.querySelectorAll("img")].find(e => { const r = e.getBoundingClientRect(); return r.width >= 100 && Math.abs(r.width - r.height) < 8 && e.src && e.src.startsWith("data:image/"); });
-let near = "";
-if (img) { let p = img; for (let i = 0; i < 4 && p.parentElement; i++) p = p.parentElement; near = p.innerText || ""; }
-if (!window.__mdQR) {
-  window.__mdQR = { status: 0 };
-  const seen = (u, t) => { if (/check_qrconnect/.test(String(u))) { try { window.__mdQR.status = Number(JSON.parse(t).data.status) || 0; } catch {} } };
-  const of = window.fetch;
-  window.fetch = function (input) { const p = of.apply(this, arguments); p.then(r => r.clone().text().then(t => seen(typeof input === "string" ? input : input && input.url, t))).catch(() => {}); return p; };
-  const open = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function (m, u) { this.addEventListener("load", () => { try { seen(u, this.responseText); } catch {} }); return open.apply(this, arguments); };
-}
-const body = document.body ? document.body.innerText : "";
-const expired = /失效|过期/.test(near);
-if (expired) { const r = [...document.querySelectorAll("*")].find(e => e.children.length === 0 && /刷新/.test(e.textContent || "") && vis(e)); if (r) r.click(); }
-const hasCaptcha = [...document.querySelectorAll(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper")].some(vis)
+// renewed, as its 刷新 does. It reads DOM state without patching fetch or XHR
+// natives so Douyin's security SDK (uc-secure-tool-detect) does not flag hooks.
+const loginJS = visibleJS + `
+if (window.__mdSignPage) return { src: "", scanned: false, expired: false, verify: false, signedIn: false, captchaHidden: false };
+const captchaHidden = [...document.querySelectorAll("` + captchaFrameSelector + `")].some(e => getComputedStyle(e).visibility === "hidden");
+const hasCaptcha = captchaHidden || [...document.querySelectorAll("` + captchaSelector + `")].some(vis)
   || [...document.querySelectorAll("#captcha_container > *")].some(e => e.id !== "nocaptcha-container" && !e.classList.contains("nocaptcha-container") && vis(e));
-const verify = !img && (/身份验证|安全验证|短信验证|二次验证/.test(body) || hasCaptcha);
-const capFrame = document.querySelector("iframe[src*='/verifycenter/captcha/']");
-const captchaHidden = !!capFrame && getComputedStyle(capFrame).visibility === "hidden";
-const signedIn = !img && !verify && document.readyState === "complete" && /抖音号/.test(body) && !/未登录|扫码登录/.test(body);
-if (!img && !verify && !signedIn && !window.__mdNoTabClick && !window.__mdQRTabClicked) {
+const hasSecondVerify = [...document.querySelectorAll("` + secondVerifySelector + `")].some(vis);
+const img = (hasCaptcha || hasSecondVerify) ? null : [...document.querySelectorAll("img")].find(e => {
+  if (!vis(e) || e.closest("#uc-second-verify, .vc-second-valid-container")) return false;
+  const r = e.getBoundingClientRect();
+  return r.width >= 100 && Math.abs(r.width - r.height) < 8 && e.src && e.src.startsWith("data:image/");
+});
+let qrPanel = img;
+for (let i = 0; i < 4 && qrPanel && qrPanel.parentElement; i++) qrPanel = qrPanel.parentElement;
+const near = qrPanel ? qrPanel.innerText || "" : "";
+const body = document.body ? document.body.innerText : "";
+const scanAvatar = document.getElementById("douyin_login_comp_scan_code_avatar");
+const scanDesc = document.getElementById("douyin_login_comp_scan_code_avatar_desc_id");
+const scanText = vis(scanDesc) ? scanDesc.innerText : "";
+const expiredEl = document.getElementById("douyin_login_comp_scan_code_qrcode_expired");
+const hasExpiredControl = vis(expiredEl);
+const expired = !hasCaptcha && !hasSecondVerify && (hasExpiredControl || /失效|过期/.test(near));
+if (expired) {
+  const scope = hasExpiredControl ? expiredEl : qrPanel;
+  const r = [...scope.querySelectorAll("*")].find(e => e.children.length === 0 && /刷新/.test(e.textContent || "") && vis(e)) || (hasExpiredControl ? expiredEl : null);
+  if (r) r.click();
+}
+const profile = document.readyState === "complete" && /抖音号/.test(body) && !/未登录|扫码登录/.test(body);
+const verifyText = /身份验证|安全验证|短信验证|二次验证|扫码验证|刷脸验证|验证身份|验证登录密码|接收短信验证码|请使用验证码登录|本次登录需|当前账号未激活/.test(body);
+const verify = hasCaptcha || hasSecondVerify || (!img && !profile && verifyText);
+const scanned = !expired && !verify && (vis(scanAvatar) || /扫码成功|确认登录|手机上确认|上进行确认|正在登录/.test(near + "\n" + scanText));
+const signedIn = !img && !verify && !scanned && !expired && profile;
+if (!img && !expired && !verify && !scanned && !signedIn && !window.__mdNoTabClick && !window.__mdQRTabClicked) {
   const tab = [...document.querySelectorAll("button, div, span, li, a")].find(e => e.children.length === 0 && (e.textContent || "").trim() === "扫码登录" && vis(e));
   if (tab) { window.__mdQRTabClicked = true; tab.click(); }
 }
-return { src: img ? img.src : "", scanned: window.__mdQR.status === 2 || /扫码成功|确认登录|手机上确认/.test(near), expired, verify, signedIn, captchaHidden };`
+return { src: img ? img.src : "", scanned, expired, verify, signedIn, captchaHidden };`
 
 // sessionID is the session cookie of cs, or "".
 func sessionID(cs []dy.Cookie) string {
@@ -599,7 +618,7 @@ func (a *app) pollLogin(gen int) {
 		was, _ := a.web.Cookies() // a session Douyin let go may linger: the login is a new one
 		old := sessionID(was)
 		started := time.Now()
-		checkedExisting := false
+		var checkedSession time.Time
 		var captcha hiddenCaptcha
 		defer a.post(func() {
 			if a.loginGen == gen {
@@ -617,18 +636,6 @@ func (a *app) pollLogin(gen int) {
 			if !open {
 				return
 			}
-			// The cookie first, which asks no page: once confirmed on the phone the
-			// page goes elsewhere, and an evaluation would wait for it to load.
-			if cs, err := a.web.Cookies(); err == nil && dy.LoggedIn(cs) && sessionID(cs) != old {
-				a.post(func() {
-					if a.loginGen == gen {
-						a.loginOpen, a.login.status = false, ""
-						a.toast = "扫码成功，正在登录…"
-					}
-				})
-				a.finishLogin(gen)
-				return
-			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			var st struct {
 				Src                                               string
@@ -642,30 +649,31 @@ func (a *app) pollLogin(gen int) {
 				json.Unmarshal(b, &st)
 			}
 			cancel()
-			if st.SignedIn {
-				a.post(func() {
-					if a.loginGen == gen {
-						a.loginOpen, a.login.status = false, ""
-						a.toast = "已检测到登录状态，正在恢复…"
-					}
-				})
-				a.finishLogin(gen)
-				return
-			}
-			if !checkedExisting && old != "" && !hasQR && !inVerify && !st.Verify && time.Since(started) >= 4*time.Second {
-				checkedExisting = true
-				cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
-				valid := a.web.checkSignedIn(cctx) == loginCheckValid
-				ccancel()
-				if valid {
+			if !st.Verify {
+				cs, err := a.web.Cookies()
+				if err == nil && dy.LoggedIn(cs) && (sessionID(cs) != old || st.SignedIn && !inVerify) {
 					a.post(func() {
 						if a.loginGen == gen {
-							a.loginOpen, a.login.status = false, ""
-							a.toast = "已检测到登录状态，正在恢复…"
+							a.login.status = "正在确认登录…"
 						}
 					})
-					a.finishLogin(gen)
+					a.finishLogin(gen, false)
 					return
+				}
+				// Verification can authorize the same session cookie. Probe again
+				// after verification instead of restarting on a stale profile page.
+				now := time.Now()
+				if err == nil && dy.LoggedIn(cs) && (inVerify || !hasQR && !st.Scanned) &&
+					now.Sub(started) >= 4*time.Second &&
+					(checkedSession.IsZero() || inVerify && now.Sub(checkedSession) >= 4*time.Second) {
+					checkedSession = now
+					cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
+					valid := a.web.checkSignedIn(cctx) == loginCheckValid
+					ccancel()
+					if valid {
+						a.finishLogin(gen, true)
+						return
+					}
 				}
 			}
 			slow := time.Since(started) >= 10*time.Second
@@ -702,48 +710,60 @@ func (a *app) pollLogin(gen int) {
 	}()
 }
 
-// finishLogin, once a new session cookie came, asks Douyin from the page
-// whether it takes it (the page may still be loading the login's redirect),
-// then keeps it; one Douyin does not take opens the login again, where its
-// page shows what more it asks.
-func (a *app) finishLogin(gen int) {
-	in := false
-	deadline := time.Now().Add(25 * time.Second)
-	for !in && time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		in = a.web.checkSignedIn(ctx) == loginCheckValid
-		cancel()
-		if !in {
-			time.Sleep(500 * time.Millisecond)
-		}
-	}
-	var err error
-	if in {
-		var cs []dy.Cookie
-		if cs, err = a.web.Cookies(); err == nil {
-			err = a.c.SaveCookies(cs)
-		}
-	}
-	a.post(func() {
-		if a.loginGen != gen {
+// finishLogin waits for Douyin to accept the session, then saves its cookies.
+// A pending challenge hands the page back to the login poller.
+func (a *app) finishLogin(gen int, confirmed bool) {
+	var cs []dy.Cookie
+	ctx, stop := context.WithTimeout(context.Background(), 25*time.Second)
+	defer stop()
+	for ctx.Err() == nil {
+		active := false
+		a.call(func() { active = a.loginOpen && a.loginGen == gen && !a.web.closed })
+		if !active {
 			return
 		}
-		switch {
-		case !in:
-			a.toast = "抖音没认这次登录，请按页面提示再试一次"
-			a.loginOpen, a.web.layout = true, true
-			a.login.verify = true
-		case err != nil:
-			a.toast = "登录没保存：" + err.Error()
-		default:
-			a.signedIn = true
-			a.toast = "已登录"
-			a.loadAccount()
+		if !confirmed {
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			confirmed = a.web.checkSignedIn(checkCtx) == loginCheckValid
+			cancel()
 		}
-	})
-	if in && err == nil {
-		a.c.RefreshGuard()
+		if confirmed {
+			var err error
+			if cs, err = a.web.Cookies(); err == nil && dy.LoggedIn(cs) {
+				break
+			}
+			confirmed = false
+		}
+		stateCtx, cancel := context.WithTimeout(ctx, time.Second)
+		state, _ := a.web.evalFullPageNow(stateCtx, captchaStateJS)
+		cancel()
+		if string(state) == `"shown"` || string(state) == `"hidden"` {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
+	a.post(func() {
+		if !a.loginOpen || a.loginGen != gen || a.web.closed {
+			return
+		}
+		if !confirmed {
+			a.toast = "抖音没认这次登录，请按页面提示再试一次"
+			a.web.layout = true
+			a.login.verify = true
+			a.loginGen++
+			a.pollLogin(a.loginGen)
+			return
+		}
+		a.loginOpen, a.web.layout, a.login = false, false, login{}
+		if err := a.c.SaveCookies(cs); err != nil {
+			a.toast = "登录没保存：" + err.Error()
+			return
+		}
+		a.signedIn = true
+		a.toast = "已登录"
+		a.loadAccount()
+		go a.c.RefreshGuard()
+	})
 }
 
 // logout forgets the login: WebKit's Douyin cookies, the client's, and
@@ -826,6 +846,8 @@ func (a *app) loginPanel(c *ui.Context) {
 					if ui.Button(c.Key("retry"), "重试").Clicked() {
 						a.reloadLogin()
 					}
+				}
+				if a.web.v != nil && (l.qr != nil || l.qrSlow) {
 					if ui.Button(c.Key("weblogin"), "网页登录").Clicked() {
 						l.verify = true
 					}

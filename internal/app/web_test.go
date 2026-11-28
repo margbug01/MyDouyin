@@ -329,3 +329,51 @@ func TestLoginPanelSlowFallback(t *testing.T) {
 		t.Fatalf("clicking 网页登录 did not enter web view: verify=%v texts=%q", a.login.verify, tt.Texts())
 	}
 }
+
+func TestLoginPanelOffersWebLoginOnceQRLoaded(t *testing.T) {
+	a := &app{
+		loginOpen: true,
+		login:     login{qr: logo, status: "打开抖音 App，点左上角的扫一扫"},
+	}
+	a.web.a, a.web.v = a, &mygo.WebView{}
+	tt := ui.NewTester(func(c *ui.Context) { a.loginPanel(c) }, 960, 700)
+	tt.Frame()
+	if tt.HasText("重试") {
+		t.Fatalf("retry shown after QR loaded: %q", tt.Texts())
+	}
+	if !tt.HasText("网页登录") || !tt.HasText("以后再说") {
+		t.Fatalf("QR login panel missing web fallback action: %q", tt.Texts())
+	}
+	if err := tt.Click("网页登录"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.login.verify || !tt.HasText("请在下方完成登录或身份验证") {
+		t.Fatalf("clicking 网页登录 with QR did not enter web view: verify=%v texts=%q", a.login.verify, tt.Texts())
+	}
+}
+
+func TestLoginJSDetectsSecondVerifyWithoutHookingNatives(t *testing.T) {
+	for _, want := range []string{
+		`#uc-second-verify *`,
+		`second_verify_mask`,
+		`face_auth_mask`,
+		`vc-second-valid-container`,
+		`douyin_login_comp_scan_code_avatar`,
+	} {
+		if !strings.Contains(loginJS, want) {
+			t.Fatalf("loginJS missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`window.fetch =`,
+		`XMLHttpRequest.prototype.open =`,
+	} {
+		if strings.Contains(loginJS, forbidden) {
+			t.Fatalf("loginJS must not monkey-patch native APIs (%q)", forbidden)
+		}
+	}
+	if !strings.Contains(captchaStateJS, `#uc-second-verify`) {
+		t.Fatalf("captchaStateJS missing #uc-second-verify")
+	}
+}

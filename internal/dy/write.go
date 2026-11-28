@@ -254,7 +254,11 @@ const hasCaptcha = () => {
       if (tag !== "SCRIPT" && tag !== "STYLE" && tag !== "LINK") return true;
     }
   }
-  return !!document.querySelector(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper");
+  if (document.querySelector(".captcha_verify_container, .vc-captcha-verify-container, #secsdk-captcha-drag-wrapper, iframe[src*='/verifycenter/captcha/'], #vc_captcha_wrapper")) return true;
+  return [...document.querySelectorAll("#uc-second-verify *, .second-verify-mask, [class*='second_verify_mask'], [class*='face_auth_mask'], .vc-second-valid-container, .vc-second-valid-mask")].some(el => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility === "visible";
+  });
 };
 return await new Promise((resolve, reject) => {
   let done = false;
