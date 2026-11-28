@@ -198,20 +198,51 @@ func dmValueFor[T comparable](choices []dmChoice[T], label string, fallback T) T
 	return fallback
 }
 
-// laneTail is the last comment given a lane: when it set off, how wide.
+// laneTail is the last comment given a lane: when it set off, how wide it was
+// then, which sets how fast it flies, and the merged comment it is, if it is
+// one, whose count's pill can widen it as it flies.
 type laneTail struct {
 	at   time.Duration
 	w    float32
+	g    *dmGroup
 	used bool
 }
 
-// dmGroup is a shown bullet comment and the identical ones folded into it
-// while it flies: how many it stands for, and how wide it was as it set off,
-// which it keeps moving by as its count grows.
+// room is how wide t is now.
+func (t laneTail) room() float32 {
+	if t.g != nil {
+		return t.g.w
+	}
+	return t.w
+}
+
+// keepsClear reports whether a comment setting off at at, tw wide, stays dmGap
+// behind t from from on while t is room wide: neither on t's tail nor, being
+// faster, catching it up before all of t has gone, every comment crossing w px
+// in flightDur.
+func (t laneTail) keepsClear(room float32, from, at time.Duration, tw, w float32, flightDur time.Duration) bool {
+	if !t.used {
+		return true
+	}
+	sec := float32(flightDur.Seconds())
+	v0, v := (w+t.w)/sec, (w+tw)/sec // px a second: wider ones fly faster
+	if float32((from-t.at).Seconds())*v0-float32((from-at).Seconds())*v < room+dmGap {
+		return false
+	}
+	gone := (w + room) / v0 // seconds after t set off until all of it has left
+	return v <= v0 || (gone-float32((at-t.at).Seconds()))*v <= w-dmGap
+}
+
+// dmGroup is a shown bullet comment and the identical ones folded into it:
+// how many it stands for, how wide it flies with its count's pill, until when
+// repeats fold in, and what set off next behind it in its lane, which a wider
+// pill must not run into.
 type dmGroup struct {
-	d dy.Danmaku
-	n int
-	w float32
+	d      dy.Danmaku
+	n      int
+	w      float32
+	until  time.Duration
+	behind laneTail
 }
 
 // dmField is where the bullet comments over a video fly: the lane each took
@@ -227,6 +258,7 @@ type dmField struct {
 	block  []string      // blocked words when these lanes were computed
 	group  map[dy.Danmaku]*dmGroup
 	repeat map[string]*dmGroup // by dmFoldKey: the latest shown, which repeats fold into
+	linger time.Duration       // how long past its flight a merged comment's pill can be on screen
 }
 
 func (f *dmField) hide(d dy.Danmaku) {
@@ -312,6 +344,20 @@ func (a *app) danmakuWidth(text string, n int) float32 {
 	return w
 }
 
+// danmakuRoom is how wide a comment standing for n flies in its lane: from 2
+// on, its pill kept as wide as for 99 (or 999, …), so that its count grows
+// digit by digit without the pill running into what follows.
+func (a *app) danmakuRoom(text string, n int) float32 {
+	if n < 2 {
+		return a.danmakuText(text).w
+	}
+	nines := 99
+	for nines < n {
+		nines = nines*10 + 9
+	}
+	return max(a.danmakuWidth(text, n), a.danmakuWidth(text, nines))
+}
+
 // dmBlocked reports whether text has one of the user's blocked words.
 func (a *app) dmBlocked(text string) bool {
 	if len(a.dmBlock) == 0 {
@@ -339,50 +385,54 @@ func (a *app) setDanmakuBlock(words []string) {
 	a.dmBlock = out
 }
 
-// dmSetOff decides where d flies as it sets off, rest being the comments after
-// it: -1 when it is not shown, for a blocked word, for folding into an
-// identical one still flying, or for the lanes being full. When merging, d
-// counts at once the identical ones of rest that set off while it flies; one
-// that comes later (a live room's, or a page loaded later) folds into it then.
-func dmSetOff[D any](a *app, f *dmField, d dy.Danmaku, rest []D, key func(D) dy.Danmaku, w float32, flightDur time.Duration, lanes int) int {
+// dmSetOff decides where d flies as it sets off: -1 when it is not shown, for
+// a blocked word, for folding into an identical one still on the right half,
+// or for the lanes being full. A folded one keeps its room in a lane empty, so
+// merging only takes comments away and never lets in one the lanes had no
+// room for.
+func (a *app) dmSetOff(f *dmField, d dy.Danmaku, w float32, flightDur time.Duration, lanes int) int {
 	own := d == f.own
 	if !own && a.dmBlocked(d.Text) {
 		f.hide(d)
 		return -1
 	}
+	tw := a.danmakuText(d.Text).w
 	if !f.merge || own {
-		return f.placeIn(d, a.danmakuText(d.Text).w, w, flightDur, lanes)
+		return f.placeIn(d, tw, w, flightDur, lanes)
 	}
 	k := dmFoldKey(d.Text)
-	if g := f.repeat[k]; g != nil && d.At-g.d.At < flightDur {
-		g.n++
+	if g := f.repeat[k]; g != nil && d.At <= g.until && a.dmFold(f, g, d.At, w, flightDur) {
+		f.placeIn(d, tw, w, flightDur, lanes)
 		f.hide(d)
 		return -1
 	}
-	var folded []dy.Danmaku
-	for _, it := range rest {
-		e := key(it)
-		if e.At-d.At >= flightDur {
-			break
-		}
-		if _, seen := f.lane[e]; !seen && e != d && e != f.own && dmFoldKey(e.Text) == k && !a.dmBlocked(e.Text) {
-			folded = append(folded, e)
-		}
-	}
-	g := &dmGroup{d: d, n: 1 + len(folded)}
-	g.w = a.danmakuWidth(d.Text, g.n)
-	l := f.placeIn(d, g.w, w, flightDur, lanes)
-	if l < 0 { // no room: the next identical one tries for itself
+	l := f.placeIn(d, tw, w, flightDur, lanes)
+	if l < 0 {
 		return -1
 	}
-	for _, e := range folded {
-		f.hide(e)
-	}
+	g := &dmGroup{d: d, n: 1, w: tw, until: d.At + time.Duration(float64(flightDur)*float64(w/2)/float64(w+tw))}
+	f.tail[l].g = g
 	if f.group == nil {
 		f.group, f.repeat = map[dy.Danmaku]*dmGroup{}, map[string]*dmGroup{}
 	}
 	f.group[d], f.repeat[k] = g, g
 	return l
+}
+
+// dmFold counts one more, said at at, into g, when g's pill can widen as the
+// count needs without running into what set off behind it.
+func (a *app) dmFold(f *dmField, g *dmGroup, at time.Duration, w float32, flightDur time.Duration) bool {
+	room := a.danmakuRoom(g.d.Text, g.n+1)
+	if room > g.w {
+		tw := a.danmakuText(g.d.Text).w
+		if b := g.behind; b.used && !(laneTail{at: g.d.At, w: tw, used: true}).keepsClear(room, at, b.at, b.w, w, flightDur) {
+			return false
+		}
+		g.w = room
+		f.linger = max(f.linger, time.Duration(float64(flightDur)*float64(room-tw)/float64(w+tw)))
+	}
+	g.n++
+	return true
 }
 
 // place assigns d a lane using the default flight duration.
@@ -391,8 +441,7 @@ func (f *dmField) place(d dy.Danmaku, tw, w float32) int {
 }
 
 // placeIn gives a comment setting off at at, tw wide, the topmost lane where it
-// neither starts on the last one's tail nor, being faster, catches it up
-// before that one is gone: -1 when none, as Douyin's drops a crowd's excess.
+// keeps clear of the last one: -1 when none, as Douyin's drops a crowd's excess.
 func (f *dmField) placeIn(d dy.Danmaku, tw, w float32, flightDur time.Duration, maxLanes int) int {
 	if flightDur <= 0 {
 		flightDur = flight
@@ -401,20 +450,9 @@ func (f *dmField) placeIn(d dy.Danmaku, tw, w float32, flightDur time.Duration, 
 		maxLanes = dmLanes
 	}
 	maxLanes = min(maxLanes, dmLanesMax)
-	fits := func(t laneTail) bool {
-		if !t.used {
-			return true
-		}
-		sec := float32(flightDur.Seconds())
-		v0, v := (w+t.w)/sec, (w+tw)/sec // px a second: wider ones fly faster
-		if float32((d.At-t.at).Seconds())*v0 < t.w+dmGap {
-			return false
-		}
-		return v <= v0 || float32((t.at+flightDur-d.At).Seconds())*v <= w-dmGap
-	}
 	lane := -1
 	for i := range maxLanes {
-		if fits(f.tail[i]) {
+		if t := f.tail[i]; t.keepsClear(t.room(), d.At, d.At, tw, w, flightDur) {
 			lane = i
 			break
 		}
@@ -428,7 +466,11 @@ func (f *dmField) placeIn(d dy.Danmaku, tw, w float32, flightDur time.Duration, 
 		}
 	}
 	if lane >= 0 {
-		f.tail[lane] = laneTail{d.At, tw, true}
+		t := laneTail{at: d.At, w: tw, used: true}
+		if g := f.tail[lane].g; g != nil {
+			g.behind = t
+		}
+		f.tail[lane] = t
 	}
 	if f.lane == nil {
 		f.lane = map[dy.Danmaku]int{}
@@ -463,10 +505,11 @@ func flyDanmakuWith[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku,
 	return flyDanmakuIn(a, f, list, key, at, w, 0, flightDur)
 }
 
-// flyDanmakuIn returns the comments of list flying at at over a video w×h
-// for flightDur: each from its time on for flightDur, in the lane of f it took
-// as it set off. next is how long until the next one sets off, -1 when none is
-// to come.
+// flyDanmakuIn returns the comments of list flying at at over a video w×h,
+// each from its time on, crossing in flightDur at the speed it set off with
+// until all of it, its count's pill too, has gone, in the lane of f it took as
+// it set off. next is how long until the next one sets off, -1 when none is to
+// come.
 func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, at time.Duration, w, h float32, flightDur time.Duration) (out []dmFlying, next time.Duration) {
 	next = -1
 	if w <= 0 {
@@ -485,7 +528,7 @@ func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, a
 	}
 	laneH := a.dmLaneHeight()
 	// list is time-ordered: jump straight to the first comment still in flight.
-	start := sort.Search(len(list), func(i int) bool { return key(list[i]).At > at-flightDur })
+	start := sort.Search(len(list), func(i int) bool { return key(list[i]).At > at-flightDur-f.linger })
 	for i := start; i < len(list); i++ {
 		d := key(list[i])
 		age := at - d.At
@@ -494,21 +537,24 @@ func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, a
 			break
 		}
 		l, ok := f.lane[d]
-		if ok && l < 0 {
-			continue
-		}
 		if !ok {
-			if l = dmSetOff(a, f, d, list[i+1:], key, w, flightDur, lanes); l < 0 {
+			if age >= flightDur { // crossed before it was seen: skipped past
 				continue
 			}
+			l = a.dmSetOff(f, d, w, flightDur, lanes)
 		}
-		var tw float32
+		if l < 0 {
+			continue
+		}
+		tw := a.danmakuText(d.Text).w
+		x, room := w-float32(age)/float32(flightDur)*(w+tw), tw
 		if g := f.group[d]; g != nil {
-			tw = g.w
-		} else {
-			tw = a.danmakuText(d.Text).w
+			room = g.w
 		}
-		out = append(out, dmFlying{d, w - float32(age)/float32(flightDur)*(w+tw), float32(dmTop + l*laneH), 1})
+		if x+room <= 0 {
+			continue
+		}
+		out = append(out, dmFlying{d, x, float32(dmTop + l*laneH), 1})
 	}
 	for i := range out { // counted now, with the repeats that set off after it this frame
 		if g := f.group[out[i].d]; g != nil {

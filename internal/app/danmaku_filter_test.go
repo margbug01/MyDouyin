@@ -26,8 +26,9 @@ func flyingTexts(a *app, f *dmField, list []dy.Danmaku, at time.Duration) map[st
 	return m
 }
 
-// Twelve 来了 said within one crossing fly as one 来了×12, however they are
-// punctuated; a blocked word is not shown; the user's own 来了 still shows.
+// Twelve 来了 said while the first is on the right half fly as one 来了×12,
+// however they are punctuated; a blocked word is not shown; the user's own
+// 来了 still shows.
 func TestDanmakuMergeAndBlock(t *testing.T) {
 	a := &app{}
 	a.setDanmakuBlock([]string{"剧透"})
@@ -73,9 +74,35 @@ func TestDanmakuMergeAndBlock(t *testing.T) {
 	}
 }
 
+// Merging only takes repeats away: the lane a folded 来了 would have taken
+// stays empty, so a sentence the lanes had no room for with merging off is
+// not let in with merging on.
+func TestDanmakuMergeOnlyRemoves(t *testing.T) {
+	list := []dy.Danmaku{{At: 0, Text: "来了"}, {At: 100 * time.Millisecond, Text: "来了"}, {At: 200 * time.Millisecond, Text: "这句话本来就没地方放"}}
+	shown := func(mergeOff bool) []string {
+		a := &app{dmMergeOff: mergeOff}
+		if n := a.dmLaneCount(100); n != 2 {
+			t.Fatalf("%d lanes", n)
+		}
+		flying, _ := flyDanmakuArea(a, &dmField{}, list, sameDanmaku, time.Second, 1280, 100)
+		var out []string
+		for _, fl := range flying {
+			out = append(out, fmt.Sprintf("%s×%d", fl.d.Text, fl.n))
+		}
+		return out
+	}
+	if got := shown(true); !slices.Equal(got, []string{"来了×1", "来了×1"}) {
+		t.Fatalf("merging off: %q", got)
+	}
+	if got := shown(false); !slices.Equal(got, []string{"来了×2"}) {
+		t.Fatalf("merging on: %q", got)
+	}
+}
+
 // In a live room the repeats come after the first sets off: they fold into
-// it while it flies, its count growing without it jumping back, and one said
-// after it has crossed flies by itself.
+// it while it is on the right half, its count growing without it jumping
+// back, and one said after that flies by itself. The merged one flies on at
+// its speed until its pill, not only its text, has gone.
 func TestDanmakuMergeLive(t *testing.T) {
 	a := &app{}
 	f := &dmField{}
@@ -91,9 +118,18 @@ func TestDanmakuMergeLive(t *testing.T) {
 	if d := first.x - three.x - want; three.y != first.y || d < -0.5 || d > 0.5 {
 		t.Fatalf("moved from %+v to %+v", first, three)
 	}
-	list = append(list, dy.Danmaku{At: 9 * time.Second, Text: "来了"})
-	if got := flyingTexts(a, f, list, 9500*time.Millisecond); got["来了"].d.Text == "" {
-		t.Fatalf("at 9.5s: %v", got)
+	list = append(list, dy.Danmaku{At: 5 * time.Second, Text: "来了"})
+	if got := flyingTexts(a, f, list, 5500*time.Millisecond); got["来了×3"].d.At != 0 || got["来了"].d.At != 5*time.Second {
+		t.Fatalf("at 5.5s: %v", got)
+	}
+	at := flight + 50*time.Millisecond
+	end, ok := flyingTexts(a, f, list, at)["来了×3"]
+	wantX := 1280 - float32(at)/float32(flight)*(1280+a.danmakuText("来了").w)
+	if !ok || end.x-wantX < -0.5 || end.x-wantX > 0.5 || end.x+a.danmakuWidth("来了", 3) <= 0 {
+		t.Fatalf("as its text has gone, its pill still showing: %+v, want x %.1f", end, wantX)
+	}
+	if got := flyingTexts(a, f, list, flight+time.Second); got["来了×3"].d.Text != "" {
+		t.Fatalf("pill gone too: %v", got)
 	}
 }
 

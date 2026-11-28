@@ -988,14 +988,15 @@ func (s *slot) pruneDanmaku(at, flightDur time.Duration) {
 	if flightDur <= 0 {
 		flightDur = flight
 	}
-	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= at-flightDur }); i > 0 {
+	gone := at - flightDur - s.dm.linger
+	if i := sort.Search(len(s.danmaku), func(i int) bool { return s.danmaku[i].At >= gone }); i > 0 {
 		for _, d := range s.danmaku[:i] {
 			delete(s.dm.lane, d)
 			delete(s.dm.group, d)
 		}
 		s.danmaku = slices.Delete(s.danmaku, 0, i)
 		for k, g := range s.dm.repeat {
-			if g.d.At < at-flightDur {
+			if g.until < at {
 				delete(s.dm.repeat, k)
 			}
 		}
