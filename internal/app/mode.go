@@ -54,8 +54,11 @@ func (a *app) windowTitle() string {
 }
 
 func (a *app) brandLogo() *ui.Bitmap {
-	if a.mode == modeHongguo {
+	switch a.mode {
+	case modeHongguo:
 		return hongguoLogo
+	case modeTikTok:
+		return tiktokLogo
 	}
 	return logo
 }
@@ -355,7 +358,7 @@ func (a *app) brandMenu(c *ui.Context, x float32) {
 		},
 		{
 			mode:     modeTikTok,
-			icon:     logo,
+			icon:     tiktokLogo,
 			title:    "MyTikTok",
 			subtitle: "For You · 字幕翻译 · 直播",
 			hint:     onOff(runtime.GOOS == "darwin", "⌘3", "Ctrl+3"),

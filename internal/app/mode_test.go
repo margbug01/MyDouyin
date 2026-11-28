@@ -425,3 +425,22 @@ func TestBrandSwitcherPositionUnifiedAcrossModesAndPages(t *testing.T) {
 		}
 	}
 }
+
+func TestBrandLogoPerMode(t *testing.T) {
+	a := &app{}
+	a.mode = modeDouyin
+	if got := a.brandLogo(); got != logo || got == nil {
+		t.Fatalf("modeDouyin brandLogo = %v, want non-nil logo", got)
+	}
+	a.mode = modeHongguo
+	if got := a.brandLogo(); got != hongguoLogo || got == nil {
+		t.Fatalf("modeHongguo brandLogo = %v, want non-nil hongguoLogo", got)
+	}
+	a.mode = modeTikTok
+	if got := a.brandLogo(); got != tiktokLogo || got == nil {
+		t.Fatalf("modeTikTok brandLogo = %v, want non-nil tiktokLogo", got)
+	}
+	if tiktokLogo == logo || tiktokLogo == hongguoLogo {
+		t.Fatal("tiktokLogo should be distinct from logo and hongguoLogo")
+	}
+}

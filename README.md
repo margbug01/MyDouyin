@@ -4,13 +4,15 @@
   <img src="docs/douyin-icon.png" width="80" height="80" alt="MyDouyin 抖音原生桌面客户端图标">
   &nbsp;&nbsp;&nbsp;&nbsp;
   <img src="docs/hongguo-icon.png" width="80" height="80" alt="MyHongguo 红果短剧桌面模式图标">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/tiktok-icon.png" width="80" height="80" alt="MyTikTok 桌面模式图标">
 </p>
 
-# MyDouyin · MyHongguo
+# MyDouyin · MyHongguo · MyTikTok
 
-**开源原生抖音桌面客户端 & 红果短剧电脑版（macOS / Windows）**
+**开源原生抖音、红果短剧 & TikTok 桌面客户端（macOS / Windows）**
 
-**MyDouyin** 是基于 Go 与 [MyGo](https://github.com/egoist/mygo) 构建的轻量原生桌面软件，在一个窗口内同时提供 **抖音（MyDouyin）** 与 **红果短剧（MyHongguo）** 两种模式，原生支持 **macOS（Apple Silicon）** 与 **Windows 10/11（x64）**。无需 Electron、无需安卓模拟器、无需额外安装 FFmpeg 或 HEVC 商店扩展，打开即可免登录浏览抖音公开内容与红果免费短剧、漫剧。
+**MyDouyin** 是基于 Go 与 [MyGo](https://github.com/egoist/mygo) 构建的轻量原生桌面软件，在一个窗口内同时提供 **抖音（MyDouyin）**、**红果短剧（MyHongguo）** 与 **TikTok（MyTikTok）** 三种模式，原生支持 **macOS（Apple Silicon）** 与 **Windows 10/11（x64）**。无需 Electron、无需安卓模拟器、无需额外安装 FFmpeg 或 HEVC 商店扩展，打开即可免登录浏览抖音公开内容与红果免费短剧、漫剧，并一键切入支持多语言字幕翻译与独立代理的 MyTikTok 模式。
 
 **简体中文** · [English](README.en.md)
 
@@ -18,7 +20,7 @@
 
 [![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/mydouyin)
 
-**[下载最新版](https://github.com/margbug01/MyDouyin/releases/latest)** · [产品定义](#mydouyin--myhongguo-是什么) · [对比传统方案](#为什么用-mydouyin-替代网页版electron-客户端或安卓模拟器) · [抖音模式](#抖音模式mydouyin引力场原生播放直播与评论) · [红果短剧模式](#红果短剧模式myhongguo电脑端免登录看免费短剧与漫剧) · [性能实测](#实测性能与资源占用数据) · [安装指南](#如何在-macos-与-windows-上安装与更新) · [常见问题](#常见问题faq)
+**[下载最新版](https://github.com/margbug01/MyDouyin/releases/latest)** · [产品定义](#mydouyin--myhongguo--mytiktok-是什么) · [对比传统方案](#为什么用-mydouyin-替代网页版electron-客户端或安卓模拟器) · [抖音模式](#抖音模式mydouyin引力场原生播放直播与评论) · [红果短剧模式](#红果短剧模式myhongguo电脑端免登录看免费短剧与漫剧) · [TikTok 模式](#tiktok-模式mytiktokfor-you多语言字幕翻译直播与独立代理) · [性能实测](#实测性能与资源占用数据) · [安装指南](#如何在-macos-与-windows-上安装与更新) · [常见问题](#常见问题faq)
 
 <br>
 
@@ -27,41 +29,43 @@
 </div>
 
 > [!IMPORTANT]
-> MyDouyin 是个人开源项目，与抖音（Douyin）、红果短剧（Hongguo）及字节跳动没有任何官方关联。应用所有数据仅在本地运行和存储，不收集任何遥测或统计信息。请仅使用个人账号合理浏览，并遵守对应平台的服务条款。
+> MyDouyin 是个人开源项目，与抖音（Douyin）、红果短剧（Hongguo）、TikTok 及字节跳动没有任何官方关联。应用所有数据仅在本地运行和存储，不收集任何遥测或统计信息。请仅使用个人账号合理浏览，并遵守对应平台的服务条款。
 
-## MyDouyin · MyHongguo 是什么
+## MyDouyin · MyHongguo · MyTikTok 是什么
 
-**MyDouyin** 是一款运行在 macOS（Apple Silicon）与 Windows 10/11（x64）上的开源原生桌面客户端，同时集成 **抖音电脑端浏览** 与 **红果短剧电脑版观看** 两大核心能力。软件使用 Go 语言与原生图形框架 [MyGo](https://github.com/egoist/mygo) 直接绘制界面并调用系统原生硬件解码，不依赖 Electron 或常驻 Chromium 内核，也无需通过安卓模拟器运行红果短剧 App。
+**MyDouyin** 是一款运行在 macOS（Apple Silicon）与 Windows 10/11（x64）上的开源原生桌面客户端，同时集成 **抖音电脑端浏览**、**红果短剧电脑版观看** 与 **TikTok 桌面端浏览** 三大核心能力。软件使用 Go 语言与原生图形框架 [MyGo](https://github.com/egoist/mygo) 直接绘制界面并调用系统原生硬件解码，不依赖 Electron 或常驻 Chromium 内核，也无需通过安卓模拟器运行红果短剧 App。
 
 | 属性 | 说明 |
 | --- | --- |
-| **软件定位** | 轻量原生抖音桌面客户端 + 红果短剧电脑版（双模式一体） |
+| **软件定位** | 轻量原生抖音 + 红果短剧 + TikTok 桌面客户端（三模式一体） |
 | **支持系统** | macOS（Apple Silicon / arm64）、Windows 10 / 11（x64） |
 | **视频解码引擎** | macOS 原生 AVFoundation（零写盘硬解）；Windows 原生 Media Foundation + D3D11 GPU 纹理（无需 FFmpeg） |
 | **红果加密与封面** | 内置纯 Go 流式 ISO-BMFF CENC（AES-128-CTR）解密；macOS ImageIO / Windows 纯 Go `h265/heic` 封面解码 |
-| **登录要求** | 红果短剧全程免登录匿名播放；抖音支持免登录看公开内容，点赞/评论/同步历史可应用内扫码登录 |
+| **TikTok 字幕与网络** | 原生渲染 WebVTT 多语言字幕并支持外语字幕自动译中文与文案翻译；独立代理自动识别系统代理（仅给 TikTok 使用） |
+| **登录要求** | 红果短剧全程免登录匿名播放；抖音支持免登录看公开内容，写操作可应用内扫码登录；TikTok 支持应用内登录或剪贴板导入 Cookie，账号与抖音相互独立 |
 | **更新与隐私** | 支持签名增量热更新（Delta Update）；所有凭证、追剧记录与偏好仅存本机 |
 
 ## 为什么用 MyDouyin 替代网页版、Electron 客户端或安卓模拟器
 
-用户在 Mac 或 Windows 上看抖音和红果短剧时，常见痛点是浏览器标签内存持续暴涨、官方或套壳桌面端后台进程臃肿、以及红果短剧缺乏原生电脑版而被迫安装高占用的安卓模拟器。MyDouyin 用一套轻量原生客户端同时解决这两类场景。
+用户在 Mac 或 Windows 上看抖音、红果短剧与 TikTok 时，常见痛点是浏览器标签内存持续暴涨、官方或套壳桌面端后台进程臃肿、红果短剧缺乏原生电脑版而被迫安装安卓模拟器，以及跨平台切换时代理互相干扰。MyDouyin 用一套轻量原生客户端同时解决这些场景。
 
-| 对比维度 | MyDouyin · MyHongguo（原生桌面端） | 浏览器网页版 | Electron 客户端 / 安卓模拟器 |
+| 对比维度 | MyDouyin · MyHongguo · MyTikTok（原生桌面端） | 浏览器网页版 | Electron 客户端 / 安卓模拟器 |
 | --- | --- | --- | --- |
-| **抖音 + 红果覆盖** | 单窗口集成抖音与红果短剧，快捷键一键切换 | 抖音依赖浏览器标签；红果缺少完整桌面网页端 | 通常仅覆盖单一平台，看红果需开整套安卓虚拟机 |
+| **抖音 + 红果 + TikTok 覆盖** | 单窗口集成抖音、红果短剧与 TikTok，快捷键一键切换且状态互不干扰 | 抖音与 TikTok 依赖浏览器多标签；红果缺少完整桌面网页端 | 通常仅覆盖单一平台，看红果需开整套安卓虚拟机 |
 | **打开首屏体验** | 默认进入「引力场」搜索与卡片画布，配合本地快照秒开，不强制连播 | 打开即自动播放推荐流 | 启动耗时长，后台常驻多个高内存进程 |
 | **视频解码与写盘** | macOS 走 AVFoundation 原生层（零写盘）；Windows 走 Media Foundation 硬件解码 | 浏览器持续写入媒体缓存，多开标签内存上涨 | 模拟器虚拟化开销高，风扇与硬盘写入明显 |
 | **红果 HEIC 封面** | macOS 系统 ImageIO 硬解；Windows 内置纯 Go `h265/heic` 解码并缓存 JPEG | 依赖浏览器对 HEIC 格式支持 | 需要额外编解码组件或完整 Android 运行环境 |
+| **网络代理隔离** | TikTok 自动识别系统代理或走单独配置的 `http://` / `socks5://`，抖音与红果不受影响 | 依赖浏览器全局或扩展规则 | 多依赖全局系统代理，国内与海外平台易冲突 |
 | **内存占用** | macOS 1080p 原生解码约 **65 MB**；抖音写操作签名页约 **80 MB**（闲置 10 秒销毁） | 长时间刷视频易涨至数百 MB 甚至数 GB | 常驻内存普遍在 500 MB 至 2 GB 以上 |
 | **桌面更新体验** | 应用内签名增量更新，顶部胶囊一键重启升级 | 无独立桌面更新 | 多需重新下载完整安装包 |
 
-## 如何在抖音与红果短剧之间一键切换
+## 如何在抖音、红果短剧与 TikTok 之间一键切换
 
-在 MyDouyin 中切换抖音模式与红果短剧模式只需一次点击或一组快捷键：点击窗口左上角的品牌切换胶囊，或按下 `⌘1` / `⌘2`（Windows 为 `Ctrl+1` / `Ctrl+2`），即可在 **MyDouyin** 与 **MyHongguo** 之间切换。
+在 MyDouyin 中切换三大模式只需一次点击或一组快捷键：点击窗口左上角的品牌切换胶囊，或按下 `⌘1` / `⌘2` / `⌘3`（Windows 为 `Ctrl+1` / `Ctrl+2` / `Ctrl+3`），即可在 **MyDouyin**、**MyHongguo** 与 **MyTikTok** 之间切换。
 
-- 两种模式共享「极净瓷白」浅色主题与「纯黑黑洞」深色主题，各自保留独立强调色与左侧悬浮胶囊导航，且 macOS 与 Windows 顶栏品牌位置统一对齐。
-- 切换模式时自动保存当前观看进度并释放退出模式的播放器，避免后台音频残留或双播放器占内存。
-- 红果服务采用懒初始化策略，仅在首次切入 MyHongguo 时创建实例，日常只用抖音不会触发任何红果请求。
+- 三种模式共享「极净瓷白」浅色主题与「纯黑黑洞」深色主题，各自拥有独立品牌图标与顶栏标题，且 macOS 与 Windows 顶栏品牌位置统一对齐。
+- 切换模式时自动保存当前观看进度并释放退出模式的播放器，避免后台音频残留或双播放器占内存；在 MyDouyin 与 MyTikTok 间切换时，两边的页面栈、视频状态与账号会话各自独立保留。
+- 红果与 TikTok 服务均采用懒初始化策略，仅在切入对应模式时才初始化，日常只用抖音不会触发其他平台的请求。
 
 ## 抖音模式（MyDouyin）：引力场、原生播放、直播与评论
 
@@ -116,6 +120,18 @@ MyHongguo 是内置在 MyDouyin 中的红果短剧电脑端模式，支持在 Ma
 | **弹幕、评论与本地追剧** | 播放页右侧抽屉集成选集、本集评论、剧评与弹幕列表（点击弹幕可直接跳转对应时间点），画面实时渲染避让弹幕。本地持久化「我的追剧」与「最近观看」，每 2 秒记录断点并支持一键续播。 |
 | **跨平台 HEIC 封面与网络设置** | macOS 通过系统 ImageIO 解码、Windows 通过内置纯 Go `h265/heic` 解码红果签名 HEIC 封面并转存紧凑 JPEG 缓存，无需安装商店 HEVC 扩展。设置面板提供「绕过系统代理直连」（默认开启）、可选远端签名服务与一键重置匿名设备。 |
 
+## TikTok 模式（MyTikTok）：For You、多语言字幕翻译、直播与独立代理
+
+MyTikTok 是内置在品牌切换菜单中的第三个并列模式（`⌘3` / `Ctrl+3` 进入），复用 MyDouyin 原生短视频界面与硬解播放器，同时提供 WebVTT 多语言字幕自动译中文、文案翻译以及仅对 TikTok 生效的独立代理链路。
+
+| 功能模块 | 具体能力 |
+| --- | --- |
+| **For You 与频道浏览** | 支持刷 For You 推荐流、关注、搜索、作者主页与 TikTok 直播，复用 MyDouyin 的引力场与原生播控体验；切回 MyDouyin 时两边的页面栈与账号状态各自保留。 |
+| **多语言字幕与文案翻译** | 自动加载并原生叠加渲染视频自带的 WebVTT 多语言字幕，非中文字幕默认自动译成中文；外语视频文案下方提供「查看翻译 / 查看原文」。可在「设置 → 播放 → 字幕」分别开关。 |
+| **评论与社交互动** | 支持浏览评论区与展开楼中楼回复、点赞、收藏、关注与发表评论，内置 X-Bogus 签名支持。 |
+| **独立代理与区域设置** | 留空时自动识别系统代理（macOS 读取网络代理设置、Windows 读取 Internet 选项，代理开关 5 秒内自动跟进），也可在 MyTikTok 的「设置 → 账号 → TikTok 网络」手动填写 `http://` / `socks5://` 代理并指定区域。该代理**仅给 TikTok 使用**，不影响抖音与红果短剧。 |
+| **多种登录方式与会话隔离** | 支持应用内网页、扫码或邮箱登录，也支持外部浏览器完成通行密钥登录后从剪贴板导入 cURL 或 Cookie-Editor JSON。TikTok 会话独立持久化，与抖音登录互不干扰。 |
+
 ## 实测性能与资源占用数据
 
 以下关键指标均来自本仓库实测记录，完整测试方法见 [PERFORMANCE.md](PERFORMANCE.md) 与 [CHANGELOG.md](CHANGELOG.md)：
@@ -152,6 +168,7 @@ xattr -dr com.apple.quarantine /Applications/MyDouyin.app
 | --- | --- |
 | 切换到抖音模式（MyDouyin） | `⌘1`（macOS） / `Ctrl+1`（Windows） |
 | 切换到红果短剧模式（MyHongguo） | `⌘2`（macOS） / `Ctrl+2`（Windows） |
+| 切换到 TikTok 模式（MyTikTok） | `⌘3`（macOS） / `Ctrl+3`（Windows） |
 | 播放 / 暂停当前视频或短剧 | `Space`（空格） |
 | 切换上一条 / 下一条视频，或上一集 / 下一集 | `↑` / `↓` |
 | 关闭弹窗 / 退出大图预览或全屏 / 返回上一页 | `Esc` |
@@ -198,23 +215,27 @@ MyDouyin 内置了完整的 **MyHongguo 红果短剧模式**，原生运行在 m
 
 点击右上角齿轮打开「设置」，在「红果短剧 (MyHongguo)」分区确认「绕过系统代理直连」处于开启状态（默认开启）。如果匿名设备触发限流，点击「重置匿名设备」即可重新生成匿名身份；进阶用户也可以在该分区填写自定义的远端签名服务地址与 Token。
 
+### MyTikTok 如何配置代理？会影响抖音或红果短剧吗？
+
+不会影响。进入 MyTikTok 模式（`⌘3` / `Ctrl+3`）后，TikTok 请求、媒体拉流与字幕翻译默认自动识别系统代理（macOS 读网络代理设置、Windows 读 Internet 选项，且系统代理开关会在 5 秒内自动跟进）。如需单独指定代理，可在 MyTikTok 模式下打开「设置 → 账号 → TikTok 网络」填写 `http://` 或 `socks5://` 代理地址。该代理**仅给 TikTok 使用**，抖音与红果短剧仍按各自原有链路直连。
+
 ### macOS 首次打开提示“无法验证开发者”或“已损坏”怎么办？
 
 MyDouyin 尚未进行 Apple 官方公证，macOS Gatekeeper 会默认拦截首次运行。将应用拖入 `/Applications` 后，前往「系统设置 › 隐私与安全性」点击「仍要打开」，或在终端运行 `xattr -dr com.apple.quarantine /Applications/MyDouyin.app` 即可启动。
 
 ### 登录凭证、红果追剧记录和个人设置保存在哪里？
 
-所有个人数据只保存在本机标准应用配置目录中（macOS 位于 `~/Library/Application Support/Douyin` 与 `~/Library/Application Support/mydouyin`，Windows 位于 `%APPDATA%` 对应目录）。覆盖安装或应用内热更新均会保留登录态、偏好设置与红果追剧进度。
+所有个人数据只保存在本机标准应用配置目录中（macOS 位于 `~/Library/Application Support/Douyin`、`~/Library/Application Support/TikTok` 与 `~/Library/Application Support/mydouyin`，Windows 位于 `%APPDATA%` 对应目录）。覆盖安装或应用内热更新均会保留登录态、偏好设置与红果追剧进度。
 
 ## 致谢
 
-MyDouyin · MyHongguo 的实现借鉴并受益于以下优秀开源项目与社区贡献者的工作，特此致谢：
+MyDouyin · MyHongguo · MyTikTok 的实现借鉴并受益于以下优秀开源项目与社区贡献者的工作，特此致谢：
 
 - **[MyGo](https://github.com/egoist/mygo)**：提供轻量原生的 Go 跨平台 GUI、系统原生视频播放与签名增量更新框架，构成了本项目的基础底座。
 - **[openhongguo](https://github.com/beilunyang/openhongguo)**（及上游修复贡献者 **[J3n5en/openhongguo](https://github.com/J3n5en/openhongguo)**）：开源红果短剧协议分析与 Go SDK，为 MyHongguo 红果短剧模式提供了核心支持。
 - **[purego](https://github.com/ebitengine/purego)**：让 Go 程序无需 CGo 即可直接调用系统原生动态库。
 - **[gen2brain/h265](https://github.com/gen2brain/h265)**：纯 Go HEVC / HEIC 图像解码实现，使 Windows 端无需微软商店扩展即可直接显示红果短剧封面。
-- 感谢所有体验反馈、提出建议与分享思路的开源社区朋友们。
+- **[@uttogg](https://github.com/uttogg)**：贡献 TikTok 接入、WebVTT 多语言字幕与翻译支持（[#6](https://github.com/margbug01/MyDouyin/pull/6)），感谢所有体验反馈、提出建议与分享思路的开源社区朋友们。
 
 ## 友链
 

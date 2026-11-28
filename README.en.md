@@ -4,13 +4,15 @@
   <img src="docs/douyin-icon.png" width="80" height="80" alt="MyDouyin native desktop client icon">
   &nbsp;&nbsp;&nbsp;&nbsp;
   <img src="docs/hongguo-icon.png" width="80" height="80" alt="MyHongguo short drama mode icon">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/tiktok-icon.png" width="80" height="80" alt="MyTikTok desktop mode icon">
 </p>
 
-# MyDouyin · MyHongguo
+# MyDouyin · MyHongguo · MyTikTok
 
-**Open-source native desktop client for Douyin and Hongguo Short Dramas (macOS / Windows)**
+**Open-source native desktop client for Douyin, Hongguo Short Dramas, and TikTok (macOS / Windows)**
 
-**MyDouyin** is a lightweight native desktop application built with Go and [MyGo](https://github.com/egoist/mygo) for **macOS (Apple Silicon)** and **Windows 10/11 (x64)**. It combines **MyDouyin** (Douyin / Chinese TikTok) and **MyHongguo** (Hongguo Short Dramas) in one window without Electron, Android emulators, FFmpeg binaries, or paid Windows Store HEVC extensions.
+**MyDouyin** is a lightweight native desktop application built with Go and [MyGo](https://github.com/egoist/mygo) for **macOS (Apple Silicon)** and **Windows 10/11 (x64)**. It combines **MyDouyin** (Douyin / Chinese TikTok), **MyHongguo** (Hongguo Short Dramas), and **MyTikTok** (TikTok with multilingual WebVTT subtitle translation and isolated proxy routing) in one window without Electron, Android emulators, FFmpeg binaries, or paid Windows Store HEVC extensions.
 
 [简体中文](README.md) · **English**
 
@@ -18,7 +20,7 @@
 
 [![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/mydouyin)
 
-**[Download Latest Release](https://github.com/margbug01/MyDouyin/releases/latest)** · [What It Is](#what-is-mydouyin--myhongguo) · [Comparison](#why-use-mydouyin-instead-of-web-electron-or-android-emulators) · [Douyin Mode](#mydouyin-mode-orbit-native-playback-live-rooms-and-comments) · [Hongguo Mode](#myhongguo-mode-desktop-short-dramas-and-animated-dramas-without-login) · [Benchmarks](#measured-performance-and-resource-usage) · [Install](#installation-and-updates) · [FAQ](#faq)
+**[Download Latest Release](https://github.com/margbug01/MyDouyin/releases/latest)** · [What It Is](#what-is-mydouyin--myhongguo--mytiktok) · [Comparison](#why-use-mydouyin-instead-of-web-electron-or-android-emulators) · [Douyin Mode](#mydouyin-mode-orbit-native-playback-live-rooms-and-comments) · [Hongguo Mode](#myhongguo-mode-desktop-short-dramas-and-animated-dramas-without-login) · [TikTok Mode](#mytiktok-mode-for-you-multilingual-subtitles-live-rooms-and-isolated-proxy) · [Benchmarks](#measured-performance-and-resource-usage) · [Install](#installation-and-updates) · [FAQ](#faq)
 
 <br>
 
@@ -27,41 +29,43 @@
 </div>
 
 > [!IMPORTANT]
-> MyDouyin is an independent open-source project and is not affiliated with Douyin, Hongguo, or ByteDance. All data stays locally on your machine with zero telemetry or analytics. Use only with your own account and follow each platform's terms of service.
+> MyDouyin is an independent open-source project and is not affiliated with Douyin, Hongguo, TikTok, or ByteDance. All data stays locally on your machine with zero telemetry or analytics. Use only with your own account and follow each platform's terms of service.
 
-## What is MyDouyin · MyHongguo?
+## What is MyDouyin · MyHongguo · MyTikTok?
 
-**MyDouyin** is an open-source native desktop client for **macOS (Apple Silicon)** and **Windows 10/11 (x64)** that integrates both **Douyin** and **Hongguo Short Dramas** (红果短剧) inside a single application. Built with Go and [MyGo](https://github.com/egoist/mygo), MyDouyin draws its UI natively and decodes video through OS hardware pipelines instead of wrapping Chromium/Electron or requiring an Android emulator to watch Hongguo dramas on desktop.
+**MyDouyin** is an open-source native desktop client for **macOS (Apple Silicon)** and **Windows 10/11 (x64)** that integrates **Douyin**, **Hongguo Short Dramas** (红果短剧), and **TikTok** inside a single application. Built with Go and [MyGo](https://github.com/egoist/mygo), MyDouyin draws its UI natively and decodes video through OS hardware pipelines instead of wrapping Chromium/Electron or requiring an Android emulator to watch Hongguo dramas on desktop.
 
 | Property | Specification |
 | --- | --- |
-| **Category** | Native desktop client for Douyin and Hongguo Short Dramas |
+| **Category** | Native desktop client for Douyin, Hongguo Short Dramas, and TikTok (three modes in one) |
 | **Supported platforms** | macOS (Apple Silicon / arm64), Windows 10 / 11 (x64) |
 | **Video playback engine** | Native AVFoundation on macOS (zero persistent disk cache); native Media Foundation + D3D11 GPU textures on Windows (no FFmpeg) |
 | **Hongguo decryption and covers** | Pure-Go streaming ISO-BMFF CENC (AES-128-CTR) decryption; ImageIO on macOS and pure-Go `h265/heic` on Windows |
-| **Account model** | MyHongguo runs anonymously without login; MyDouyin browses public feeds without login and supports in-app QR sign-in for interactive writes |
+| **TikTok subtitles and network** | Native WebVTT subtitle overlay with automatic Chinese translation and caption translation; isolated proxy auto-detects OS proxy settings (TikTok only) |
+| **Account model** | MyHongguo runs anonymously without login; MyDouyin browses public feeds without login and supports in-app QR sign-in; MyTikTok supports in-app login or clipboard cookie import with sessions kept separate from Douyin |
 | **Updates and privacy** | Signed in-app delta updates; credentials, tracking history, and preferences stay strictly local |
 
 ## Why use MyDouyin instead of web, Electron, or Android emulators?
 
-Watching Douyin or Hongguo Short Dramas on desktop typically forces trade-offs: browser tabs leak memory, Electron wrappers keep heavy Chromium processes resident, and Hongguo lacks a native desktop app so users resort to resource-heavy Android emulators. MyDouyin replaces those workarounds with one lightweight native binary.
+Watching Douyin, Hongguo Short Dramas, or TikTok on desktop typically forces trade-offs: browser tabs leak memory, Electron wrappers keep heavy Chromium processes resident, Hongguo lacks a native desktop app so users resort to Android emulators, and global proxies conflict across domestic and international platforms. MyDouyin replaces those workarounds with one lightweight native binary.
 
-| Dimension | MyDouyin · MyHongguo (Native Desktop) | Web Browser | Electron App / Android Emulator |
+| Dimension | MyDouyin · MyHongguo · MyTikTok (Native Desktop) | Web Browser | Electron App / Android Emulator |
 | --- | --- | --- | --- |
-| **Platform coverage** | Douyin and Hongguo Short Dramas in one window with shortcut switching | Douyin runs in browser tabs; Hongguo has no full desktop web app | Usually single-platform; Hongguo requires running a full Android VM |
+| **Platform coverage** | Douyin, Hongguo Short Dramas, and TikTok in one window with shortcut switching and isolated state | Douyin and TikTok run across browser tabs; Hongguo has no full desktop web app | Usually single-platform; Hongguo requires running a full Android VM |
 | **Launch experience** | Opens to an Orbit search and card canvas backed by local fast-start snapshots | Autoplays the recommended feed immediately | Slow cold start with multiple resident background processes |
 | **Video decode and disk I/O** | AVFoundation on macOS (zero disk cache); Media Foundation on Windows | Continuous browser media caching across tabs | Heavy virtualization overhead, fan noise, and disk writes |
 | **Hongguo HEIC covers** | System ImageIO on macOS; built-in pure-Go `h265/heic` decoder on Windows | Depends on browser HEIC support | Requires extra codec packs or a full Android runtime |
+| **Proxy isolation** | TikTok auto-detects the OS proxy or uses its own `http://` / `socks5://` setting without affecting Douyin or Hongguo | Relies on global browser proxy or PAC extensions | Often shares one global proxy across all platforms |
 | **Memory footprint** | ~**65 MB** 1080p native decoder on macOS; ~**80 MB** on-demand signing page freed after 10 s idle | Climbs over long browsing sessions | Typically 500 MB to 2 GB+ resident memory |
 | **Desktop updates** | Signed in-app delta updates via top-right pill | Web-only | Full installer downloads |
 
-## How to switch between Douyin and Hongguo modes
+## How to switch between Douyin, Hongguo, and TikTok modes
 
-Click the top-left brand switcher pill, or press `Cmd+1` / `Cmd+2` on macOS (`Ctrl+1` / `Ctrl+2` on Windows), to switch directly between **MyDouyin** and **MyHongguo**.
+Click the top-left brand switcher pill, or press `Cmd+1` / `Cmd+2` / `Cmd+3` on macOS (`Ctrl+1` / `Ctrl+2` / `Ctrl+3` on Windows), to switch directly among **MyDouyin**, **MyHongguo**, and **MyTikTok**.
 
-- Both modes share the Porcelain White and Pure Black themes with distinct brand accents, floating navigation rails, and unified top-bar alignment across macOS and Windows.
-- Mode switches automatically checkpoint watch progress and release the outgoing media player before initializing the incoming mode.
-- Hongguo services initialize lazily on first entry, so staying in Douyin mode produces zero Hongguo network traffic.
+- All three modes share the Porcelain White and Pure Black themes with dedicated brand icons, window titles, floating navigation rails, and unified top-bar alignment across macOS and Windows.
+- Mode switches automatically checkpoint watch progress and release the outgoing media player before initializing the incoming mode; switching between MyDouyin and MyTikTok preserves each platform's page stack, video state, and login session independently.
+- Hongguo and TikTok services initialize lazily on first entry, so staying in Douyin mode produces zero network traffic for the other platforms.
 
 ## MyDouyin mode: Orbit, native playback, live rooms, and comments
 
@@ -116,6 +120,18 @@ MyHongguo mode brings Hongguo Short Dramas natively to macOS and Windows with ze
 | **Danmaku, comments, and local tracking** | Side drawer integrates episode selector, episode comments, series reviews, and clickable danmaku timestamps alongside real-time danmaku overlay. Persists favorites and per-episode resume positions locally every 2 seconds. |
 | **Cross-platform HEIC covers and settings** | Decodes signed Hongguo HEIC covers via ImageIO on macOS and pure-Go `h265/heic` on Windows, saving compact JPEG disk caches. Settings include direct connection (bypassing system proxy by default), optional remote signer URL/token, and one-click anonymous device reset. |
 
+## MyTikTok mode: For You, multilingual subtitles, live rooms, and isolated proxy
+
+MyTikTok is the third top-level mode in the brand switcher (`Cmd+3` / `Ctrl+3`), sharing MyDouyin's native short-video surface and hardware player while adding multilingual WebVTT subtitle translation, caption translation, and a TikTok-only proxy pipeline.
+
+| Module | Capabilities |
+| --- | --- |
+| **For You and channels** | Browse For You, Following, Search, Creator Profiles, and TikTok Live on the same Orbit and native player interface, while keeping page stacks and accounts completely separate from MyDouyin. |
+| **WebVTT subtitles and caption translation** | Renders native WebVTT multilingual subtitles over video and automatically translates non-Chinese subtitles to Chinese by default, plus inline caption translation toggles (`Settings → Playback → Subtitles`). |
+| **Comments and interactions** | Read comment threads and replies, like, bookmark, follow creators, and post comments with built-in X-Bogus signing. |
+| **Isolated proxy and region** | Automatically follows OS system proxy settings when left blank (macOS network proxy via `scutil`, Windows Internet Options, reacting within 5 seconds), or configure a dedicated `http://` / `socks5://` proxy and region under `Settings → Account → TikTok Network`. Proxy settings apply **only to TikTok**, leaving Douyin and Hongguo untouched. |
+| **Flexible sign-in and session isolation** | Supports in-app web, QR, and email sign-in, plus clipboard cURL / Cookie-Editor JSON import for external browser passkey logins. Cookies persist separately from Douyin. |
+
 ## Measured performance and resource usage
 
 All figures come from measurements recorded in this repository (see [PERFORMANCE.md](PERFORMANCE.md) and [CHANGELOG.md](CHANGELOG.md)):
@@ -152,6 +168,7 @@ xattr -dr com.apple.quarantine /Applications/MyDouyin.app
 | --- | --- |
 | Switch to MyDouyin mode | `Cmd+1` (macOS) / `Ctrl+1` (Windows) |
 | Switch to MyHongguo mode | `Cmd+2` (macOS) / `Ctrl+2` (Windows) |
+| Switch to MyTikTok mode | `Cmd+3` (macOS) / `Ctrl+3` (Windows) |
 | Play or pause current video or episode | `Space` |
 | Previous or next video or episode | `Up` / `Down` |
 | Close dialog, exit viewer or fullscreen, or go back | `Esc` |
@@ -193,23 +210,27 @@ No. MyDouyin sets `AVURLAssetUsesNoPersistentCacheKey` on macOS AVFoundation str
 
 Open **Settings** in the top-right corner and check the **MyHongguo** section. Direct connection (bypassing system proxy) is enabled by default. Click **Reset anonymous device** if an anonymous profile is rate-limited, or optionally configure a custom remote signer URL and token.
 
+### How do I configure a proxy for MyTikTok, and does it affect Douyin or Hongguo?
+
+No—it stays strictly isolated to TikTok. When entering MyTikTok mode (`Cmd+3` / `Ctrl+3`), API requests, video playback, and subtitle translation automatically follow your OS system proxy (macOS network proxy settings or Windows Internet Options, picking up changes within 5 seconds). You can also set a manual `http://` or `socks5://` proxy under **Settings › Account › TikTok Network** inside MyTikTok mode without affecting Douyin or Hongguo traffic.
+
 ### How do I open MyDouyin on macOS if Gatekeeper blocks an unnotarized app?
 
 Drag **MyDouyin.app** into `/Applications`, click **Open Anyway** under **System Settings › Privacy & Security**, or run `xattr -dr com.apple.quarantine /Applications/MyDouyin.app` in Terminal.
 
 ### Where are login sessions, Hongguo tracking lists, and settings stored?
 
-All personal data stays in standard local OS configuration directories (`~/Library/Application Support/Douyin` and `~/Library/Application Support/mydouyin` on macOS, or `%APPDATA%` on Windows) and persists across manual upgrades and in-app delta updates.
+All personal data stays in standard local OS configuration directories (`~/Library/Application Support/Douyin`, `~/Library/Application Support/TikTok`, and `~/Library/Application Support/mydouyin` on macOS, or `%APPDATA%` on Windows) and persists across manual upgrades and in-app delta updates.
 
 ## Acknowledgements
 
-MyDouyin · MyHongguo builds on and draws inspiration from the following open-source projects and contributors:
+MyDouyin · MyHongguo · MyTikTok builds on and draws inspiration from the following open-source projects and contributors:
 
 - **[MyGo](https://github.com/egoist/mygo)**: Native Go cross-platform UI, OS media playback, and signed delta update framework powering this app.
 - **[openhongguo](https://github.com/beilunyang/openhongguo)** (and upstream contributor **[J3n5en/openhongguo](https://github.com/J3n5en/openhongguo)**): Open-source Hongguo Short Drama protocol research and Go SDK behind MyHongguo mode.
 - **[purego](https://github.com/ebitengine/purego)**: Calling native OS libraries from Go without CGo.
 - **[gen2brain/h265](https://github.com/gen2brain/h265)**: Pure-Go HEVC / HEIC decoding that renders Hongguo covers on Windows without Store codec packs.
-- Thanks to everyone in the open-source community who tested builds, reported bugs, and shared feedback.
+- **[@uttogg](https://github.com/uttogg)**: Contributed TikTok integration, multilingual WebVTT subtitles, and translation support ([#6](https://github.com/margbug01/MyDouyin/pull/6)). Thanks as well to everyone in the open-source community who tested builds, reported bugs, and shared feedback.
 
 ## Community Links
 

@@ -35,3 +35,19 @@ var hongguoLogo = func() *ui.Bitmap {
 	}
 	return b
 }()
+
+// tiktok_logo.png is the MyTikTok rounded-square badge at 128 pixels, drawn
+// from resources/tiktok-icon.svg.
+//
+//go:embed tiktok_logo.png
+var tiktokLogoPNG []byte
+
+// tiktokLogo is the MyTikTok mode icon, shown in the top-left brand switcher
+// and brand menu.
+var tiktokLogo = func() *ui.Bitmap {
+	b, err := ui.DecodeBitmap(tiktokLogoPNG)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}()

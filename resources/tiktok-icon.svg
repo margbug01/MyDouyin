@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="64 64 896 896" width="1024" height="1024">
+  <defs>
+    <clipPath id="sqClip">
+      <rect x="64" y="64" width="896" height="896" rx="206" />
+    </clipPath>
+    <clipPath id="coreClip">
+      <circle cx="512" cy="500" r="264" />
+    </clipPath>
+    <!-- Seamless split at y=532 (ring center) -->
+    <clipPath id="ringBackClip">
+      <rect x="0" y="0" width="1024" height="534" />
+    </clipPath>
+    <clipPath id="ringFrontClip">
+      <rect x="0" y="530" width="1024" height="500" />
+    </clipPath>
+
+    <linearGradient id="bgGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#D7E0EC" />
+      <stop offset="36%" stop-color="#F2F5FA" />
+      <stop offset="100%" stop-color="#DCE4F0" />
+    </linearGradient>
+
+    <radialGradient id="coreBody" cx="0.36" cy="0.28" r="0.78">
+      <stop offset="0%" stop-color="#222C44" />
+      <stop offset="55%" stop-color="#121725" />
+      <stop offset="100%" stop-color="#06080E" />
+    </radialGradient>
+
+    <linearGradient id="ringFrontGrad" x1="0" y1="0.5" x2="1" y2="0.5">
+      <stop offset="0%" stop-color="#25F4EE" />
+      <stop offset="38%" stop-color="#25F4EE" />
+      <stop offset="50%" stop-color="#F0F9FF" />
+      <stop offset="62%" stop-color="#FE2C55" />
+      <stop offset="100%" stop-color="#FE2C55" />
+    </linearGradient>
+
+    <linearGradient id="ringBackGrad" x1="0" y1="0.5" x2="1" y2="0.5">
+      <stop offset="0%" stop-color="#25F4EE" />
+      <stop offset="18%" stop-color="#0EA5E9" />
+      <stop offset="50%" stop-color="#334155" />
+      <stop offset="82%" stop-color="#E11D48" />
+      <stop offset="100%" stop-color="#FE2C55" />
+    </linearGradient>
+
+    <linearGradient id="coreStroke" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.30" />
+      <stop offset="100%" stop-color="#94A3B8" stop-opacity="0.10" />
+    </linearGradient>
+
+    <linearGradient id="sqRim" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#94A3B8" stop-opacity="0.55" />
+    </linearGradient>
+
+    <filter id="coreShadow" x="-25%" y="-25%" width="150%" height="155%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#0F172A" flood-opacity="0.26" />
+    </filter>
+    <filter id="ringGlow" x="-30%" y="-60%" width="160%" height="220%">
+      <feGaussianBlur stdDeviation="12" />
+    </filter>
+    <filter id="ringShadow" x="-20%" y="-40%" width="140%" height="180%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#020617" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <g clip-path="url(#sqClip)">
+    <rect x="64" y="64" width="896" height="896" fill="url(#bgGrad)" />
+
+    <!-- Back half of orbital ring (seamless endpoints matching front ring) -->
+    <g transform="rotate(-21 512 532)">
+      <g clip-path="url(#ringBackClip)">
+        <ellipse cx="512" cy="532" rx="382" ry="110" fill="none" stroke="url(#ringBackGrad)" stroke-width="30" />
+        <ellipse cx="512" cy="532" rx="382" ry="110" fill="none" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="5" />
+      </g>
+    </g>
+
+    <!-- Centered obsidian medallion (slightly raised so front ring cradles bottom cleanly) -->
+    <g filter="url(#coreShadow)">
+      <circle cx="512" cy="500" r="264" fill="url(#coreBody)" />
+      <g clip-path="url(#coreClip)">
+        <g fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2">
+          <ellipse cx="512" cy="500" rx="116" ry="264" />
+          <line x1="248" y1="500" x2="776" y2="500" />
+        </g>
+
+        <!-- Clean crisp white note sitting clearly above front orbital ring -->
+        <g transform="translate(507 498) scale(0.74)" fill="none" stroke="#25F4EE" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M 28 -224 L 28 92 A 88 88 0 1 1 -60 4" />
+          <path d="M 28 -212 C 28 -134, 82 -92, 146 -88" />
+        </g>
+        <g transform="translate(523 510) scale(0.74)" fill="none" stroke="#FE2C55" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M 28 -224 L 28 92 A 88 88 0 1 1 -60 4" />
+          <path d="M 28 -212 C 28 -134, 82 -92, 146 -88" />
+        </g>
+        <g transform="translate(515 504) scale(0.74)" fill="none" stroke="#FFFFFF" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M 28 -224 L 28 92 A 88 88 0 1 1 -60 4" />
+          <path d="M 28 -212 C 28 -134, 82 -92, 146 -88" />
+        </g>
+      </g>
+      <circle cx="512" cy="500" r="262.5" fill="none" stroke="url(#coreStroke)" stroke-width="3" />
+    </g>
+
+    <!-- Front half of luminous cyan-to-rose orbital ring cradling the lower arc -->
+    <g transform="rotate(-21 512 532)">
+      <g clip-path="url(#ringFrontClip)">
+        <ellipse cx="512" cy="532" rx="382" ry="110" fill="none" stroke="url(#ringFrontGrad)" stroke-width="36" opacity="0.44" filter="url(#ringGlow)" />
+        <g filter="url(#ringShadow)">
+          <ellipse cx="512" cy="532" rx="382" ry="110" fill="none" stroke="url(#ringFrontGrad)" stroke-width="30" />
+          <ellipse cx="512" cy="532" rx="382" ry="110" fill="none" stroke="#FFFFFF" stroke-opacity="0.48" stroke-width="5" />
+        </g>
+      </g>
+    </g>
+  </g>
+  <rect x="66.5" y="66.5" width="891" height="891" rx="203.5" fill="none" stroke="url(#sqRim)" stroke-width="5" />
+</svg>
