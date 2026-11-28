@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,7 +17,11 @@ func flyingTexts(a *app, f *dmField, list []dy.Danmaku, at time.Duration) map[st
 	flying, _ := flyDanmaku(a, f, list, sameDanmaku, at, 1280)
 	m := map[string]dmFlying{}
 	for _, fl := range flying {
-		m[fl.d.Text] = fl
+		k := fl.d.Text
+		if fl.n > 1 {
+			k += fmt.Sprintf("×%d", fl.n)
+		}
+		m[k] = fl
 	}
 	return m
 }
@@ -53,7 +58,7 @@ func TestDanmakuMergeAndBlock(t *testing.T) {
 	flying, _ := flyDanmaku(a, f, list, sameDanmaku, 3*time.Second, 1280)
 	said := 0
 	for _, fl := range flying {
-		if strings.Contains(fl.d.Text, "×") {
+		if fl.n > 1 {
 			t.Fatalf("merged with merging off: %q", fl.d.Text)
 		}
 		if strings.HasPrefix(fl.d.Text, "来") {

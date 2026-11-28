@@ -251,12 +251,65 @@ func dmFoldKey(text string) string {
 	return k
 }
 
-// dmLabel is what a comment standing for n shows: 来了×12.
-func dmLabel(text string, n int) string {
-	if n < 2 {
-		return text
+const dmBadgeGap = 5 // px between a merged comment's text and its count
+
+// dmBadge is the pill a merged comment's count is drawn in after its text,
+// hotter as more say it: gold, then orange from 10, then Douyin's red from 50.
+type dmBadge struct {
+	l             *ui.TextLayout // ×12, the × smaller, on one baseline
+	lw, lh, w, h  float32        // the text's size; the pill's
+	from, to, ink ui.Color
+}
+
+type dmBadgeKey struct {
+	n    int
+	size float32
+}
+
+// danmakuBadge is the count n's pill at the style's size, shaped once.
+func (a *app) danmakuBadge(n int) *dmBadge {
+	size := a.danmakuStyle().Size
+	k := dmBadgeKey{n, size}
+	if b := a.dmBadges[k]; b != nil {
+		return b
 	}
-	return text + "×" + strconv.Itoa(n)
+	b := &dmBadge{from: ui.Hex("#ffe58a"), to: ui.Hex("#ffc23d"), ink: ui.Hex("#5a3300")}
+	switch {
+	case n >= 50:
+		b.from, b.to, b.ink = ui.Hex("#ff6b8b"), ui.Hex("#fe2c55"), white
+	case n >= 10:
+		b.from, b.to, b.ink = ui.Hex("#ffb547"), ui.Hex("#ff7a1a"), white
+	}
+	b.l = ui.ShapeRichText([]ui.Span{
+		{Text: "×", Size: size * 0.62, Weight: 800, Italic: true, Color: b.ink},
+		{Text: strconv.Itoa(n), Size: size * 0.84, Weight: 900, Italic: true, Color: b.ink},
+	}, ui.Font{Size: size * 0.84, Weight: 900}, 0)
+	b.lw, b.lh = b.l.Size()
+	b.h = size * 1.02
+	b.w = b.lw + b.h*0.62
+	if a.dmBadges == nil {
+		a.dmBadges = map[dmBadgeKey]*dmBadge{}
+	}
+	a.dmBadges[k] = b
+	return b
+}
+
+// paint draws the pill at x, centered on a line of text textH tall.
+func (b *dmBadge) paint(p *ui.Painter, x, textH float32) {
+	r := ui.Rect{X: x + dmBadgeGap, Y: (textH - b.h) / 2, W: b.w, H: b.h}
+	p.Shadow(r, b.h/2, 0, 1, 4, 0, ui.RGBA(0, 0, 0, 0.5))
+	p.FillGradient(r, ui.LinearGradient{Angle: 90, From: b.from, To: b.to}, b.h/2)
+	p.Stroke(r, ui.RGBA(255, 255, 255, 0.28), b.h/2, 1)
+	p.TextLayout(b.l, r.X+(b.w-b.lw)/2, r.Y+(b.h-b.lh)/2, b.ink)
+}
+
+// danmakuWidth is how wide a comment standing for n is, its count's pill with it.
+func (a *app) danmakuWidth(text string, n int) float32 {
+	w := a.danmakuText(text).w
+	if n > 1 {
+		w += dmBadgeGap + a.danmakuBadge(n).w
+	}
+	return w
 }
 
 // dmBlocked reports whether text has one of the user's blocked words.
@@ -317,7 +370,7 @@ func dmSetOff[D any](a *app, f *dmField, d dy.Danmaku, rest []D, key func(D) dy.
 		}
 	}
 	g := &dmGroup{d: d, n: 1 + len(folded)}
-	g.w = a.danmakuText(dmLabel(d.Text, g.n)).w
+	g.w = a.danmakuWidth(d.Text, g.n)
 	l := f.placeIn(d, g.w, w, flightDur, lanes)
 	if l < 0 { // no room: the next identical one tries for itself
 		return -1
@@ -384,10 +437,12 @@ func (f *dmField) placeIn(d dy.Danmaku, tw, w float32, flightDur time.Duration, 
 	return lane
 }
 
-// dmFlying is a bullet comment where it is at a moment, in the layer.
+// dmFlying is a bullet comment where it is at a moment, in the layer, and how
+// many identical ones it stands for.
 type dmFlying struct {
 	d    dy.Danmaku
 	x, y float32
+	n    int
 }
 
 // flyDanmaku returns the VOD comments of list, in time order, flying at at over
@@ -453,11 +508,11 @@ func flyDanmakuIn[D any](a *app, f *dmField, list []D, key func(D) dy.Danmaku, a
 		} else {
 			tw = a.danmakuText(d.Text).w
 		}
-		out = append(out, dmFlying{d, w - float32(age)/float32(flightDur)*(w+tw), float32(dmTop + l*laneH)})
+		out = append(out, dmFlying{d, w - float32(age)/float32(flightDur)*(w+tw), float32(dmTop + l*laneH), 1})
 	}
 	for i := range out { // counted now, with the repeats that set off after it this frame
 		if g := f.group[out[i].d]; g != nil {
-			out[i].d.Text = dmLabel(g.d.Text, g.n)
+			out[i].n = g.n
 		}
 	}
 	return out, next
@@ -576,7 +631,7 @@ func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h
 		flying, next := fly(r.W, r.H, late)
 		for _, f := range flying {
 			sh := a.danmakuText(f.d.Text)
-			if f.x+sh.w <= 0 || f.x >= r.W {
+			if f.x+a.danmakuWidth(f.d.Text, f.n) <= 0 || f.x >= r.W {
 				continue
 			}
 			x := r.X + f.x
@@ -597,6 +652,10 @@ func (a *app) danmakuLayer(c *ui.Context, key string, moving bool, fly func(w, h
 							p.Image(bmp, ui.Rect{X: o.Rect.X, Y: o.Rect.Y, W: o.Rect.W, H: o.Rect.H}, ui.Contain)
 						}
 					}
+				}
+				if f.n > 1 {
+					_, h := sh.l.Size()
+					a.danmakuBadge(f.n).paint(p, sh.w, h)
 				}
 			})
 		}

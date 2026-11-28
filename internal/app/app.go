@@ -296,7 +296,8 @@ type app struct {
 	dmBlock        []string      // words whose bullet comments are not shown, kept on this computer
 	dmBlockText    string        // the blocked word being written in the settings
 	dmBlockBox     ui.Handle
-	dmSettingsOpen bool // the bar's danmaku style popover
+	dmBadges       map[dmBadgeKey]*dmBadge // merged comments' count pills, by count and size
+	dmSettingsOpen bool                    // the bar's danmaku style popover
 
 	quality     string  // the definition chosen, "" or "智能" for Douyin's pick
 	liveQuality string  // the live room definition chosen, "" or "智能" for live default
